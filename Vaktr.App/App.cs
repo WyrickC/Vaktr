@@ -1,4 +1,3 @@
-﻿using System.Configuration;
 using Microsoft.UI.Xaml;
 using Vaktr.App.Services;
 using Vaktr.App.ViewModels;
@@ -8,7 +7,7 @@ using Vaktr.Store.Persistence;
 
 namespace Vaktr.App;
 
-public partial class App : Application
+public sealed class App : Application
 {
     private ShellWindow? _window;
 
@@ -16,7 +15,6 @@ public partial class App : Application
 
     public App()
     {
-        InitializeComponent();
         ApplyThemeResources(ThemeMode.Dark);
     }
 
@@ -30,6 +28,7 @@ public partial class App : Application
         var collectorService = new CollectorService(new WindowsMetricCollector(), metricStore);
         var viewModel = new MainViewModel(config);
         ApplyThemeResources(config.Theme);
+
         _window = new ShellWindow(
             viewModel,
             collectorService,
@@ -140,4 +139,3 @@ public partial class App : Application
         string WarningHalo,
         string OverlayScrim);
 }
-

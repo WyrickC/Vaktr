@@ -1,0 +1,61 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="AppBackdropBrush" Color="#061018" />
+    <SolidColorBrush x:Key="ShellBackgroundBrush" Color="#0B1622" />
+    <SolidColorBrush x:Key="ShellStrokeBrush" Color="#1E3144" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#102131" />
+    <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#15283B" />
+    <SolidColorBrush x:Key="SurfaceStrongBrush" Color="#183148" />
+    <SolidColorBrush x:Key="SurfaceStrokeBrush" Color="#27425E" />
+    <SolidColorBrush x:Key="PanelOverlayBrush" Color="#11283C" />
+    <SolidColorBrush x:Key="SurfaceGridBrush" Color="#22405C" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F8FF" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B7CCE1" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#7D9AB6" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#66E7FF" />
+    <SolidColorBrush x:Key="AccentStrongBrush" Color="#B7F7FF" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#10394D" />
+    <SolidColorBrush x:Key="AccentHaloBrush" Color="#1B68DAFF" />
+    <SolidColorBrush x:Key="WarningHaloBrush" Color="#15FF9B54" />
+    <SolidColorBrush x:Key="OverlayScrimBrush" Color="#A0060C14" />
+
+    <Style x:Key="FilledButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="{ThemeResource AccentSoftBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SurfaceStrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="14,10" />
+        <Setter Property="MinHeight" Value="42" />
+    </Style>
+
+    <Style x:Key="GhostButtonStyle" TargetType="Button" BasedOn="{StaticResource FilledButtonStyle}">
+        <Setter Property="Background" Value="{ThemeResource SurfaceElevatedBrush}" />
+    </Style>
+
+    <Style x:Key="RangeButtonStyle" TargetType="Button" BasedOn="{StaticResource GhostButtonStyle}">
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="FontFamily" Value="Bahnschrift" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style x:Key="DeckTextBoxStyle" TargetType="TextBox">
+        <Setter Property="Background" Value="{ThemeResource SurfaceStrongBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SurfaceStrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style x:Key="DeckComboBoxStyle" TargetType="ComboBox">
+        <Setter Property="Background" Value="{ThemeResource SurfaceStrongBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SurfaceStrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style x:Key="DeckCheckBoxStyle" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimaryBrush}" />
+        <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+</ResourceDictionary>

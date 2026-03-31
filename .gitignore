@@ -7,3 +7,8 @@ obj/
 *_wpftmp.csproj
 *.nupkg
 TestResults/
+scratch-winui/
+.obj-scratch/
+temp-write-check/
+write-test.txt
+NuGet.Config
