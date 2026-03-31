@@ -1,0 +1,155 @@
+<UserControl x:Class="Vaktr.App.Controls.MetricPanelControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:Vaktr.App.Controls"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:viewModels="clr-namespace:Vaktr.App.ViewModels"
+             mc:Ignorable="d"
+             d:DesignHeight="300"
+             d:DesignWidth="440"
+             x:Name="Root">
+    <Border x:Name="PanelCard"
+            CornerRadius="24"
+            BorderThickness="1"
+            BorderBrush="{DynamicResource SurfaceStrokeBrush}"
+            Background="{DynamicResource SurfaceBrush}"
+            Padding="20"
+            RenderTransformOrigin="0.5,0.5"
+            MouseEnter="OnPanelMouseEnter"
+            MouseLeave="OnPanelMouseLeave"
+            Loaded="OnLoaded">
+        <Border.RenderTransform>
+            <TransformGroup>
+                <ScaleTransform x:Name="PanelScaleTransform" ScaleX="1" ScaleY="1" />
+                <TranslateTransform x:Name="PanelTranslateTransform" />
+            </TransformGroup>
+        </Border.RenderTransform>
+
+        <Grid>
+            <Border CornerRadius="22"
+                    Background="{DynamicResource PanelOverlayBrush}"
+                    Opacity="0.55" />
+
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Border CornerRadius="999"
+                                    Background="{DynamicResource AccentSoftBrush}"
+                                    Padding="10,4">
+                                <TextBlock Text="{Binding Panel.Badge, ElementName=Root}"
+                                           Foreground="{DynamicResource AccentStrongBrush}"
+                                           FontFamily="Bahnschrift"
+                                           FontSize="11"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                            <TextBlock Margin="10,4,0,0"
+                                       Text="{Binding Panel.FooterText, ElementName=Root}"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       FontSize="11" />
+                        </StackPanel>
+
+                        <TextBlock Margin="0,14,0,0"
+                                   Text="{Binding Panel.Title, ElementName=Root}"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                   FontFamily="Bahnschrift"
+                                   FontSize="24"
+                                   FontWeight="SemiBold" />
+
+                        <TextBlock Margin="0,10,0,0"
+                                   Text="{Binding Panel.CurrentValue, ElementName=Root}"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                   FontFamily="Bahnschrift"
+                                   FontSize="30"
+                                   FontWeight="SemiBold" />
+
+                        <TextBlock Margin="0,4,0,0"
+                                   Text="{Binding Panel.SecondaryValue, ElementName=Root}"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   FontSize="13" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Top">
+                        <Button x:Name="OneMinuteButton" Click="OnRangeClick" Content="1m" Margin="0,0,8,0" Style="{StaticResource RangeButtonStyle}" Tag="OneMinute" />
+                        <Button x:Name="FiveMinuteButton" Click="OnRangeClick" Content="5m" Margin="0,0,8,0" Style="{StaticResource RangeButtonStyle}" Tag="FiveMinutes" />
+                        <Button x:Name="FifteenMinuteButton" Click="OnRangeClick" Content="15m" Margin="0,0,8,0" Style="{StaticResource RangeButtonStyle}" Tag="FifteenMinutes" />
+                        <Button x:Name="OneHourButton" Click="OnRangeClick" Content="1h" Margin="0,0,8,0" Style="{StaticResource RangeButtonStyle}" Tag="OneHour" />
+                        <Button x:Name="ExpandButton" Click="OnExpandClick" Content="Zoom" Style="{StaticResource GhostButtonStyle}" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Grid.Row="1" Margin="0,16,0,16">
+                    <local:LineChartSurface x:Name="ChartSurface"
+                                            HoverRatio="{Binding HoverRatio, ElementName=Root}"
+                                            Series="{Binding Panel.VisibleSeries, ElementName=Root}"
+                                            Unit="{Binding Panel.Unit, ElementName=Root}"
+                                            WindowEndUtc="{Binding Panel.WindowEndUtc, ElementName=Root}"
+                                            WindowStartUtc="{Binding Panel.WindowStartUtc, ElementName=Root}" />
+
+                    <Canvas Background="Transparent"
+                            MouseLeave="OnChartMouseLeave"
+                            MouseMove="OnChartMouseMove">
+                        <Border x:Name="HoverCard"
+                                Visibility="Collapsed"
+                                CornerRadius="16"
+                                Background="{DynamicResource SurfaceElevatedBrush}"
+                                BorderBrush="{DynamicResource SurfaceStrokeBrush}"
+                                BorderThickness="1"
+                                Padding="12">
+                            <StackPanel>
+                                <TextBlock x:Name="HoverTimeText"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           FontFamily="Bahnschrift"
+                                           FontSize="12"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="HoverValueText"
+                                           Margin="0,6,0,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           FontSize="12"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Canvas>
+                </Grid>
+
+                <ItemsControl Grid.Row="2"
+                              ItemsSource="{Binding Panel.VisibleSeries, ElementName=Root}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type viewModels:ChartSeriesViewModel}">
+                            <Border Margin="0,0,10,6" Padding="0,0,6,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="8"
+                                             Height="8"
+                                             Margin="0,4,8,0"
+                                             Fill="{Binding StrokeBrush}" />
+                                    <TextBlock Text="{Binding Name}"
+                                               Foreground="{DynamicResource TextMutedBrush}"
+                                               FontSize="12" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

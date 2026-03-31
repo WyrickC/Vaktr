@@ -1,0 +1,296 @@
+﻿<Window x:Class="Vaktr.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Vaktr.App.Controls"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:viewModels="clr-namespace:Vaktr.App.ViewModels"
+        Title="Vaktr"
+        Width="1480"
+        Height="920"
+        MinWidth="1180"
+        MinHeight="780"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        Background="Transparent"
+        Loaded="OnLoaded"
+        Closed="OnClosed"
+        Closing="OnClosing"
+        mc:Ignorable="d">
+    <WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            CornerRadius="28"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="8"
+                            UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Grid Background="{DynamicResource AppBackdropBrush}">
+        <Border Margin="18"
+                CornerRadius="30"
+                BorderBrush="{DynamicResource ShellStrokeBrush}"
+                BorderThickness="1"
+                Background="{DynamicResource ShellBackgroundBrush}">
+            <Grid ClipToBounds="True">
+                <Ellipse Width="640"
+                         Height="640"
+                         HorizontalAlignment="Left"
+                         VerticalAlignment="Top"
+                         Margin="-180,-260,0,0"
+                         Fill="{DynamicResource AccentSoftBrush}"
+                         Opacity="0.38" />
+                <Ellipse Width="520"
+                         Height="520"
+                         HorizontalAlignment="Right"
+                         VerticalAlignment="Bottom"
+                         Margin="0,0,-120,-200"
+                         Fill="{DynamicResource AccentSoftBrush}"
+                         Opacity="0.22" />
+
+                <Grid Margin="24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" MouseLeftButtonDown="OnTitleBarMouseDown">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="52"
+                                    Height="52"
+                                    CornerRadius="18"
+                                    Background="{DynamicResource AccentSoftBrush}">
+                                <TextBlock Text="V"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource AccentStrongBrush}"
+                                           FontFamily="Bahnschrift"
+                                           FontSize="26"
+                                           FontWeight="Bold" />
+                            </Border>
+
+                            <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="Vaktr"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           FontFamily="Bahnschrift"
+                                           FontSize="29"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Local hardware watch with persistent history and clean motion."
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           FontSize="13" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center">
+                            <Border Margin="0,0,12,0"
+                                    Padding="12,8"
+                                    CornerRadius="18"
+                                    Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource SurfaceStrokeBrush}"
+                                    BorderThickness="1">
+                                <TextBlock Text="{Binding StatusText}"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           FontSize="12" />
+                            </Border>
+
+                            <Button Margin="0,0,8,0" Click="OnThemeQuickToggle" Content="Theme" Style="{StaticResource GhostButtonStyle}" />
+                            <Button Margin="0,0,8,0" Click="OnSettingsClick" Content="Settings" Style="{StaticResource GhostButtonStyle}" />
+                            <Button Margin="0,0,8,0" Click="OnMinimizeClick" Content="_" Style="{StaticResource GhostButtonStyle}" />
+                            <Button Margin="0,0,8,0" Click="OnMaximizeClick" Content="□" Style="{StaticResource GhostButtonStyle}" />
+                            <Button Click="OnCloseClick" Content="X" Style="{StaticResource GhostButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <ItemsControl Grid.Row="1"
+                                  Margin="0,24,0,24"
+                                  ItemsSource="{Binding SummaryCards}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" Columns="4" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModels:SummaryCardViewModel}">
+                                <Border Margin="0,0,18,0"
+                                        Padding="18"
+                                        CornerRadius="22"
+                                        BorderBrush="{DynamicResource SurfaceStrokeBrush}"
+                                        BorderThickness="1"
+                                        Background="{DynamicResource SurfaceBrush}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border Width="52"
+                                                Height="52"
+                                                CornerRadius="16"
+                                                Background="{DynamicResource AccentSoftBrush}">
+                                            <TextBlock Text="{Binding Glyph}"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource AccentStrongBrush}"
+                                                       FontFamily="Bahnschrift"
+                                                       FontSize="18"
+                                                       FontWeight="Bold" />
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                            <TextBlock Text="{Binding Title}"
+                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                       FontSize="12" />
+                                            <TextBlock Text="{Binding Value}"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                                       FontFamily="Bahnschrift"
+                                                       FontSize="28"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Caption}"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       FontSize="12" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Grid Grid.Row="2">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding DashboardPanels}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type viewModels:MetricPanelViewModel}">
+                                        <controls:MetricPanelControl Margin="0,0,18,18"
+                                                                     Width="438"
+                                                                     Height="310"
+                                                                     Panel="{Binding}"
+                                                                     ExpandRequested="OnPanelExpandRequested" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <Border x:Name="SettingsDrawer"
+                                Width="360"
+                                HorizontalAlignment="Right"
+                                CornerRadius="28"
+                                BorderBrush="{DynamicResource SurfaceStrokeBrush}"
+                                BorderThickness="1"
+                                Background="{DynamicResource SurfaceElevatedBrush}">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="SettingsDrawerTransform" X="396" />
+                            </Border.RenderTransform>
+
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="22">
+                                    <TextBlock Text="Control Deck"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               FontFamily="Bahnschrift"
+                                               FontSize="26"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Margin="0,6,0,20"
+                                               Text="Tune collection cadence, history windows, storage, and which panels stay on the board."
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap" />
+
+                                    <TextBlock Text="Scrape interval" Foreground="{DynamicResource TextMutedBrush}" />
+                                    <ComboBox Margin="0,8,0,16"
+                                              DisplayMemberPath="Label"
+                                              ItemsSource="{Binding IntervalOptions}"
+                                              SelectedValue="{Binding SelectedIntervalSeconds}"
+                                              SelectedValuePath="Value" />
+
+                                    <TextBlock Text="Graph window" Foreground="{DynamicResource TextMutedBrush}" />
+                                    <ComboBox Margin="0,8,0,16"
+                                              DisplayMemberPath="Label"
+                                              ItemsSource="{Binding WindowOptions}"
+                                              SelectedValue="{Binding SelectedWindowMinutes}"
+                                              SelectedValuePath="Value" />
+
+                                    <TextBlock Text="Retention" Foreground="{DynamicResource TextMutedBrush}" />
+                                    <ComboBox Margin="0,8,0,16"
+                                              DisplayMemberPath="Label"
+                                              ItemsSource="{Binding RetentionOptions}"
+                                              SelectedValue="{Binding SelectedRetentionDays}"
+                                              SelectedValuePath="Value" />
+
+                                    <TextBlock Text="Theme" Foreground="{DynamicResource TextMutedBrush}" />
+                                    <ComboBox Margin="0,8,0,16"
+                                              DisplayMemberPath="Label"
+                                              ItemsSource="{Binding ThemeOptions}"
+                                              SelectedValue="{Binding SelectedTheme}"
+                                              SelectedValuePath="Value" />
+
+                                    <TextBlock Text="Storage path" Foreground="{DynamicResource TextMutedBrush}" />
+                                    <TextBox Margin="0,8,0,16"
+                                             Text="{Binding StorageDirectory, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <CheckBox Content="Launch Vaktr when Windows starts"
+                                              IsChecked="{Binding LaunchOnStartup}" />
+                                    <CheckBox Content="Minimize to tray when closing"
+                                              IsChecked="{Binding MinimizeToTray}" />
+
+                                    <TextBlock Margin="0,22,0,8"
+                                               Text="Visible panels"
+                                               Foreground="{DynamicResource TextMutedBrush}" />
+                                    <ItemsControl ItemsSource="{Binding PanelToggles}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type viewModels:PanelToggleViewModel}">
+                                                <CheckBox Content="{Binding Title}" IsChecked="{Binding IsVisible}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,28,0,0">
+                                        <Button Click="OnSaveSettingsClick" Content="Apply changes" />
+                                        <Button Margin="10,0,0,0" Click="OnSettingsClick" Content="Close" Style="{StaticResource GhostButtonStyle}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Grid x:Name="ExpandedOverlay"
+              Visibility="Collapsed"
+              Opacity="0">
+            <Border Background="#7A08111C" />
+            <Border Width="980"
+                    Height="640"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="14"
+                    CornerRadius="30"
+                    BorderBrush="{DynamicResource SurfaceStrokeBrush}"
+                    BorderThickness="1"
+                    Background="{DynamicResource ShellBackgroundBrush}">
+                <Grid>
+                    <Button HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Click="OnExpandedCloseClick"
+                            Content="Close"
+                            Style="{StaticResource GhostButtonStyle}" />
+                    <controls:MetricPanelControl Margin="0,44,0,0"
+                                                 Height="560"
+                                                 Panel="{Binding ExpandedPanel}"
+                                                 IsExpandedView="True" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

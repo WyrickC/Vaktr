@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+.dotnet/
+*.user
+*.suo
+*_wpftmp.csproj
+*.nupkg
+TestResults/
