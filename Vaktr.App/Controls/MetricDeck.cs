@@ -35,27 +35,20 @@ public sealed class MetricDeck : UserControl
     private readonly Button _fifteenMinuteButton;
     private readonly Button _oneHourButton;
     private readonly Button _expandButton;
-    private readonly WinUiChartSurface _chartSurface;
-    private readonly Canvas _hoverCanvas;
-    private readonly Border _hoverCard;
-    private readonly TextBlock _hoverTimeText;
-    private readonly TextBlock _hoverValueText;
-    private readonly StackPanel _legendHost;
+    private readonly StackPanel _seriesHost;
 
     private MetricPanelViewModel? _observedPanel;
 
     public MetricDeck()
     {
         Width = 430;
-        Height = 320;
+        MinHeight = 280;
 
         _badgeText = CreateTextBlock("Bahnschrift", 11, FontWeights.SemiBold);
         _footerText = CreateTextBlock(fontSize: 11);
         _titleText = CreateTextBlock("Segoe UI Variable Display", 24, FontWeights.SemiBold);
         _currentValueText = CreateTextBlock("Bahnschrift", 30, FontWeights.SemiBold);
         _secondaryValueText = CreateTextBlock(fontSize: 13);
-        _hoverTimeText = CreateTextBlock("Bahnschrift", 12, FontWeights.SemiBold);
-        _hoverValueText = CreateTextBlock(fontSize: 12);
 
         _oneMinuteButton = CreateRangeButton("1m", "OneMinute");
         _fiveMinuteButton = CreateRangeButton("5m", "FiveMinutes");
@@ -68,38 +61,9 @@ public sealed class MetricDeck : UserControl
         _expandButton = CreateGhostButton("Expand");
         _expandButton.Click += OnExpandClick;
 
-        _chartSurface = new WinUiChartSurface();
-        _hoverCard = new Border
+        _seriesHost = new StackPanel
         {
-            Visibility = Visibility.Collapsed,
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(12),
-            Child = new StackPanel
-            {
-                Spacing = 6,
-                Children =
-                {
-                    _hoverTimeText,
-                    _hoverValueText,
-                },
-            },
-        };
-
-        _hoverCanvas = new Canvas
-        {
-            Background = BrushFactory.CreateBrush("#00FFFFFF"),
-            Children =
-            {
-                _hoverCard,
-            },
-        };
-        _hoverCanvas.PointerMoved += OnChartPointerMoved;
-        _hoverCanvas.PointerExited += OnChartPointerExited;
-
-        _legendHost = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            Spacing = 8,
         };
 
         var badgeBorder = new Border
@@ -153,25 +117,24 @@ public sealed class MetricDeck : UserControl
         headerGrid.Children.Add(actionsHost);
         Grid.SetColumn(actionsHost, 1);
 
-        var chartGrid = new Grid
-        {
-            Margin = new Thickness(0, 18, 0, 18),
-            Children =
-            {
-                _chartSurface,
-                _hoverCanvas,
-            },
-        };
-
         var bodyGrid = new Grid();
         bodyGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         bodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        bodyGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         bodyGrid.Children.Add(headerGrid);
-        bodyGrid.Children.Add(chartGrid);
-        bodyGrid.Children.Add(_legendHost);
-        Grid.SetRow(chartGrid, 1);
-        Grid.SetRow(_legendHost, 2);
+        var seriesSurface = new Border
+        {
+            Margin = new Thickness(0, 18, 0, 0),
+            Padding = new Thickness(14),
+            CornerRadius = new CornerRadius(18),
+            Child = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollMode = ScrollMode.Auto,
+                Content = _seriesHost,
+            },
+        };
+        bodyGrid.Children.Add(seriesSurface);
+        Grid.SetRow(seriesSurface, 1);
 
         _hoverGlow = new Border
         {
@@ -279,8 +242,8 @@ public sealed class MetricDeck : UserControl
             _titleText.Text = "Telemetry";
             _currentValueText.Text = "Waiting";
             _secondaryValueText.Text = "Collecting samples";
-            _legendHost.Children.Clear();
-            _chartSurface.Series = Array.Empty<ChartSeriesViewModel>();
+            _seriesHost.Children.Clear();
+            _seriesHost.Children.Add(CreateEmptySeriesText("Waiting for samples"));
             return;
         }
 
@@ -289,44 +252,80 @@ public sealed class MetricDeck : UserControl
         _titleText.Text = panel.Title;
         _currentValueText.Text = panel.CurrentValue;
         _secondaryValueText.Text = panel.SecondaryValue;
-        _chartSurface.Series = panel.VisibleSeries;
-        _chartSurface.Unit = panel.Unit;
-        _chartSurface.WindowStartUtc = panel.WindowStartUtc;
-        _chartSurface.WindowEndUtc = panel.WindowEndUtc;
-
-        RefreshLegend(panel);
+        RefreshSeriesRows(panel);
         RefreshRangeButtons();
         RefreshVisuals();
     }
 
-    private void RefreshLegend(MetricPanelViewModel panel)
+    private void RefreshSeriesRows(MetricPanelViewModel panel)
     {
-        _legendHost.Children.Clear();
+        _seriesHost.Children.Clear();
+        if (panel.VisibleSeries.Count == 0)
+        {
+            _seriesHost.Children.Add(CreateEmptySeriesText("Waiting for samples"));
+            return;
+        }
+
         foreach (var series in panel.VisibleSeries)
         {
-            _legendHost.Children.Add(new Border
+            var latestValue = series.Points.Count == 0
+                ? "--"
+                : FormatValue(series.Points[^1].Value, panel.Unit);
+
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            row.Children.Add(new Ellipse
             {
-                Margin = new Thickness(0, 0, 10, 6),
-                Padding = new Thickness(0, 0, 6, 0),
+                Width = 8,
+                Height = 8,
+                Margin = new Thickness(0, 5, 12, 0),
+                Fill = series.StrokeBrush,
+            });
+
+            var nameText = new TextBlock
+            {
+                FontSize = 13,
+                Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1"),
+                Text = series.Name,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            row.Children.Add(nameText);
+            Grid.SetColumn(nameText, 1);
+
+            var valueText = new TextBlock
+            {
+                FontFamily = new FontFamily("Bahnschrift"),
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+                Text = latestValue,
+            };
+            row.Children.Add(valueText);
+            Grid.SetColumn(valueText, 2);
+
+            _seriesHost.Children.Add(new Border
+            {
+                Padding = new Thickness(12, 10, 12, 10),
+                CornerRadius = new CornerRadius(14),
+                Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+                BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+                BorderThickness = new Thickness(1),
                 Child = new StackPanel
                 {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 8,
+                    Spacing = 4,
                     Children =
                     {
-                        new Ellipse
-                        {
-                            Width = 8,
-                            Height = 8,
-                            Margin = new Thickness(0, 4, 0, 0),
-                            Fill = series.StrokeBrush,
-                        },
                         new TextBlock
                         {
-                            FontSize = 12,
+                            FontSize = 11,
+                            CharacterSpacing = 50,
                             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
-                            Text = series.Name,
+                            Text = $"{series.Points.Count} SAMPLES",
                         },
+                        row,
                     },
                 },
             });
@@ -344,7 +343,6 @@ public sealed class MetricDeck : UserControl
     private void RefreshVisuals()
     {
         var surfaceBrush = ResolveBrush("SurfaceBrush", "#102131");
-        var elevatedBrush = ResolveBrush("SurfaceElevatedBrush", "#15283B");
         var panelOverlay = ResolveBrush("PanelOverlayBrush", "#11283C");
         var strokeBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         var textPrimary = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
@@ -364,16 +362,11 @@ public sealed class MetricDeck : UserControl
             overlay.Background = panelOverlay;
         }
 
-        _hoverCard.Background = elevatedBrush;
-        _hoverCard.BorderBrush = strokeBrush;
-        _hoverCard.BorderThickness = new Thickness(1);
         _badgeText.Foreground = accentStrong;
         _footerText.Foreground = textMuted;
         _titleText.Foreground = textPrimary;
         _currentValueText.Foreground = textPrimary;
         _secondaryValueText.Foreground = textSecondary;
-        _hoverTimeText.Foreground = textPrimary;
-        _hoverValueText.Foreground = textSecondary;
 
         if (_badgeText.Parent is Border badgeBorder)
         {
@@ -419,39 +412,6 @@ public sealed class MetricDeck : UserControl
     }
 
     private void OnExpandClick(object sender, RoutedEventArgs e) => Panel?.RequestExpand();
-
-    private void OnChartPointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (Panel is null || sender is not FrameworkElement area || area.ActualWidth <= 0)
-        {
-            return;
-        }
-
-        var position = e.GetCurrentPoint(area).Position;
-        var ratio = Math.Clamp(position.X / area.ActualWidth, 0d, 1d);
-        _chartSurface.HoverRatio = ratio;
-
-        var hover = Panel.BuildHoverInfo(ratio);
-        if (hover is null)
-        {
-            _hoverCard.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        _hoverCard.Visibility = Visibility.Visible;
-        _hoverTimeText.Text = hover.Timestamp.LocalDateTime.ToString("t");
-        _hoverValueText.Text = string.Join(Environment.NewLine, hover.Values.Select(value => $"{value.Label}: {value.Value}"));
-
-        _hoverCard.UpdateLayout();
-        Canvas.SetLeft(_hoverCard, Math.Min(position.X + 16, Math.Max(0, area.ActualWidth - _hoverCard.ActualWidth - 16)));
-        Canvas.SetTop(_hoverCard, 12);
-    }
-
-    private void OnChartPointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        _chartSurface.HoverRatio = double.NaN;
-        _hoverCard.Visibility = Visibility.Collapsed;
-    }
 
     private void ApplyRangeState(Button control, bool? isActive)
     {
@@ -511,4 +471,22 @@ public sealed class MetricDeck : UserControl
 
         return BrushFactory.CreateBrush(fallbackHex);
     }
+
+    private static TextBlock CreateEmptySeriesText(string text) => new()
+    {
+        FontSize = 13,
+        Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+        Text = text,
+        TextWrapping = TextWrapping.WrapWholeWords,
+    };
+
+    private static string FormatValue(double value, MetricUnit unit) => unit switch
+    {
+        MetricUnit.Percent => $"{value:0.#}%",
+        MetricUnit.Gigabytes => $"{value:0.0} GB",
+        MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
+        MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
+        MetricUnit.Megahertz => $"{value / 1000d:0.00} GHz",
+        _ => $"{value:0.##}",
+    };
 }

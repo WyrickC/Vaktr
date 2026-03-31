@@ -12,3 +12,11 @@ scratch-winui/
 temp-write-check/
 write-test.txt
 NuGet.Config
+*.bak
+*-input.json
+manual-*.dll
+manual-*.exe
+manual-*.rsp
+build-now.log
+xaml-build.log
+xamlc-*.txt

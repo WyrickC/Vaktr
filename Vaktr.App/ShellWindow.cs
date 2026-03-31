@@ -1,6 +1,5 @@
 using System.Collections.Specialized;
 using Microsoft.UI;
-using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
 using Vaktr.App.Controls;
@@ -16,11 +15,11 @@ namespace Vaktr.App;
 public sealed class ShellWindow : Window
 {
     private readonly MainViewModel _viewModel;
-    private readonly CollectorService _collectorService;
+    private CollectorService? _collectorService;
     private readonly IMetricStore _metricStore;
     private readonly IConfigStore _configStore;
     private readonly AutoLaunchService _autoLaunchService;
-    private readonly TrayIconHost _trayIcon;
+    private TrayIconHost? _trayIcon;
 
     private readonly Grid _rootLayout;
     private readonly StackPanel _summaryHost;
@@ -35,13 +34,12 @@ public sealed class ShellWindow : Window
 
     public ShellWindow(
         MainViewModel viewModel,
-        CollectorService collectorService,
         IMetricStore metricStore,
         IConfigStore configStore,
         AutoLaunchService autoLaunchService)
     {
+        StartupTrace.Write("ShellWindow ctor start");
         _viewModel = viewModel;
-        _collectorService = collectorService;
         _metricStore = metricStore;
         _configStore = configStore;
         _autoLaunchService = autoLaunchService;
@@ -73,43 +71,36 @@ public sealed class ShellWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
         };
+        StartupTrace.Write("ShellWindow core controls created");
 
         _expandedOverlay = BuildExpandedOverlay();
         _rootLayout = BuildRootLayout();
         _rootLayout.DataContext = _viewModel;
+        StartupTrace.Write("Root layout built");
         Content = _rootLayout;
-
-        _trayIcon = new TrayIconHost(WinRT.Interop.WindowNative.GetWindowHandle(this));
-        _trayIcon.OpenRequested += (_, _) => DispatcherQueue.TryEnqueue(RestoreFromTray);
-        _trayIcon.ExitRequested += (_, _) => DispatcherQueue.TryEnqueue(() =>
-        {
-            _allowClose = true;
-            Close();
-        });
+        StartupTrace.Write("Window content assigned");
 
         _viewModel.DashboardPanels.CollectionChanged += OnDashboardPanelsChanged;
         _viewModel.PanelToggles.CollectionChanged += OnPanelTogglesChanged;
         SubscribeToPanels(_viewModel.DashboardPanels);
 
         Closed += OnWindowClosed;
-        AppWindow.Resize(new SizeInt32(1480, 920));
-        AppWindow.Closing += OnAppWindowClosing;
 
         BuildSummaryCards();
         RefreshPanelToggles();
         RefreshDashboardPanels();
         ApplyTheme(_viewModel.SelectedTheme);
-        ConfigureTitleBar();
+        StartupTrace.Write("ShellWindow ctor complete");
     }
 
     public void ApplyTheme(ThemeMode mode)
     {
         _rootLayout.RequestedTheme = mode == ThemeMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
-        ConfigureTitleBar();
     }
 
     private Grid BuildRootLayout()
     {
+        StartupTrace.Write("BuildRootLayout");
         var shellBorder = new Border
         {
             Background = ResolveBrush("ShellBackgroundBrush", "#0B1622"),
@@ -147,6 +138,7 @@ public sealed class ShellWindow : Window
 
     private StackPanel BuildShellStack()
     {
+        StartupTrace.Write("BuildShellStack");
         var stack = new StackPanel
         {
             Spacing = 24,
@@ -157,11 +149,13 @@ public sealed class ShellWindow : Window
         stack.Children.Add(BuildSummaryStrip());
         stack.Children.Add(CreateSectionHeader("LIVE BOARD", "CPU, memory, disk, and network panels stay compact by default and can be expanded on demand."));
         stack.Children.Add(_dashboardGrid);
+        stack.Children.Add(BuildFooter());
         return stack;
     }
 
     private Grid BuildHeader()
     {
+        StartupTrace.Write("BuildHeader");
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -241,6 +235,7 @@ public sealed class ShellWindow : Window
 
     private Border BuildControlsSurface()
     {
+        StartupTrace.Write("BuildControlsSurface");
         var root = new StackPanel
         {
             Spacing = 14,
@@ -316,6 +311,7 @@ public sealed class ShellWindow : Window
 
     private UIElement BuildSummaryStrip()
     {
+        StartupTrace.Write("BuildSummaryStrip");
         return new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -328,6 +324,7 @@ public sealed class ShellWindow : Window
 
     private Grid BuildExpandedOverlay()
     {
+        StartupTrace.Write("BuildExpandedOverlay");
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -366,8 +363,46 @@ public sealed class ShellWindow : Window
         return overlay;
     }
 
+    private Border BuildFooter()
+    {
+        StartupTrace.Write("BuildFooter");
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        grid.Children.Add(new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                CreateAccentText("LOCAL-FIRST // LOW OVERHEAD", 11, 100),
+                CreateSecondaryText("Vaktr only samples local machine telemetry and writes a lightweight SQLite history."),
+            },
+        });
+
+        var tag = new TextBlock
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+            Text = "WinUI 3 dashboard",
+        };
+        grid.Children.Add(tag);
+        Grid.SetColumn(tag, 1);
+
+        return new Border
+        {
+            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(16, 14, 16, 14),
+            Child = grid,
+        };
+    }
+
     private void BuildSummaryCards()
     {
+        StartupTrace.Write("BuildSummaryCards");
         _summaryHost.Children.Clear();
         foreach (var card in _viewModel.SummaryCards)
         {
@@ -444,6 +479,7 @@ public sealed class ShellWindow : Window
 
     private void RefreshPanelToggles()
     {
+        StartupTrace.Write("RefreshPanelToggles");
         _panelToggleHost.Children.Clear();
         foreach (var toggle in _viewModel.PanelToggles)
         {
@@ -456,6 +492,7 @@ public sealed class ShellWindow : Window
 
     private void RefreshDashboardPanels()
     {
+        StartupTrace.Write("RefreshDashboardPanels");
         _dashboardGrid.Children.Clear();
         _dashboardGrid.RowDefinitions.Clear();
         _dashboardGrid.ColumnDefinitions.Clear();
@@ -475,7 +512,8 @@ public sealed class ShellWindow : Window
             return;
         }
 
-        var columns = AppWindow.Size.Width >= 1700 ? 3 : AppWindow.Size.Width >= 1100 ? 2 : 1;
+        var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
+        var columns = width >= 1700 ? 3 : width >= 1100 ? 2 : 1;
         for (var column = 0; column < columns; column++)
         {
             _dashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -508,46 +546,73 @@ public sealed class ShellWindow : Window
         }
 
         _initialized = true;
-        _collectorService.SnapshotCollected += OnSnapshotCollected;
+        StartupTrace.Write("OnRootLoaded start");
+        try
+        {
+            _viewModel.StatusText = "Loading local history";
+            var config = _viewModel.BuildConfig();
+            await _metricStore.InitializeAsync(config, CancellationToken.None);
 
-        var config = _viewModel.BuildConfig();
-        await _metricStore.InitializeAsync(config, CancellationToken.None);
-        var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.AddHours(-1), CancellationToken.None);
-        _viewModel.LoadHistory(history);
-        App.CurrentApp.ApplyTheme(config.Theme);
-        _autoLaunchService.SetEnabled(config.LaunchOnStartup);
-        await _collectorService.StartAsync(config, CancellationToken.None);
+            var historyWindow = TimeSpan.FromMinutes(Math.Max(config.GraphWindowMinutes, 5));
+            var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
+            _viewModel.LoadHistory(history);
+
+            App.CurrentApp.ApplyTheme(config.Theme);
+            _autoLaunchService.SetEnabled(config.LaunchOnStartup);
+
+            _collectorService ??= new CollectorService(new WindowsMetricCollector(), _metricStore);
+            _collectorService.SnapshotCollected -= OnSnapshotCollected;
+            _collectorService.SnapshotCollected += OnSnapshotCollected;
+
+            _viewModel.StatusText = "Starting telemetry";
+            await _collectorService.StartAsync(config, CancellationToken.None);
+            _viewModel.StatusText = "Streaming local telemetry";
+            StartupTrace.Write("OnRootLoaded complete");
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("OnRootLoaded", ex);
+            _viewModel.StatusText = $"Startup issue: {ex.Message}";
+        }
     }
 
     private async void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        _collectorService.SnapshotCollected -= OnSnapshotCollected;
+        if (_collectorService is not null)
+        {
+            _collectorService.SnapshotCollected -= OnSnapshotCollected;
+        }
+
         _viewModel.DashboardPanels.CollectionChanged -= OnDashboardPanelsChanged;
         _viewModel.PanelToggles.CollectionChanged -= OnPanelTogglesChanged;
         UnsubscribeFromPanels(_viewModel.DashboardPanels);
-        _trayIcon.Dispose();
-        await _collectorService.DisposeAsync();
-    }
-
-    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
-    {
-        if (_allowClose || !_viewModel.MinimizeToTray)
+        _trayIcon?.Dispose();
+        if (_collectorService is not null)
         {
-            return;
+            await _collectorService.DisposeAsync();
         }
-
-        args.Cancel = true;
-        HideToTray();
     }
 
     private async void OnSaveSettingsClick(object sender, RoutedEventArgs e)
     {
-        _viewModel.ApplyPanelVisibility();
-        var config = _viewModel.BuildConfig();
-        App.CurrentApp.ApplyTheme(config.Theme);
-        _autoLaunchService.SetEnabled(config.LaunchOnStartup);
-        await _configStore.SaveAsync(config, CancellationToken.None);
-        await _collectorService.StartAsync(config, CancellationToken.None);
+        try
+        {
+            _viewModel.StatusText = "Applying settings";
+            _viewModel.ApplyPanelVisibility();
+            var config = _viewModel.BuildConfig();
+            App.CurrentApp.ApplyTheme(config.Theme);
+            _autoLaunchService.SetEnabled(config.LaunchOnStartup);
+            await _configStore.SaveAsync(config, CancellationToken.None);
+            _collectorService ??= new CollectorService(new WindowsMetricCollector(), _metricStore);
+            _collectorService.SnapshotCollected -= OnSnapshotCollected;
+            _collectorService.SnapshotCollected += OnSnapshotCollected;
+            await _collectorService.StartAsync(config, CancellationToken.None);
+            _viewModel.StatusText = "Settings applied";
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = $"Settings issue: {ex.Message}";
+        }
     }
 
     private void OnThemeQuickToggle(object sender, RoutedEventArgs e)
@@ -585,13 +650,14 @@ public sealed class ShellWindow : Window
 
     private void HideToTray()
     {
+        EnsureTrayIcon();
         AppWindow.Hide();
         if (_hasShownTrayHint)
         {
             return;
         }
 
-        _trayIcon.ShowInfo("Vaktr is still running", "Use the tray icon to reopen the dashboard.");
+        _trayIcon?.ShowInfo("Vaktr is still running", "Use the tray icon to reopen the dashboard.");
         _hasShownTrayHint = true;
     }
 
@@ -634,30 +700,21 @@ public sealed class ShellWindow : Window
         }
     }
 
-    private void ConfigureTitleBar()
+    private void EnsureTrayIcon()
     {
-        if (!AppWindowTitleBar.IsCustomizationSupported())
+        if (_trayIcon is not null)
         {
             return;
         }
 
-        var isDark = _rootLayout.RequestedTheme != ElementTheme.Light;
-        var foreground = isDark ? Colors.White : Colors.Black;
-
-        AppWindow.TitleBar.BackgroundColor = Colors.Transparent;
-        AppWindow.TitleBar.ForegroundColor = foreground;
-        AppWindow.TitleBar.InactiveBackgroundColor = Colors.Transparent;
-        AppWindow.TitleBar.InactiveForegroundColor = foreground;
-        AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
-        AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        AppWindow.TitleBar.ButtonForegroundColor = foreground;
-        AppWindow.TitleBar.ButtonInactiveForegroundColor = foreground;
-        AppWindow.TitleBar.ButtonHoverBackgroundColor = isDark
-            ? ColorHelper.FromArgb(28, 255, 255, 255)
-            : ColorHelper.FromArgb(28, 0, 0, 0);
-        AppWindow.TitleBar.ButtonPressedBackgroundColor = isDark
-            ? ColorHelper.FromArgb(52, 255, 255, 255)
-            : ColorHelper.FromArgb(52, 0, 0, 0);
+        _trayIcon = new TrayIconHost(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        _trayIcon.OpenRequested += (_, _) => DispatcherQueue.TryEnqueue(RestoreFromTray);
+        _trayIcon.SettingsRequested += (_, _) => DispatcherQueue.TryEnqueue(RestoreFromTray);
+        _trayIcon.ExitRequested += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            _allowClose = true;
+            Close();
+        });
     }
 
     private static void AddControlField(Grid grid, int row, int column, string label, FrameworkElement control, int columnSpan = 1)

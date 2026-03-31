@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Vaktr.App.Services;
 using Vaktr.App.ViewModels;
-using Vaktr.Collector;
 using Vaktr.Core.Models;
 using Vaktr.Store.Persistence;
 
@@ -15,29 +14,48 @@ public sealed class App : Application
 
     public App()
     {
-        ApplyThemeResources(ThemeMode.Dark);
+        StartupTrace.Write("App ctor");
+        UnhandledException += OnUnhandledException;
     }
 
-    protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         base.OnLaunched(args);
+        StartupTrace.Write("App.OnLaunched start");
+        EnsureResourcesInitialized();
+        ApplyThemeResources(ThemeMode.Dark);
+        StartupTrace.Write("Default theme applied");
 
         var configStore = new JsonConfigStore();
-        var config = await configStore.LoadAsync(CancellationToken.None);
+        VaktrConfig config;
+        try
+        {
+            config = configStore.LoadAsync(CancellationToken.None).GetAwaiter().GetResult();
+            StartupTrace.Write("Config loaded");
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("Config load", ex);
+            config = VaktrConfig.CreateDefault().Normalize();
+        }
+
         var metricStore = new SqliteMetricStore();
-        var collectorService = new CollectorService(new WindowsMetricCollector(), metricStore);
         var viewModel = new MainViewModel(config);
+        StartupTrace.Write("Stores and view model created // launch-cut-v4");
         ApplyThemeResources(config.Theme);
+        StartupTrace.Write("Configured theme applied");
 
         _window = new ShellWindow(
             viewModel,
-            collectorService,
             metricStore,
             configStore,
             new AutoLaunchService());
+        StartupTrace.Write("ShellWindow created // minimal-v4");
 
         _window.ApplyTheme(config.Theme);
+        StartupTrace.Write("Window theme applied");
         _window.Activate();
+        StartupTrace.Write("Window activated");
     }
 
     public void ApplyTheme(ThemeMode mode)
@@ -117,6 +135,19 @@ public sealed class App : Application
         }
 
         Resources[key] = BrushFactory.CreateBrush(hex);
+    }
+
+    private void EnsureResourcesInitialized()
+    {
+        Resources ??= new ResourceDictionary();
+    }
+
+    private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        if (e.Exception is not null)
+        {
+            StartupTrace.WriteException("App.UnhandledException", e.Exception);
+        }
     }
 
     private sealed record ThemePalette(

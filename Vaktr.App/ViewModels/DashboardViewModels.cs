@@ -436,6 +436,7 @@ public sealed class PanelToggleViewModel : ObservableObject
 
 public sealed class MetricPanelViewModel : ObservableObject
 {
+    private static readonly TimeSpan LiveBufferWindow = TimeSpan.FromMinutes(75);
     private readonly Dictionary<string, SeriesBuffer> _buffers = new(StringComparer.OrdinalIgnoreCase);
 
     private IReadOnlyList<ChartSeriesViewModel> _visibleSeries = Array.Empty<ChartSeriesViewModel>();
@@ -564,7 +565,7 @@ public sealed class MetricPanelViewModel : ObservableObject
         }
 
         buffer.Points.Add(new MetricPoint(sample.Timestamp, sample.Value));
-        var keepAfter = sample.Timestamp.AddHours(-2);
+        var keepAfter = sample.Timestamp - LiveBufferWindow;
         buffer.Points.RemoveAll(point => point.Timestamp < keepAfter);
 
         RefreshPresentation(sample.Timestamp);
@@ -591,10 +592,14 @@ public sealed class MetricPanelViewModel : ObservableObject
         var values = VisibleSeries
             .Select(series =>
             {
-                var point = series.Points.OrderBy(point => Math.Abs((point.Timestamp - targetTimestamp).TotalMilliseconds)).FirstOrDefault();
-                return point is null
-                    ? null
-                    : new HoverSeriesValue(series.Name, FormatValue(point.Value, Unit), series.StrokeBrush);
+                if (series.Points.Count == 0)
+                {
+                    return null;
+                }
+
+                var seriesIndex = (int)Math.Round(normalizedPosition * Math.Max(0, series.Points.Count - 1));
+                var point = series.Points[Math.Clamp(seriesIndex, 0, series.Points.Count - 1)];
+                return new HoverSeriesValue(series.Name, FormatValue(point.Value, Unit), series.StrokeBrush);
             })
             .Where(value => value is not null)
             .Cast<HoverSeriesValue>()
