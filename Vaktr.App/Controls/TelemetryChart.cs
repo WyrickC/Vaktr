@@ -286,8 +286,8 @@ public sealed class TelemetryChart : UserControl
             Height = plotHeight,
             RadiusX = 16,
             RadiusY = 16,
-            Stroke = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            StrokeThickness = 1,
+            Stroke = ResolveBrush("SurfaceGridBrush", "#27425E"),
+            StrokeThickness = 0.8,
             Fill = CreateSurfaceGradient("#0C1828", "#112338"),
             Opacity = 0.98,
         };
@@ -302,24 +302,12 @@ public sealed class TelemetryChart : UserControl
             Opacity = 0.08,
         };
 
-        var topEdge = new Line
-        {
-            X1 = LeftPadding + 1,
-            X2 = LeftPadding + plotWidth - 1,
-            Y1 = TopPadding + 1,
-            Y2 = TopPadding + 1,
-            Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
-            StrokeThickness = 1,
-            Opacity = 0.08,
-        };
-
         Canvas.SetLeft(frame, LeftPadding);
         Canvas.SetTop(frame, TopPadding);
         _canvas.Children.Add(frame);
         Canvas.SetLeft(tint, LeftPadding);
         Canvas.SetTop(tint, TopPadding);
         _canvas.Children.Add(tint);
-        _canvas.Children.Add(topEdge);
     }
 
     private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue)
@@ -363,16 +351,19 @@ public sealed class TelemetryChart : UserControl
         for (var index = 0; index <= divisions; index++)
         {
             var x = LeftPadding + ((plotWidth / divisions) * index);
-            _canvas.Children.Add(new Line
+            if (index is not 0 && index != divisions)
             {
-                Stroke = gridBrush,
-                StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.4 : 0.28,
-                X1 = x,
-                X2 = x,
-                Y1 = TopPadding,
-                Y2 = bottomY,
-            });
+                _canvas.Children.Add(new Line
+                {
+                    Stroke = gridBrush,
+                    StrokeThickness = 1,
+                    Opacity = 0.24,
+                    X1 = x,
+                    X2 = x,
+                    Y1 = TopPadding,
+                    Y2 = bottomY,
+                });
+            }
 
             var tick = start + TimeSpan.FromTicks((end - start).Ticks / divisions * index);
             var label = new TextBlock

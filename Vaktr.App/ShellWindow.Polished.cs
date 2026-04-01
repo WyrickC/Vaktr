@@ -22,7 +22,6 @@ namespace Vaktr.App;
 
 public sealed partial class ShellWindow : Window
 {
-    private static readonly TimeSpan StartupYieldDelay = TimeSpan.FromMilliseconds(30);
     private static readonly int[] ScrapeIntervalPresets = [1, 2, 5, 10, 15, 30, 60];
     private static readonly int[] RetentionHourPresets = [1, 6, 12, 24, 48, 72, 168, 336, 720, 2160, 8760];
     private DeckEditorMode _activeDeckEditor = DeckEditorMode.Scrape;
@@ -89,21 +88,27 @@ public sealed partial class ShellWindow : Window
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
 
-        RenderControlDeckSummary();
+        TryLoadBrandImage();
+        RenderEditableControlDeck();
         BuildSummaryCards();
         RefreshDashboardPanels();
         UpdateStatusText();
-        ApplyTheme(_viewModel.SelectedTheme);
+        ApplyInitialTheme(_viewModel.SelectedTheme);
         StartupTrace.Write("ShellWindow ctor complete // polished-v19");
     }
 
-    public void ApplyTheme(ThemeMode mode)
+    public void ApplyInitialTheme(ThemeMode mode)
     {
         var requestedTheme = mode == ThemeMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
         if (_rootLayout.RequestedTheme != requestedTheme)
         {
             _rootLayout.RequestedTheme = requestedTheme;
         }
+    }
+
+    public void ApplyTheme(ThemeMode mode)
+    {
+        ApplyInitialTheme(mode);
 
         RebuildSummaryCards();
         _panelCards.Clear();
@@ -141,21 +146,21 @@ public sealed partial class ShellWindow : Window
 
         foreach (var card in _viewModel.SummaryCards)
         {
-            var badgeHost = IconFactory.CreateTile(card.Title, card.AccentBrush, 56, 18);
+            var badgeHost = IconFactory.CreateTile(card.Title, card.AccentBrush, 52, 18);
 
-            var titleText = CreateMutedText(string.Empty, 12);
+            var titleText = CreateMutedText(string.Empty, 11);
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
-            var valueText = CreatePrimaryText(string.Empty, 28, true);
+            var valueText = CreatePrimaryText(string.Empty, 29, true);
             valueText.FontFamily = new FontFamily("Segoe UI Variable Display");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
-            var captionText = CreateSecondaryText(string.Empty, 12);
+            var captionText = CreateSecondaryText(string.Empty, 11);
             captionText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Caption)) });
 
             var details = new StackPanel
             {
-                Spacing = 5,
+                Spacing = 2,
                 Children =
                 {
                     titleText,
@@ -166,7 +171,7 @@ public sealed partial class ShellWindow : Window
 
             var contentGrid = new Grid
             {
-                ColumnSpacing = 16,
+                ColumnSpacing = 12,
             };
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -180,32 +185,10 @@ public sealed partial class ShellWindow : Window
                 Background = CreateSurfaceGradient("#0E1A2B", "#13243A"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
-                Padding = new Thickness(18, 16, 18, 16),
-                MinHeight = 112,
-                Child = new Grid
-                {
-                    Children =
-                    {
-                        new StackPanel
-                        {
-                            Spacing = 12,
-                            Children =
-                            {
-                                new Border
-                                {
-                                    Width = 68,
-                                    Height = 1.5,
-                                    CornerRadius = new CornerRadius(1),
-                                    Background = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
-                                    Opacity = 0.58,
-                                    HorizontalAlignment = HorizontalAlignment.Center,
-                                },
-                                contentGrid,
-                            },
-                        },
-                    },
-                },
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(17, 14, 17, 14),
+                MinHeight = 104,
+                Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);
             var index = _summaryHost.Children.Count - 1;
@@ -307,19 +290,15 @@ public sealed partial class ShellWindow : Window
 
         try
         {
-            await Task.Delay(StartupYieldDelay);
             var config = _viewModel.BuildConfig();
             StartupTrace.Write("OnRootLoaded resumed after first paint // polished-v19");
-            App.CurrentApp.ApplyTheme(config.Theme);
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
             await TryLoadHistoryAsync(config);
             await EnsureCollectorRunningAsync(config);
             App.CurrentApp.MarkStartupSettled();
             _ = DispatcherQueue.TryEnqueue(() =>
             {
-                RenderEditableControlDeck();
                 TryApplyWindowIcon();
-                TryLoadBrandImage();
             });
             StartupTrace.Write("OnRootLoaded complete // polished-v19");
         }
@@ -810,29 +789,16 @@ public sealed partial class ShellWindow : Window
             var bitmap = new BitmapImage();
             bitmap.UriSource = new Uri(imagePath);
 
-            _brandHost.Width = 120;
-            _brandHost.Height = 120;
-            _brandHost.CornerRadius = new CornerRadius(34);
-            _brandHost.Background = ResolveBrush("SurfaceStrongBrush", "#17304A");
-            _brandHost.Padding = new Thickness(12);
-            _brandHost.Child = new Grid
+            _brandHost.Width = 142;
+            _brandHost.Height = 142;
+            _brandHost.CornerRadius = new CornerRadius(0);
+            _brandHost.Background = null;
+            _brandHost.BorderThickness = new Thickness(0);
+            _brandHost.Padding = new Thickness(0);
+            _brandHost.Child = new Microsoft.UI.Xaml.Controls.Image
             {
-                Children =
-                {
-                    new Border
-                    {
-                        CornerRadius = new CornerRadius(24),
-                        Background = ResolveBrush("PanelOverlayBrush", "#061018"),
-                        BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                        BorderThickness = new Thickness(1),
-                    },
-                    new Microsoft.UI.Xaml.Controls.Image
-                    {
-                        Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
-                        Source = bitmap,
-                        Margin = new Thickness(10),
-                    },
-                },
+                Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
+                Source = bitmap,
             };
             StartupTrace.Write("TryLoadBrandImage complete // polished-v19");
         }

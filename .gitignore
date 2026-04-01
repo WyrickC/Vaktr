@@ -20,3 +20,4 @@ manual-*.rsp
 build-now.log
 xaml-build.log
 xamlc-*.txt
+.pydeps/

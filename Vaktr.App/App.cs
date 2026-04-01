@@ -55,8 +55,8 @@ public sealed class App : Application
             new AutoLaunchService());
         StartupTrace.Write("ShellWindow created // polished-v19");
 
-        _window.ApplyTheme(config.Theme);
-        StartupTrace.Write("Window theme applied");
+        _window.ApplyInitialTheme(config.Theme);
+        StartupTrace.Write("Window theme prepared");
         _window.Activate();
         StartupTrace.Write("Window activated");
     }
