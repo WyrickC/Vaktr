@@ -19,34 +19,34 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildRootLayout // polished-v19");
         var shellHalo = new Border
         {
-            Margin = new Thickness(-8),
-            Background = ResolveBrush("AccentSoftBrush", "#10394D"),
-            CornerRadius = new CornerRadius(42),
-            Opacity = 0.24,
+            Margin = new Thickness(-10),
+            Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF"),
+            CornerRadius = new CornerRadius(40),
+            Opacity = 0.1,
         };
 
         var shellOutline = new Border
         {
             Margin = new Thickness(-1),
-            BorderBrush = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
+            BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(38),
-            Opacity = 0.18,
+            Opacity = 0.22,
         };
 
         var shellBorder = new Border
         {
-            Background = CreateSurfaceGradient("#09111E", "#0E1A2B"),
+            Background = ResolveBrush("ShellBackgroundBrush", "#07101B"),
             BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(38),
-            Padding = new Thickness(28, 22, 28, 30),
+            Padding = new Thickness(28, 20, 28, 28),
             Child = BuildShellStack(),
         };
 
         var root = new Grid
         {
-            Background = CreateSurfaceGradient("#040911", "#09111D"),
+            Background = ResolveBrush("AppBackdropBrush", "#030812"),
         };
 
         root.Children.Add(new ScrollViewer
@@ -97,50 +97,37 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildHeader // polished-v19");
         var topRail = new Grid
         {
-            Margin = new Thickness(2, 0, 2, 2),
+            Margin = new Thickness(2, 0, 2, 0),
         };
-        topRail.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         topRail.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         topRail.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        topRail.Children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                CreateMiniBrandMark(),
-            },
-        });
 
         var railLine = new Border
         {
             Height = 1,
-            Margin = new Thickness(18, 0, 18, 0),
+            Margin = new Thickness(0, 0, 18, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            Opacity = 0.4,
+            Opacity = 0.45,
         };
         topRail.Children.Add(railLine);
-        Grid.SetColumn(railLine, 1);
 
         var railGlow = new Border
         {
-            Width = 128,
+            Width = 112,
             Height = 2,
             CornerRadius = new CornerRadius(1),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             Background = CreateLineGradient("#4EDBFF", "#A6F6FF"),
-            Opacity = 0.7,
+            Opacity = 0.64,
         };
         topRail.Children.Add(railGlow);
-        Grid.SetColumn(railGlow, 1);
 
         var topRailStatus = CreateTopStatusPill(new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            Spacing = 8,
             Children =
             {
                 _statusText,
@@ -156,12 +143,12 @@ public sealed partial class ShellWindow
             },
         });
         topRail.Children.Add(topRailStatus);
-        Grid.SetColumn(topRailStatus, 2);
+        Grid.SetColumn(topRailStatus, 1);
 
         var heroGrid = new Grid
         {
-            ColumnSpacing = 28,
-            Margin = new Thickness(2, 12, 2, 0),
+            ColumnSpacing = 20,
+            Margin = new Thickness(2, 10, 2, 0),
         };
         heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -173,55 +160,28 @@ public sealed partial class ShellWindow
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                CreatePrimaryText("Vaktr", 60, true),
-                CreateSecondaryText("Local-first Windows telemetry with live timelines, compact gauges, and no backend setup.", 20),
-                CreateMutedText("Local defaults: 2 second scrape, 24 hour retention, machine-local storage.", 14),
+                CreatePrimaryText("Vaktr", 52, true),
+                CreateSecondaryText("Local-first Windows telemetry with live timelines, compact gauges, and no backend setup.", 18),
+                CreateMutedText("2s scrape · 24h retention · Local App Data", 13),
             },
         };
         heroGrid.Children.Add(titleStack);
         Grid.SetColumn(titleStack, 1);
 
-        var heroSurface = new Grid
-        {
-            Margin = new Thickness(4, 2, 4, 0),
-            Children =
-            {
-                new Border
-                {
-                    Height = 1,
-                    VerticalAlignment = VerticalAlignment.Bottom,
-                    Margin = new Thickness(0, 0, 0, -1),
-                    Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                    Opacity = 0.42,
-                },
-                new StackPanel
-                {
-                    Spacing = 10,
-                    Margin = new Thickness(0, 0, 0, 10),
-                    Children =
-                    {
-                        new Border
-                        {
-                            Width = 172,
-                            Height = 2,
-                            CornerRadius = new CornerRadius(1),
-                            Background = CreateLineGradient("#4EDBFF", "#8FF0FF"),
-                            Opacity = 0.76,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                        },
-                        heroGrid,
-                    },
-                }
-            },
-        };
-
         return new StackPanel
         {
-            Spacing = 14,
+            Spacing = 12,
             Children =
             {
                 topRail,
-                heroSurface,
+                heroGrid,
+                new Border
+                {
+                    Height = 1,
+                    Margin = new Thickness(2, 4, 2, 2),
+                    Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+                    Opacity = 0.42,
+                },
             },
         };
     }
@@ -241,7 +201,7 @@ public sealed partial class ShellWindow
 
         return new Border
         {
-            Background = CreateSurfaceGradient("#0D1828", "#112236"),
+            Background = ResolveBrush("SurfaceBrush", "#0C1726"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(28),
@@ -539,12 +499,12 @@ public sealed partial class ShellWindow
         var accentBrush = BrushFactory.CreateBrush(accentHex);
         var card = new Border
         {
-            Background = CreateSurfaceGradient("#101C2E", "#15263C"),
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15263C"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(20),
             Padding = new Thickness(16, 15, 16, 15),
-            MinHeight = 92,
+            MinHeight = 88,
             Child = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -925,21 +885,21 @@ public sealed partial class ShellWindow
     private static Border CreateBrandPlaceholder() =>
         new()
         {
-            Width = 148,
-            Height = 148,
-            CornerRadius = new CornerRadius(44),
-            Background = CreateSurfaceGradient("#0F2032", "#17304A"),
+            Width = 120,
+            Height = 120,
+            CornerRadius = new CornerRadius(34),
+            Background = ResolveBrush("SurfaceStrongBrush", "#17304A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(16),
+            Padding = new Thickness(12),
             Child = new Grid
             {
                 Children =
                 {
                     new Border
                     {
-                        CornerRadius = new CornerRadius(30),
-                        Background = ResolveBrush("AppBackdropBrush", "#061018"),
+                        CornerRadius = new CornerRadius(24),
+                        Background = ResolveBrush("PanelOverlayBrush", "#061018"),
                         BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                         BorderThickness = new Thickness(1),
                     },
@@ -947,7 +907,7 @@ public sealed partial class ShellWindow
                     {
                         Text = "V",
                         FontFamily = new FontFamily("Segoe UI Variable Display"),
-                        FontSize = 54,
+                        FontSize = 42,
                         FontWeight = FontWeights.SemiBold,
                         Foreground = ResolveBrush("AccentBrush", "#66E7FF"),
                         HorizontalAlignment = HorizontalAlignment.Center,
@@ -1102,11 +1062,11 @@ public sealed partial class ShellWindow
     private static Border CreateTopStatusPill(UIElement content) =>
         new()
         {
-            Background = CreateSurfaceGradient("#102031", "#152840"),
+            Background = ResolveBrush("SurfaceElevatedBrush", "#152840"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(18, 11, 18, 11),
+            Padding = new Thickness(16, 10, 16, 10),
             Child = new Grid
             {
                 Children =
@@ -1176,7 +1136,7 @@ public sealed partial class ShellWindow
     private static Border CreateInfoPanel(string title, string value) =>
         new()
         {
-            Background = CreateSurfaceGradient("#101E31", "#15273C"),
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15273C"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16),
@@ -1251,6 +1211,20 @@ public sealed partial class ShellWindow
 
     private static Brush CreateSurfaceGradient(string startHex, string endHex)
     {
+        if (IsLightPaletteActive())
+        {
+            return new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = ResolveColor("SurfaceBrush", "#F8FBFF"), Offset = 0d },
+                    new GradientStop { Color = ResolveColor("SurfaceElevatedBrush", "#EEF5FB"), Offset = 1d },
+                },
+            };
+        }
+
         return new LinearGradientBrush
         {
             StartPoint = new Windows.Foundation.Point(0, 0),
@@ -1261,6 +1235,23 @@ public sealed partial class ShellWindow
                 new GradientStop { Color = ParseColor(endHex), Offset = 1d },
             },
         };
+    }
+
+    private static bool IsLightPaletteActive()
+    {
+        var color = ResolveColor("AppBackdropBrush", "#030812");
+        var luminance = (0.2126 * color.R) + (0.7152 * color.G) + (0.0722 * color.B);
+        return luminance >= 170d;
+    }
+
+    private static Color ResolveColor(string key, string fallbackHex)
+    {
+        if (Application.Current.Resources.TryGetValue(key, out var value) && value is SolidColorBrush brush)
+        {
+            return brush.Color;
+        }
+
+        return ParseColor(fallbackHex);
     }
 
     private static Brush CreateLineGradient(string startHex, string endHex)

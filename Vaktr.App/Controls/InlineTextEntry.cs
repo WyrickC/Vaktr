@@ -238,6 +238,20 @@ public sealed class InlineTextEntry : UserControl
 
     private static Brush CreateSurfaceGradient(string startHex, string endHex)
     {
+        if (IsLightPaletteActive())
+        {
+            return new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = ResolveColor("SurfaceElevatedBrush", "#F4F8FC"), Offset = 0d },
+                    new GradientStop { Color = ResolveColor("SurfaceStrongBrush", "#EDF4FB"), Offset = 1d },
+                },
+            };
+        }
+
         return new LinearGradientBrush
         {
             StartPoint = new Windows.Foundation.Point(0, 0),
@@ -248,5 +262,22 @@ public sealed class InlineTextEntry : UserControl
                 new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
             },
         };
+    }
+
+    private static bool IsLightPaletteActive()
+    {
+        var color = ResolveColor("AppBackdropBrush", "#030812");
+        var luminance = (0.2126 * color.R) + (0.7152 * color.G) + (0.0722 * color.B);
+        return luminance >= 170d;
+    }
+
+    private static Windows.UI.Color ResolveColor(string key, string fallbackHex)
+    {
+        if (Application.Current.Resources.TryGetValue(key, out var value) && value is SolidColorBrush brush)
+        {
+            return brush.Color;
+        }
+
+        return BrushFactory.ParseColor(fallbackHex);
     }
 }

@@ -105,10 +105,20 @@ public sealed partial class ShellWindow : Window
             _rootLayout.RequestedTheme = requestedTheme;
         }
 
+        RebuildSummaryCards();
+        _panelCards.Clear();
+        RefreshDashboardPanels();
+
         if (_controlDeckEditableActive)
         {
             RenderEditableControlDeck();
         }
+        else
+        {
+            RenderControlDeckSummary();
+        }
+
+        TryLoadBrandImage();
     }
 
     private void BuildSummaryCards()
@@ -209,6 +219,15 @@ public sealed partial class ShellWindow : Window
         }
 
         _summaryCardsBound = true;
+    }
+
+    private void RebuildSummaryCards()
+    {
+        _summaryCardsBound = false;
+        _summaryHost.Children.Clear();
+        _summaryHost.RowDefinitions.Clear();
+        _summaryHost.ColumnDefinitions.Clear();
+        BuildSummaryCards();
     }
 
     private void RefreshPanelToggles()
@@ -791,19 +810,19 @@ public sealed partial class ShellWindow : Window
             var bitmap = new BitmapImage();
             bitmap.UriSource = new Uri(imagePath);
 
-            _brandHost.Width = 148;
-            _brandHost.Height = 148;
-            _brandHost.CornerRadius = new CornerRadius(44);
-            _brandHost.Background = CreateSurfaceGradient("#0F2032", "#17304A");
-            _brandHost.Padding = new Thickness(16);
+            _brandHost.Width = 120;
+            _brandHost.Height = 120;
+            _brandHost.CornerRadius = new CornerRadius(34);
+            _brandHost.Background = ResolveBrush("SurfaceStrongBrush", "#17304A");
+            _brandHost.Padding = new Thickness(12);
             _brandHost.Child = new Grid
             {
                 Children =
                 {
                     new Border
                     {
-                        CornerRadius = new CornerRadius(30),
-                        Background = ResolveBrush("AppBackdropBrush", "#061018"),
+                        CornerRadius = new CornerRadius(24),
+                        Background = ResolveBrush("PanelOverlayBrush", "#061018"),
                         BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                         BorderThickness = new Thickness(1),
                     },
@@ -811,7 +830,7 @@ public sealed partial class ShellWindow : Window
                     {
                         Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
                         Source = bitmap,
-                        Margin = new Thickness(12),
+                        Margin = new Thickness(10),
                     },
                 },
             };
@@ -876,7 +895,7 @@ public sealed partial class ShellWindow : Window
             var historyWindow = TimeSpan.FromMinutes(Math.Max(config.GraphWindowMinutes, 5));
             var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
             _viewModel.LoadHistory(history);
-            BuildSummaryCards();
+            RebuildSummaryCards();
             RefreshDashboardPanels();
             StartupTrace.Write($"TryLoadHistoryAsync complete // panels={history.Count}");
         }
