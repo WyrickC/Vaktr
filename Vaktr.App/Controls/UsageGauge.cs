@@ -55,6 +55,14 @@ public sealed class UsageGauge : UserControl
         {
             Children =
             {
+                new Border
+                {
+                    CornerRadius = new CornerRadius(999),
+                    BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+                    BorderThickness = new Thickness(1),
+                    Background = ResolveBrush("SurfaceBrush", "#102131"),
+                    Opacity = 0.75,
+                },
                 _canvas,
                 new StackPanel
                 {
@@ -136,7 +144,7 @@ public sealed class UsageGauge : UserControl
             totalSweep,
             ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             11,
-            0.45));
+            0.32));
 
         _canvas.Children.Add(CreateArcPath(
             centerX,

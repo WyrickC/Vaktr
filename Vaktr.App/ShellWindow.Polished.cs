@@ -131,42 +131,49 @@ public sealed partial class ShellWindow : Window
             glyphText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Glyph)) });
             glyphText.SetBinding(TextBlock.ForegroundProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
 
-            var glow = new Border
+            var badgeGlow = new Border
             {
-                Width = 46,
-                Height = 46,
-                CornerRadius = new CornerRadius(16),
-                Opacity = 0.18,
+                Width = 56,
+                Height = 56,
+                CornerRadius = new CornerRadius(28),
+                Opacity = 0.14,
             };
-            glow.SetBinding(Border.BackgroundProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
+            badgeGlow.SetBinding(Border.BackgroundProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
 
-            var titleText = CreateMutedText(string.Empty, 11);
+            var badgeRing = new Border
+            {
+                Width = 56,
+                Height = 56,
+                CornerRadius = new CornerRadius(28),
+                BorderThickness = new Thickness(1.4),
+                Background = ResolveBrush("SurfaceBrush", "#102131"),
+            };
+            badgeRing.SetBinding(Border.BorderBrushProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
+
+            var titleText = CreateMutedText(string.Empty, 12);
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
-            var valueText = CreatePrimaryText(string.Empty, 26, true);
+            var valueText = CreatePrimaryText(string.Empty, 28, true);
             valueText.FontFamily = new FontFamily("Bahnschrift");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
             var captionText = CreateSecondaryText(string.Empty, 12);
             captionText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Caption)) });
 
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.Children.Add(new Grid
+            var badgeHost = new Grid
             {
-                Width = 46,
-                Height = 46,
+                Width = 56,
+                Height = 56,
                 Children =
                 {
-                    glow,
+                    badgeGlow,
+                    badgeRing,
                     glyphText,
                 },
-            });
+            };
 
             var details = new StackPanel
             {
-                Margin = new Thickness(14, 0, 0, 0),
                 Spacing = 4,
                 Children =
                 {
@@ -175,7 +182,15 @@ public sealed partial class ShellWindow : Window
                     captionText,
                 },
             };
-            row.Children.Add(details);
+
+            var contentGrid = new Grid
+            {
+                ColumnSpacing = 16,
+            };
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            contentGrid.Children.Add(badgeHost);
+            contentGrid.Children.Add(details);
             Grid.SetColumn(details, 1);
 
             var summaryCard = new Border
@@ -184,9 +199,25 @@ public sealed partial class ShellWindow : Window
                 Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
-                Padding = new Thickness(14),
-                Child = row,
+                CornerRadius = new CornerRadius(22),
+                Padding = new Thickness(18, 16, 18, 16),
+                MinHeight = 122,
+                Child = new StackPanel
+                {
+                    Spacing = 14,
+                    Children =
+                    {
+                        new Border
+                        {
+                            Width = 96,
+                            Height = 3,
+                            CornerRadius = new CornerRadius(999),
+                            Background = ResolveBrush("AccentBrush", "#66E7FF"),
+                            Opacity = 0.55,
+                        },
+                        contentGrid,
+                    },
+                },
             };
             _summaryHost.Children.Add(summaryCard);
             var index = _summaryHost.Children.Count - 1;
@@ -339,6 +370,15 @@ public sealed partial class ShellWindow : Window
     {
         try
         {
+            if (!TryNormalizeScrapeInput(_viewModel.ScrapeIntervalInput, out var normalizedScrapeInput))
+            {
+                _activeDeckEditor = DeckEditorMode.Scrape;
+                _viewModel.StatusText = "Scrape interval must be a whole number of seconds between 1 and 60.";
+                UpdateStatusText();
+                RenderEditableControlDeck();
+                return;
+            }
+
             if (!MainViewModel.TryParseRetentionInput(_viewModel.RetentionHoursInput, out _, out var normalizedRetentionInput))
             {
                 _activeDeckEditor = DeckEditorMode.Retention;
@@ -348,7 +388,9 @@ public sealed partial class ShellWindow : Window
                 return;
             }
 
+            _viewModel.ScrapeIntervalInput = normalizedScrapeInput;
             _viewModel.RetentionHoursInput = normalizedRetentionInput;
+            _viewModel.StorageDirectory = _viewModel.StorageDirectory.Trim();
 
             _viewModel.StatusText = "Applying settings";
             UpdateStatusText();
@@ -517,6 +559,22 @@ public sealed partial class ShellWindow : Window
         }
     }
 
+    private void OnScrapeInputChanged(object? sender, EventArgs e)
+    {
+        if (sender is InlineTextEntry entry)
+        {
+            _viewModel.ScrapeIntervalInput = entry.Text;
+        }
+    }
+
+    private void OnStorageInputChanged(object? sender, EventArgs e)
+    {
+        if (sender is InlineTextEntry entry)
+        {
+            _viewModel.StorageDirectory = entry.Text;
+        }
+    }
+
     private void StepScrapeInterval(int direction)
     {
         var next = MoveThroughPresets(_viewModel.EffectiveScrapeIntervalSeconds, ScrapeIntervalPresets, direction);
@@ -596,6 +654,30 @@ public sealed partial class ShellWindow : Window
 
         _viewModel.StorageDirectory = value.Trim();
         RenderEditableControlDeck();
+    }
+
+    private static bool TryNormalizeScrapeInput(string? text, out string normalizedText)
+    {
+        normalizedText = string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        if (!int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return false;
+        }
+
+        if (seconds is < 1 or > 60)
+        {
+            return false;
+        }
+
+        normalizedText = seconds == VaktrConfig.DefaultScrapeIntervalSeconds
+            ? string.Empty
+            : seconds.ToString(CultureInfo.InvariantCulture);
+        return true;
     }
 
     private async void OnBrowseStorageClick(object? sender, EventArgs e)
@@ -765,7 +847,7 @@ public sealed partial class ShellWindow : Window
     private int DetermineSummaryColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        return width >= 1600 ? 4 : width >= 900 ? 2 : 1;
+        return width >= 1520 ? 4 : width >= 860 ? 2 : 1;
     }
 
     private async Task TryLoadHistoryAsync(VaktrConfig config)

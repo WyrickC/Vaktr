@@ -17,10 +17,10 @@ public sealed partial class ShellWindow
         var shellBorder = new Border
         {
             Background = ResolveBrush("ShellBackgroundBrush", "#0B1622"),
-            BorderBrush = ResolveBrush("ShellStrokeBrush", "#1E3144"),
+            BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(26),
-            Padding = new Thickness(22),
+            CornerRadius = new CornerRadius(30),
+            Padding = new Thickness(24, 22, 24, 24),
             Child = BuildShellStack(),
         };
 
@@ -39,11 +39,12 @@ public sealed partial class ShellWindow
             IsTabStop = false,
             Content = new Grid
             {
-                Margin = new Thickness(18),
+                Margin = new Thickness(18, 18, 18, 24),
                 Children =
                 {
-                    CreateBackdropGlow(380, 380, HorizontalAlignment.Left, VerticalAlignment.Top, new Thickness(-50, -40, 0, 0), "AccentHaloBrush", "#1B68DAFF"),
-                    CreateBackdropGlow(320, 320, HorizontalAlignment.Right, VerticalAlignment.Top, new Thickness(0, 20, -40, 0), "WarningHaloBrush", "#15FF9B54"),
+                    CreateBackdropGlow(420, 420, HorizontalAlignment.Left, VerticalAlignment.Top, new Thickness(-72, -62, 0, 0), "AccentHaloBrush", "#1B68DAFF"),
+                    CreateBackdropGlow(420, 420, HorizontalAlignment.Center, VerticalAlignment.Top, new Thickness(0, -90, 0, 0), "AccentHaloBrush", "#1258D6FF"),
+                    CreateBackdropGlow(340, 340, HorizontalAlignment.Right, VerticalAlignment.Top, new Thickness(0, 28, -52, 0), "WarningHaloBrush", "#15FF9B54"),
                     shellBorder,
                 },
             },
@@ -64,21 +65,60 @@ public sealed partial class ShellWindow
             {
                 BuildHeader(),
                 BuildControlsSurface(),
-                CreateSectionHeader("AT A GLANCE", "Fast launch, low overhead, and local-only telemetry with sensible defaults."),
+                CreateSectionBand("AT A GLANCE", "Fast launch, low overhead, and local-only telemetry with sensible defaults."),
                 BuildSummarySurface(),
-                CreateSectionHeader("LIVE BOARD", "Time-series panels for CPU, memory, disk I/O, network activity, and drive-usage gauges."),
+                CreateSectionBand("LIVE BOARD", "Time-series panels for CPU, memory, disk I/O, network activity, and drive-usage gauges."),
                 _dashboardGrid,
                 BuildFooter(),
             },
         };
     }
 
-    private Grid BuildHeader()
+    private FrameworkElement BuildHeader()
     {
         StartupTrace.Write("BuildHeader // polished-v19");
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var topRail = new Grid
+        {
+            Margin = new Thickness(2, 0, 2, 0),
+        };
+        topRail.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topRail.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+        topRail.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var railLead = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                CreateMiniBrandMark(),
+                CreateAccentText("LOCAL NODE / READY OUT OF THE BOX", 11, 120),
+            },
+        };
+        topRail.Children.Add(railLead);
+
+        var railLine = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(18, 0, 18, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            Opacity = 0.65,
+        };
+        topRail.Children.Add(railLine);
+        Grid.SetColumn(railLine, 1);
+
+        var topRailStatus = CreateTopStatusPill(_statusText);
+        topRail.Children.Add(topRailStatus);
+        Grid.SetColumn(topRailStatus, 2);
+
+        var heroGrid = new Grid
+        {
+            ColumnSpacing = 24,
+        };
+        heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var brandRow = new Grid
         {
@@ -91,64 +131,79 @@ public sealed partial class ShellWindow
         var titleStack = new StackPanel
         {
             Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                CreateAccentText("LOCAL NODE // READY OUT OF THE BOX", 12, 110),
-                new Border
+                CreatePrimaryText("Vaktr", 38, true),
+                CreateSecondaryText("A local-first telemetry board for this Windows machine, with live timelines, compact gauges, and zero backend setup.", 17),
+                CreateMutedText("Defaults stay sane: dark mode, 2 second scrape, 24 hour retention, and machine-local SQLite storage.", 13),
+                new StackPanel
                 {
-                    Width = 148,
-                    Height = 4,
-                    CornerRadius = new CornerRadius(999),
-                    Background = ResolveBrush("AccentBrush", "#66E7FF"),
-                    Opacity = 0.88,
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children =
+                    {
+                        CreateHeroSpecPill("Theme", "Dark"),
+                        CreateHeroSpecPill("Scrape", "2s live lane"),
+                        CreateHeroSpecPill("Storage", "Local app data"),
+                    },
                 },
-                CreatePrimaryText("Vaktr", 34, true),
-                CreateSecondaryText("A local-first telemetry board with live timelines, compact gauges, and zero backend setup."),
-                CreateMutedText("Defaults: Dark theme, 2 second scrape, 24 hour retention, machine-local storage.", 12),
             },
         };
         brandRow.Children.Add(titleStack);
         Grid.SetColumn(titleStack, 1);
 
-        var actionsStack = new StackPanel
+        var metricsRail = new StackPanel
         {
-            Spacing = 10,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 12,
+            Width = 308,
             Children =
             {
-                new Border
+                CreateInfoPanel("Last sample", "The board updates live as soon as the local collector streams a new scrape."),
+                CreateInfoPanel("Interaction", "Drag any chart to zoom a time slice. Double-click to reset back out."),
+                CreateInfoPanel("Storage", "SQLite stays local to this machine and compacts older samples automatically."),
+            },
+        };
+
+        heroGrid.Children.Add(brandRow);
+        heroGrid.Children.Add(metricsRail);
+        Grid.SetColumn(metricsRail, 1);
+
+        var heroBorder = new Border
+        {
+            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(30),
+            Padding = new Thickness(26, 24, 26, 24),
+            Child = new StackPanel
+            {
+                Spacing = 18,
+                Children =
                 {
-                    Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-                    BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(16),
-                    Padding = new Thickness(12, 10, 12, 10),
-                    Child = _statusText,
-                },
-                new Border
-                {
-                    Background = ResolveBrush("SurfaceBrush", "#102131"),
-                    BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(16),
-                    Padding = new Thickness(12),
-                    Child = new StackPanel
+                    new Border
                     {
-                        Spacing = 4,
-                        Children =
-                        {
-                            CreateAccentText("LOCAL DB", 11, 70),
-                            CreateSecondaryText("%LocalAppData%\\Vaktr\\Data", 12),
-                        },
+                        Width = 196,
+                        Height = 3,
+                        CornerRadius = new CornerRadius(999),
+                        Background = ResolveBrush("AccentBrush", "#66E7FF"),
+                        Opacity = 0.88,
+                        HorizontalAlignment = HorizontalAlignment.Center,
                     },
+                    heroGrid,
                 },
             },
         };
 
-        grid.Children.Add(brandRow);
-        grid.Children.Add(actionsStack);
-        Grid.SetColumn(actionsStack, 1);
-        return grid;
+        return new StackPanel
+        {
+            Spacing = 18,
+            Children =
+            {
+                topRail,
+                heroBorder,
+            },
+        };
     }
 
     private Border BuildControlsSurface()
@@ -156,10 +211,10 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildControlsSurface // polished-v19");
         var root = new StackPanel
         {
-            Spacing = 14,
+            Spacing = 16,
             Children =
             {
-                CreateSectionHeader("CONTROL DECK", "Click a field to tune scrape timing, retention, or storage. Defaults stay local and safe if you leave them alone."),
+                CreateSectionHeader("CONTROL DECK", "Tune scrape timing, retention, and storage in place. Defaults stay safe and machine-local if you leave them alone."),
                 _controlsBodyHost,
             },
         };
@@ -169,9 +224,25 @@ public sealed partial class ShellWindow
             Background = ResolveBrush("SurfaceBrush", "#102131"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(18),
-            Child = root,
+            CornerRadius = new CornerRadius(30),
+            Padding = new Thickness(22, 20, 22, 20),
+            Child = new StackPanel
+            {
+                Spacing = 16,
+                Children =
+                {
+                    new Border
+                    {
+                        Width = 160,
+                        Height = 3,
+                        CornerRadius = new CornerRadius(999),
+                        Background = ResolveBrush("AccentBrush", "#66E7FF"),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Opacity = 0.82,
+                    },
+                    root,
+                },
+            },
         };
     }
 
@@ -187,18 +258,18 @@ public sealed partial class ShellWindow
         settingsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         settingsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        AddStatusField(settingsGrid, 0, 0, "Scrape", $"{_viewModel.EffectiveScrapeIntervalSeconds}s");
-        AddStatusField(settingsGrid, 0, 1, "Retention", $"{_viewModel.EffectiveRetentionHours}h");
-        AddStatusField(settingsGrid, 0, 2, "Storage", GetStorageSummaryText());
+        AddStatusField(settingsGrid, 0, 0, "Collection", FormatScrapeInterval(_viewModel.EffectiveScrapeIntervalSeconds), "Default live lane");
+        AddStatusField(settingsGrid, 0, 1, "Retention", GetRetentionFieldValue(), "Local rollups keep older data lighter");
+        AddStatusField(settingsGrid, 0, 2, "Storage path", GetStorageFieldTitle(), GetStorageFieldCaption());
 
         _controlsBodyHost.Child = new StackPanel
         {
-            Spacing = 12,
+            Spacing = 14,
             Children =
             {
                 settingsGrid,
-                CreateSecondaryText(GetBehaviorSummaryText(), 12),
-                CreateMutedText("The deck becomes editable after startup settles. Recent samples stay full resolution for 6 hours, then older history compacts into 1-minute rollups automatically.", 12),
+                CreateSecondaryText("Vaktr keeps recent telemetry at full fidelity for 6 hours, then rolls older history into lighter 1-minute slices automatically.", 12),
+                CreateMutedText(GetBehaviorSummaryText(), 12),
             },
         };
     }
@@ -244,14 +315,14 @@ public sealed partial class ShellWindow
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(16),
+            CornerRadius = new CornerRadius(24),
+            Padding = new Thickness(18),
             Child = new StackPanel
             {
-                Spacing = 14,
+                Spacing = 16,
                 Children =
                 {
-                    CreateSectionHeader("COLLECTION", "Click a field to tune scrape timing, retention, or storage without leaving the main board."),
+                    CreateSectionHeader("COLLECTION", "Click a field to edit it right here. Presets stay fast, and typed values give you finer control when you need it."),
                     fieldGrid,
                     CreateActiveDeckEditorSurface(),
                 },
@@ -269,8 +340,8 @@ public sealed partial class ShellWindow
             Spacing = 4,
             Children =
             {
-                CreateMutedText("Storage stays machine-local by default.", 12),
-                CreateSecondaryText($"{VaktrConfig.DefaultStorageDirectory} // not roaming", 12),
+                CreateMutedText("Default storage stays machine-local, not roaming.", 12),
+                CreateSecondaryText($"{VaktrConfig.DefaultStorageDirectory} // drag a folder in or type one directly", 12),
             },
         });
 
@@ -299,14 +370,12 @@ public sealed partial class ShellWindow
     private UIElement BuildSummarySurface()
     {
         StartupTrace.Write("BuildSummarySurface // polished-v19");
-        return new Border
+        return new Grid
         {
-            Background = ResolveBrush("SurfaceBrush", "#102131"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(16),
-            Child = _summaryHost,
+            Children =
+            {
+                _summaryHost,
+            },
         };
     }
 
@@ -334,11 +403,11 @@ public sealed partial class ShellWindow
 
         return new Border
         {
-            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(14),
+            CornerRadius = new CornerRadius(24),
+            Padding = new Thickness(18, 16, 18, 16),
             Child = grid,
         };
     }
@@ -387,7 +456,7 @@ public sealed partial class ShellWindow
         Grid.SetColumnSpan(element, columnSpan);
     }
 
-    private static void AddStatusField(Grid grid, int row, int column, string label, string value)
+    private static void AddStatusField(Grid grid, int row, int column, string label, string value, string caption)
     {
         while (grid.RowDefinitions.Count <= row)
         {
@@ -403,11 +472,12 @@ public sealed partial class ShellWindow
             Padding = new Thickness(12),
             Child = new StackPanel
             {
-                Spacing = 4,
+                Spacing = 6,
                 Children =
                 {
-                    CreateMutedText(label, 11),
-                    CreatePrimaryText(value, 16, true),
+                    CreateAccentText(label.ToUpperInvariant(), 10, 70),
+                    CreatePrimaryText(value, 18, true),
+                    CreateSecondaryText(caption, 12),
                 },
             },
         };
@@ -429,19 +499,41 @@ public sealed partial class ShellWindow
 
     private Border CreateScrapeEditorSurface()
     {
+        var scrapeBox = CreateDeckInlineEntry(
+            string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput)
+                ? string.Empty
+                : _viewModel.ScrapeIntervalInput,
+            "2");
+        scrapeBox.TextChanged += OnScrapeInputChanged;
+
         return CreateFocusedEditorSurface(
             "SCRAPE",
-            "Pick how often Vaktr samples the local node.",
-            CreateChipWrapRow(
-                CreatePresetChip("-1s", false, (_, _) => NudgeScrapeInterval(-1)),
-                CreatePresetChip("+1s", false, (_, _) => NudgeScrapeInterval(1)),
-                CreatePresetChip("1s", _viewModel.EffectiveScrapeIntervalSeconds == 1, (_, _) => SetScrapeInterval(1)),
-                CreatePresetChip("2s", string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput), (_, _) => ResetScrapeInterval()),
-                CreatePresetChip("5s", _viewModel.EffectiveScrapeIntervalSeconds == 5, (_, _) => SetScrapeInterval(5)),
-                CreatePresetChip("10s", _viewModel.EffectiveScrapeIntervalSeconds == 10, (_, _) => SetScrapeInterval(10)),
-                CreatePresetChip("15s", _viewModel.EffectiveScrapeIntervalSeconds == 15, (_, _) => SetScrapeInterval(15)),
-                CreatePresetChip("30s", _viewModel.EffectiveScrapeIntervalSeconds == 30, (_, _) => SetScrapeInterval(30)),
-                CreatePresetChip("60s", _viewModel.EffectiveScrapeIntervalSeconds == 60, (_, _) => SetScrapeInterval(60))),
+            "Choose how often Vaktr samples the local node. Type seconds directly or snap to a preset.",
+            new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new StackPanel
+                    {
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateFieldLabel("Scrape interval (seconds)"),
+                            scrapeBox,
+                            CreateMutedText("Blank keeps the default 2 second cadence. Valid range: 1 to 60 seconds.", 12),
+                        },
+                    },
+                    CreateChipWrapRow(
+                        CreatePresetChip("1s", _viewModel.EffectiveScrapeIntervalSeconds == 1, (_, _) => SetScrapeInterval(1)),
+                        CreatePresetChip("2s", string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput), (_, _) => ResetScrapeInterval()),
+                        CreatePresetChip("5s", _viewModel.EffectiveScrapeIntervalSeconds == 5, (_, _) => SetScrapeInterval(5)),
+                        CreatePresetChip("10s", _viewModel.EffectiveScrapeIntervalSeconds == 10, (_, _) => SetScrapeInterval(10)),
+                        CreatePresetChip("15s", _viewModel.EffectiveScrapeIntervalSeconds == 15, (_, _) => SetScrapeInterval(15)),
+                        CreatePresetChip("30s", _viewModel.EffectiveScrapeIntervalSeconds == 30, (_, _) => SetScrapeInterval(30)),
+                        CreatePresetChip("60s", _viewModel.EffectiveScrapeIntervalSeconds == 60, (_, _) => SetScrapeInterval(60))),
+                },
+            },
             "2 seconds is the default because it feels live without making the collector noisy.");
     }
 
@@ -482,8 +574,12 @@ public sealed partial class ShellWindow
 
     private Border CreateStorageEditorSurface()
     {
-        var pathText = CreatePrimaryText(GetStorageSummaryText(), 16, true);
-        pathText.FontFamily = new FontFamily("Bahnschrift");
+        var storageBox = CreateDeckInlineEntry(
+            string.IsNullOrWhiteSpace(_viewModel.StorageDirectory)
+                ? string.Empty
+                : _viewModel.StorageDirectory.Trim(),
+            VaktrConfig.DefaultStorageDirectory);
+        storageBox.TextChanged += OnStorageInputChanged;
 
         var dropSurface = new Border
         {
@@ -498,8 +594,9 @@ public sealed partial class ShellWindow
                 Spacing = 6,
                 Children =
                 {
-                    pathText,
-                    CreateMutedText("Drop a folder here or browse for one. Leave it blank to use the safe local default.", 12),
+                    CreateFieldLabel("Storage directory"),
+                    storageBox,
+                    CreateMutedText("Drop a folder here, browse for one, or type a path directly. Leave it blank to use the safe local default.", 12),
                 },
             },
         };
@@ -518,7 +615,7 @@ public sealed partial class ShellWindow
                 Spacing = 14,
                 Children =
                 {
-                    CreateSectionHeader("STORAGE", "Vaktr keeps telemetry machine-local, so it belongs in Local App Data instead of Roaming."),
+                    CreateSectionHeader("STORAGE", "Vaktr keeps telemetry machine-local, so Local App Data is the sensible default instead of Roaming."),
                     dropSurface,
                     CreateChipWrapRow(
                         CreateActionChip("Browse folder", OnBrowseStorageClick, filled: true),
@@ -553,20 +650,55 @@ public sealed partial class ShellWindow
 
     private Border CreateSettingFieldCard(string title, string value, string caption, bool isActive, EventHandler onClick)
     {
+        var token = new Border
+        {
+            Width = 40,
+            Height = 40,
+            CornerRadius = new CornerRadius(20),
+            BorderBrush = ResolveBrush(isActive ? "AccentStrongBrush" : "SurfaceStrokeBrush", isActive ? "#B7F7FF" : "#27425E"),
+            BorderThickness = new Thickness(1),
+            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            Child = new TextBlock
+            {
+                Text = title.Length >= 3 ? title[..3].ToUpperInvariant() : title.ToUpperInvariant(),
+                FontFamily = new FontFamily("Bahnschrift"),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ResolveBrush(isActive ? "AccentStrongBrush" : "AccentBrush", isActive ? "#B7F7FF" : "#66E7FF"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+
+        var topGrid = new Grid();
+        topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topGrid.Children.Add(token);
+        topGrid.Children.Add(new StackPanel
+        {
+            Margin = new Thickness(12, 0, 0, 0),
+            Spacing = 6,
+            Children =
+            {
+                CreateAccentText(title.ToUpperInvariant(), 10, 70),
+                CreatePrimaryText(value, 17, true),
+            },
+        });
+        Grid.SetColumn(topGrid.Children[^1], 1);
+
         var border = new Border
         {
             Background = ResolveBrush(isActive ? "SurfaceStrongBrush" : "SurfaceElevatedBrush", isActive ? "#183148" : "#15283B"),
             BorderBrush = ResolveBrush(isActive ? "AccentStrongBrush" : "SurfaceStrokeBrush", isActive ? "#B7F7FF" : "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(14),
+            CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(16),
             Child = new StackPanel
             {
-                Spacing = 6,
+                Spacing = 10,
                 Children =
                 {
-                    CreateMutedText(title.ToUpperInvariant(), 11),
-                    CreatePrimaryText(value, 18, true),
+                    topGrid,
                     CreateSecondaryText(caption, 12),
                 },
             },
@@ -705,9 +837,9 @@ public sealed partial class ShellWindow
     private static Border CreateBrandPlaceholder() =>
         new()
         {
-            Width = 92,
-            Height = 92,
-            CornerRadius = new CornerRadius(24),
+            Width = 96,
+            Height = 96,
+            CornerRadius = new CornerRadius(28),
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
@@ -735,15 +867,15 @@ public sealed partial class ShellWindow
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(16),
+            CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(18, 16, 18, 16),
             Child = new StackPanel
             {
-                Spacing = 4,
+                Spacing = 6,
                 Children =
                 {
-                    CreateMutedText(title, 11),
-                    CreateSecondaryText(text, 12),
+                    CreateAccentText(title.ToUpperInvariant(), 10, 70),
+                    CreatePrimaryText(text, 16, true),
                 },
             },
         };
@@ -771,6 +903,109 @@ public sealed partial class ShellWindow
                 {
                     CreateAccentText(eyebrow, 11, 80),
                     CreateSecondaryText(text, 13),
+                },
+            },
+        };
+
+    private static Grid CreateSectionBand(string eyebrow, string text)
+    {
+        var grid = new Grid
+        {
+            Margin = new Thickness(4, 2, 4, 0),
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        grid.Children.Add(new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                CreateAccentText(eyebrow, 11, 90),
+                CreateSecondaryText(text, 14),
+            },
+        });
+
+        var line = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(18, 14, 0, 0),
+            Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            Opacity = 0.65,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        grid.Children.Add(line);
+        Grid.SetColumn(line, 1);
+        return grid;
+    }
+
+    private static Border CreateTopStatusPill(UIElement content) =>
+        new()
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(999),
+            Padding = new Thickness(14, 9, 14, 9),
+            Child = content,
+        };
+
+    private static Border CreateMiniBrandMark() =>
+        new()
+        {
+            Width = 30,
+            Height = 30,
+            CornerRadius = new CornerRadius(10),
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            Child = new TextBlock
+            {
+                Text = "V",
+                FontFamily = new FontFamily("Bahnschrift"),
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ResolveBrush("AccentBrush", "#66E7FF"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+
+    private static Border CreateInfoPanel(string title, string value) =>
+        new()
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(14),
+            Child = new StackPanel
+            {
+                Spacing = 6,
+                Children =
+                {
+                    CreateAccentText(title.ToUpperInvariant(), 10, 70),
+                    CreateSecondaryText(value, 12),
+                },
+            },
+        };
+
+    private static Border CreateHeroSpecPill(string label, string value) =>
+        new()
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(999),
+            Padding = new Thickness(12, 8, 12, 8),
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Children =
+                {
+                    CreateMutedText(label, 12),
+                    CreateSecondaryText(value, 12),
                 },
             },
         };
