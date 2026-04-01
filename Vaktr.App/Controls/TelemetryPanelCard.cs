@@ -21,7 +21,8 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly Border _cardBorder;
     private readonly Border _badgeBorder;
     private readonly Border _accentBar;
-    private readonly TextBlock _badgeText;
+    private readonly Border _edgeGlow;
+    private readonly Grid _badgeIconHost;
     private readonly TextBlock _footerText;
     private readonly TextBlock _scaleText;
     private readonly TextBlock _titleText;
@@ -43,31 +44,52 @@ public sealed class TelemetryPanelCard : UserControl
 
     public TelemetryPanelCard()
     {
-        MinHeight = 396;
+        MinHeight = 388;
         HorizontalAlignment = HorizontalAlignment.Stretch;
 
-        _badgeText = CreateTextBlock("Bahnschrift", 11, FontWeights.SemiBold);
+        _badgeIconHost = new Grid
+        {
+            Width = 18,
+            Height = 18,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
         _footerText = CreateTextBlock(fontSize: 11);
         _scaleText = CreateTextBlock("Bahnschrift", 11, FontWeights.SemiBold);
-        _titleText = CreateTextBlock("Segoe UI", 22, FontWeights.SemiBold);
-        _currentValueText = CreateTextBlock("Bahnschrift", 28, FontWeights.SemiBold);
+        _titleText = CreateTextBlock("Segoe UI Variable Display", 22, FontWeights.SemiBold);
+        _currentValueText = CreateTextBlock("Segoe UI Variable Display", 27, FontWeights.SemiBold);
         _secondaryValueText = CreateTextBlock(fontSize: 13);
 
         _badgeBorder = new Border
         {
-            CornerRadius = new CornerRadius(12),
+            Width = 40,
+            Height = 40,
+            CornerRadius = new CornerRadius(14),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(10, 5, 10, 5),
-            Child = _badgeText,
+            Background = CreateSurfaceGradient("#102131", "#17304A"),
+            Child = _badgeIconHost,
         };
 
         _accentBar = new Border
         {
-            Width = 86,
-            Height = 2,
+            Width = 72,
+            Height = 1.5,
             CornerRadius = new CornerRadius(1),
             Background = ResolveBrush("AccentBrush", "#66E7FF"),
-            Opacity = 0.7,
+            Opacity = 0.56,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+
+        _edgeGlow = new Border
+        {
+            Width = 3,
+            Height = 220,
+            CornerRadius = new CornerRadius(2),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(-2, 6, 0, 6),
+            Opacity = 0.85,
+            IsHitTestVisible = false,
         };
 
         _oneMinuteButton = CreateRangeButton("1m", TimeRangePreset.OneMinute);
@@ -77,7 +99,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         _visualGrid = new Grid
         {
-            ColumnSpacing = 14,
+            ColumnSpacing = 18,
         };
         _visualGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _visualGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -92,8 +114,8 @@ public sealed class TelemetryPanelCard : UserControl
 
         _chart = new TelemetryChart
         {
-            Height = 176,
-            MinHeight = 176,
+            Height = 186,
+            MinHeight = 186,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         _chart.ZoomSelectionRequested += OnChartZoomSelectionRequested;
@@ -101,11 +123,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _chartFrame = new Border
         {
-            Background = ResolveBrush("PanelOverlayBrush", "#11283C"),
+            Background = CreateSurfaceGradient("#0D1A2B", "#12243A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(12, 12, 12, 12),
+            Padding = new Thickness(14, 14, 14, 12),
             Child = _chart,
         };
 
@@ -119,7 +141,7 @@ public sealed class TelemetryPanelCard : UserControl
         };
         _legendScroller = new ScrollViewer
         {
-            MaxHeight = 206,
+            MaxHeight = 214,
             VerticalScrollMode = ScrollMode.Enabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollMode = ScrollMode.Disabled,
@@ -143,7 +165,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         var rangeShell = new Border
         {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            Background = CreateSurfaceGradient("#0F2032", "#14283F"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(14),
@@ -171,7 +193,7 @@ public sealed class TelemetryPanelCard : UserControl
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(10),
             Padding = new Thickness(10, 4, 10, 4),
             Child = _scaleText,
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -198,20 +220,27 @@ public sealed class TelemetryPanelCard : UserControl
 
         _cardBorder = new Border
         {
-            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            Background = CreateSurfaceGradient("#0E1A2B", "#122339"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(24),
             Padding = new Thickness(18, 18, 18, 18),
-            Child = new StackPanel
+            Child = new Grid
             {
-                Spacing = 14,
                 Children =
                 {
-                    _accentBar,
-                    headerGrid,
-                    _visualGrid,
-                    _legendScroller,
+                    _edgeGlow,
+                    new StackPanel
+                    {
+                        Spacing = 14,
+                        Children =
+                        {
+                            _accentBar,
+                            headerGrid,
+                            _visualGrid,
+                            _legendScroller,
+                        },
+                    },
                 },
             },
         };
@@ -280,7 +309,7 @@ public sealed class TelemetryPanelCard : UserControl
         var panel = Panel;
         if (panel is null)
         {
-            _badgeText.Text = "LIVE";
+            UpdateBadgeIcon(null);
             _footerText.Text = string.Empty;
             _scaleText.Text = string.Empty;
             _titleText.Text = "Telemetry";
@@ -296,7 +325,7 @@ public sealed class TelemetryPanelCard : UserControl
             return;
         }
 
-        _badgeText.Text = panel.Badge;
+        UpdateBadgeIcon(panel);
         _footerText.Text = panel.FooterText;
         _titleText.Text = panel.Title;
         _currentValueText.Text = panel.CurrentValue;
@@ -383,10 +412,10 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void ApplyPalette(MetricPanelViewModel panel)
     {
-        _badgeBorder.Background = ResolveBrush("SurfaceBrush", "#102131");
+        _badgeBorder.Background = CreateSurfaceGradient("#102131", "#17304A");
         _badgeBorder.BorderBrush = panel.AccentBrush;
         _accentBar.Background = panel.AccentBrush;
-        _badgeText.Foreground = panel.AccentBrush;
+        _edgeGlow.Background = panel.AccentBrush;
         _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _scaleText.Foreground = ResolveBrush("AccentStrongBrush", "#B7F7FF");
         _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
@@ -400,7 +429,9 @@ public sealed class TelemetryPanelCard : UserControl
             ? ResolveBrush("AccentStrongBrush", "#9FEFFF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _cardBorder.Opacity = 1.0;
-        _cardBorder.Background = ResolveBrush(isHovered ? "SurfaceStrongBrush" : "SurfaceBrush", isHovered ? "#183148" : "#102131");
+        _cardBorder.Background = isHovered
+            ? CreateSurfaceGradient("#112134", "#17304A")
+            : CreateSurfaceGradient("#0E1A2B", "#122339");
     }
 
     private static ActionChip CreateRangeButton(string text, TimeRangePreset preset)
@@ -478,13 +509,31 @@ public sealed class TelemetryPanelCard : UserControl
 
         return (new Border
         {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            Background = CreateSurfaceGradient("#101D2F", "#14253A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(12),
             Padding = new Thickness(12, 10, 12, 10),
             Child = row,
         }, valueText);
+    }
+
+    private void UpdateBadgeIcon(MetricPanelViewModel? panel)
+    {
+        var iconKey = panel switch
+        {
+            null => "collection",
+            { Category: MetricCategory.Cpu } => "cpu",
+            { Category: MetricCategory.Memory } => "memory",
+            { Category: MetricCategory.Disk, PrefersGaugeVisual: true } => "drive",
+            { Category: MetricCategory.Disk } => "disk",
+            { Category: MetricCategory.Network } => "network",
+            _ => "collection",
+        };
+
+        var accentBrush = panel?.AccentBrush ?? ResolveBrush("AccentBrush", "#66E7FF");
+        _badgeIconHost.Children.Clear();
+        _badgeIconHost.Children.Add(IconFactory.CreateIcon(iconKey, accentBrush, 18));
     }
 
     private static T? FindParent<T>(DependencyObject? start)
@@ -514,7 +563,7 @@ public sealed class TelemetryPanelCard : UserControl
     private static TextBlock CreateTextBlock(string? fontFamily = null, double fontSize = 12, Windows.UI.Text.FontWeight? fontWeight = null) =>
         new()
         {
-            FontFamily = string.IsNullOrWhiteSpace(fontFamily) ? new FontFamily("Segoe UI") : new FontFamily(fontFamily),
+            FontFamily = string.IsNullOrWhiteSpace(fontFamily) ? new FontFamily("Segoe UI Variable Text") : new FontFamily(fontFamily),
             FontSize = fontSize,
             FontWeight = fontWeight ?? FontWeights.Normal,
             TextWrapping = TextWrapping.WrapWholeWords,
@@ -536,6 +585,20 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         return BrushFactory.CreateBrush(fallbackHex);
+    }
+
+    private static Brush CreateSurfaceGradient(string startHex, string endHex)
+    {
+        return new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops = new GradientStopCollection
+            {
+                new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
+                new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
+            },
+        };
     }
     private static string FormatValue(double value, MetricUnit unit) => unit switch
     {

@@ -95,11 +95,11 @@ public sealed class TelemetryChart : UserControl
         _hoverTooltip = new Border
         {
             Visibility = Visibility.Collapsed,
-            Background = ResolveBrush("SurfaceStrongBrush", "#183148"),
+            Background = CreateSurfaceGradient("#15283B", "#203851"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(11, 9, 11, 9),
             Child = _hoverTooltipText,
             IsHitTestVisible = false,
         };
@@ -284,11 +284,11 @@ public sealed class TelemetryChart : UserControl
         {
             Width = plotWidth,
             Height = plotHeight,
-            RadiusX = 14,
-            RadiusY = 14,
+            RadiusX = 16,
+            RadiusY = 16,
             Stroke = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             StrokeThickness = 1,
-            Fill = ResolveBrush("PanelOverlayBrush", "#11283C"),
+            Fill = CreateSurfaceGradient("#0C1828", "#112338"),
             Opacity = 0.98,
         };
 
@@ -296,8 +296,8 @@ public sealed class TelemetryChart : UserControl
         {
             Width = plotWidth,
             Height = plotHeight,
-            RadiusX = 14,
-            RadiusY = 14,
+            RadiusX = 16,
+            RadiusY = 16,
             Fill = ResolveBrush("AccentSoftBrush", "#10394D"),
             Opacity = 0.08,
         };
@@ -324,7 +324,7 @@ public sealed class TelemetryChart : UserControl
 
     private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue)
     {
-        var gridBrush = ResolveBrush("SurfaceGridBrush", "#22405C");
+        var gridBrush = ResolveBrush("SurfaceGridBrush", "#35587A");
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
         var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
         var bottomY = TopPadding + plotHeight;
@@ -337,8 +337,8 @@ public sealed class TelemetryChart : UserControl
             {
                 Width = plotWidth,
                 Height = plotHeight / divisions,
-                Fill = ResolveBrush("SurfaceGridBrush", index % 2 == 0 ? "#22405C" : "#183149"),
-                Opacity = index % 2 == 0 ? 0.085 : 0.045,
+                Fill = ResolveBrush("SurfaceGridBrush", index % 2 == 0 ? "#274768" : "#1B3650"),
+                Opacity = index % 2 == 0 ? 0.2 : 0.12,
             });
 
             Canvas.SetLeft(_canvas.Children[^1], LeftPadding);
@@ -352,7 +352,7 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.38 : 0.24,
+                Opacity = index is 0 || index == divisions ? 0.66 : 0.46,
                 X1 = LeftPadding,
                 X2 = LeftPadding + plotWidth,
                 Y1 = y,
@@ -367,7 +367,7 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.24 : 0.14,
+                Opacity = index is 0 || index == divisions ? 0.4 : 0.28,
                 X1 = x,
                 X2 = x,
                 Y1 = TopPadding,
@@ -594,6 +594,20 @@ public sealed class TelemetryChart : UserControl
         }
 
         return BrushFactory.CreateBrush(fallbackHex);
+    }
+
+    private static Brush CreateSurfaceGradient(string startHex, string endHex)
+    {
+        return new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops = new GradientStopCollection
+            {
+                new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
+                new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
+            },
+        };
     }
 
     private static string FormatTimeLabel(DateTimeOffset timestamp, TimeSpan window)

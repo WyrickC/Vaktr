@@ -9,6 +9,8 @@ namespace Vaktr.App.Controls;
 public sealed class ActionChip : UserControl
 {
     private readonly Border _surface;
+    private readonly Border _shine;
+    private readonly Border _glow;
     private readonly TextBlock _label;
     private bool _isActive;
     private bool _isFilled;
@@ -20,25 +22,54 @@ public sealed class ActionChip : UserControl
     {
         _surface = new Border
         {
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(11),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(13, 8, 13, 8),
+            Padding = new Thickness(15, 9, 15, 9),
             Background = ResolveBrush("SurfaceElevatedBrush", "#101D2A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#233D56"),
         };
 
+        _shine = new Border
+        {
+            Height = 1,
+            CornerRadius = new CornerRadius(1),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(1, 1, 1, 0),
+            Opacity = 0.12,
+            IsHitTestVisible = false,
+        };
+
+        _glow = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4),
+            CornerRadius = new CornerRadius(9),
+            Opacity = 0,
+            IsHitTestVisible = false,
+        };
+
         _label = new TextBlock
         {
-            FontFamily = new FontFamily("Bahnschrift"),
-            FontSize = 11.5,
-            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily("Segoe UI Variable Text"),
+            FontSize = 12,
+            FontWeight = FontWeights.Medium,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             TextAlignment = TextAlignment.Center,
         };
 
-        _surface.Child = _label;
+        _surface.Child = new Grid
+        {
+            Children =
+            {
+                _glow,
+                _shine,
+                _label,
+            },
+        };
         Content = _surface;
 
         _surface.PointerEntered += OnPointerEntered;
@@ -126,15 +157,21 @@ public sealed class ActionChip : UserControl
     {
         var useAccent = _isActive || _isFilled;
         _surface.Background = useAccent
-            ? ResolveBrush("AccentSoftBrush", "#10394D")
-            : ResolveBrush(_isHovered ? "SurfaceStrongBrush" : "SurfaceElevatedBrush", _isHovered ? "#183148" : "#15283B");
+            ? CreateSurfaceGradient("#1C3C5D", "#11253B")
+            : CreateSurfaceGradient(_isHovered ? "#17263A" : "#101C2C", _isHovered ? "#1A2C43" : "#132133");
 
         _surface.BorderBrush = useAccent
             ? ResolveBrush("AccentStrongBrush", "#94F0FF")
-            : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#31516F" : "#233D56");
+            : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#355170" : "#233D56");
 
         Opacity = _isPressed ? 0.9 : 1.0;
         _label.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+        _glow.Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF");
+        _glow.Opacity = useAccent ? 0.12 : _isHovered ? 0.05 : 0;
+        _shine.Background = useAccent
+            ? ResolveBrush("AccentStrongBrush", "#D7FBFF")
+            : ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+        _shine.Opacity = useAccent ? 0.3 : _isHovered ? 0.16 : 0.09;
     }
 
     private static Brush ResolveBrush(string key, string fallbackHex)
@@ -145,5 +182,19 @@ public sealed class ActionChip : UserControl
         }
 
         return BrushFactory.CreateBrush(fallbackHex);
+    }
+
+    private static Brush CreateSurfaceGradient(string startHex, string endHex)
+    {
+        return new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops = new GradientStopCollection
+            {
+                new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
+                new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
+            },
+        };
     }
 }

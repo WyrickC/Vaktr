@@ -1,0 +1,9 @@
+<Project>
+  <!--
+    Only apply these target overrides inside Codex's sandbox. They trim a few
+    incremental bookkeeping writes that are harmless on a real machine but can
+    fail spuriously in the sandbox and mask actual compiler diagnostics.
+  -->
+  <Target Name="_GenerateCompileDependencyCache" Condition="'$(CODEX_SHELL)' == '1'" />
+  <Target Name="IncrementalClean" Condition="'$(CODEX_SHELL)' == '1'" />
+</Project>

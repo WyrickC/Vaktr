@@ -69,13 +69,13 @@ public sealed partial class ShellWindow : Window
         _brandHost = CreateBrandPlaceholder();
         _summaryHost = new Grid
         {
-            ColumnSpacing = 14,
-            RowSpacing = 14,
+            ColumnSpacing = 16,
+            RowSpacing = 16,
         };
         _dashboardGrid = new Grid
         {
-            ColumnSpacing = 18,
-            RowSpacing = 18,
+            ColumnSpacing = 20,
+            RowSpacing = 20,
         };
 
         _rootLayout = BuildRootLayout();
@@ -97,23 +97,16 @@ public sealed partial class ShellWindow : Window
 
     public void ApplyTheme(ThemeMode mode)
     {
-        _rootLayout.RequestedTheme = mode == ThemeMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
+        var requestedTheme = mode == ThemeMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
+        if (_rootLayout.RequestedTheme != requestedTheme)
+        {
+            _rootLayout.RequestedTheme = requestedTheme;
+        }
+
         if (_controlDeckEditableActive)
         {
             RenderEditableControlDeck();
         }
-        else
-        {
-            RenderControlDeckSummary();
-        }
-
-        _summaryCardsBound = false;
-        if (_viewModel.SummaryCards.Count > 0)
-        {
-            BuildSummaryCards();
-        }
-
-        RefreshDashboardPanels();
     }
 
     private void BuildSummaryCards()
@@ -136,35 +129,7 @@ public sealed partial class ShellWindow : Window
 
         foreach (var card in _viewModel.SummaryCards)
         {
-            var glyphText = new TextBlock
-            {
-                FontFamily = new FontFamily("Bahnschrift"),
-                FontSize = 16,
-                FontWeight = FontWeights.SemiBold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            glyphText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Glyph)) });
-            glyphText.SetBinding(TextBlock.ForegroundProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
-
-            var badgeGlow = new Border
-            {
-                Width = 56,
-                Height = 56,
-                CornerRadius = new CornerRadius(28),
-                Opacity = 0.14,
-            };
-            badgeGlow.SetBinding(Border.BackgroundProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
-
-            var badgeRing = new Border
-            {
-                Width = 56,
-                Height = 56,
-                CornerRadius = new CornerRadius(28),
-                BorderThickness = new Thickness(1.4),
-                Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-            };
-            badgeRing.SetBinding(Border.BorderBrushProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
+            var badgeHost = IconFactory.CreateTile(card.Title, card.AccentBrush, 56, 18);
 
             var titleText = CreateMutedText(string.Empty, 12);
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
@@ -176,21 +141,9 @@ public sealed partial class ShellWindow : Window
             var captionText = CreateSecondaryText(string.Empty, 12);
             captionText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Caption)) });
 
-            var badgeHost = new Grid
-            {
-                Width = 56,
-                Height = 56,
-                Children =
-                {
-                    badgeGlow,
-                    badgeRing,
-                    glyphText,
-                },
-            };
-
             var details = new StackPanel
             {
-                Spacing = 4,
+                Spacing = 5,
                 Children =
                 {
                     titleText,
@@ -201,7 +154,7 @@ public sealed partial class ShellWindow : Window
 
             var contentGrid = new Grid
             {
-                ColumnSpacing = 18,
+                ColumnSpacing = 16,
             };
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -212,13 +165,35 @@ public sealed partial class ShellWindow : Window
             var summaryCard = new Border
             {
                 DataContext = card,
-                Background = ResolveBrush("SurfaceBrush", "#102131"),
+                Background = CreateSurfaceGradient("#0E1A2B", "#13243A"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(20),
+                CornerRadius = new CornerRadius(22),
                 Padding = new Thickness(18, 16, 18, 16),
-                MinHeight = 114,
-                Child = contentGrid,
+                MinHeight = 112,
+                Child = new Grid
+                {
+                    Children =
+                    {
+                        new StackPanel
+                        {
+                            Spacing = 12,
+                            Children =
+                            {
+                                new Border
+                                {
+                                    Width = 68,
+                                    Height = 1.5,
+                                    CornerRadius = new CornerRadius(1),
+                                    Background = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
+                                    Opacity = 0.58,
+                                    HorizontalAlignment = HorizontalAlignment.Center,
+                                },
+                                contentGrid,
+                            },
+                        },
+                    },
+                },
             };
             _summaryHost.Children.Add(summaryCard);
             var index = _summaryHost.Children.Count - 1;
@@ -296,7 +271,7 @@ public sealed partial class ShellWindow : Window
     private int DetermineDashboardColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        return width >= 1360 ? 3 : width >= 980 ? 2 : 1;
+        return width >= 1260 ? 3 : width >= 900 ? 2 : 1;
     }
 
     private async void OnRootLoaded(object sender, RoutedEventArgs e)
@@ -429,10 +404,6 @@ public sealed partial class ShellWindow : Window
             : ThemeMode.Dark;
 
         App.CurrentApp.ApplyTheme(_viewModel.SelectedTheme);
-        if (_controlDeckEditableActive)
-        {
-            RenderEditableControlDeck();
-        }
     }
 
     private void OnCycleWindowRangeClick(object? sender, EventArgs e)
@@ -816,11 +787,29 @@ public sealed partial class ShellWindow : Window
             var bitmap = new BitmapImage();
             bitmap.UriSource = new Uri(imagePath);
 
-            _brandHost.Padding = new Thickness(6);
-            _brandHost.Child = new Microsoft.UI.Xaml.Controls.Image
+            _brandHost.Width = 148;
+            _brandHost.Height = 148;
+            _brandHost.CornerRadius = new CornerRadius(44);
+            _brandHost.Background = CreateSurfaceGradient("#0F2032", "#17304A");
+            _brandHost.Padding = new Thickness(16);
+            _brandHost.Child = new Grid
             {
-                Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
-                Source = bitmap,
+                Children =
+                {
+                    new Border
+                    {
+                        CornerRadius = new CornerRadius(30),
+                        Background = ResolveBrush("AppBackdropBrush", "#061018"),
+                        BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+                        BorderThickness = new Thickness(1),
+                    },
+                    new Microsoft.UI.Xaml.Controls.Image
+                    {
+                        Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
+                        Source = bitmap,
+                        Margin = new Thickness(12),
+                    },
+                },
             };
             StartupTrace.Write("TryLoadBrandImage complete // polished-v19");
         }
@@ -867,7 +856,7 @@ public sealed partial class ShellWindow : Window
     private int DetermineSummaryColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        return width >= 1180 ? 4 : width >= 860 ? 2 : 1;
+        return width >= 1120 ? 4 : width >= 820 ? 2 : 1;
     }
 
     private async Task TryLoadHistoryAsync(VaktrConfig config)
