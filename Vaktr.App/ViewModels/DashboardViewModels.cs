@@ -9,10 +9,11 @@ public sealed class MainViewModel : ObservableObject
 {
     private readonly Dictionary<string, MetricPanelViewModel> _panelLookup = new(StringComparer.OrdinalIgnoreCase);
 
-    private string _storageDirectory = VaktrConfig.DefaultStorageDirectory;
-    private int _selectedIntervalSeconds = 2;
+    private string _storageDirectory = string.Empty;
+    private string _scrapeIntervalInput = string.Empty;
+    private string _retentionHoursInput = string.Empty;
+    private int _selectedIntervalSeconds = VaktrConfig.DefaultScrapeIntervalSeconds;
     private int _selectedWindowMinutes = 15;
-    private int _selectedRetentionDays = 30;
     private ThemeMode _selectedTheme = ThemeMode.Dark;
     private bool _launchOnStartup;
     private bool _minimizeToTray = true;
@@ -85,6 +86,12 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _storageDirectory, value);
     }
 
+    public string ScrapeIntervalInput
+    {
+        get => _scrapeIntervalInput;
+        set => SetProperty(ref _scrapeIntervalInput, value);
+    }
+
     public int SelectedIntervalSeconds
     {
         get => _selectedIntervalSeconds;
@@ -108,10 +115,10 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public int SelectedRetentionDays
+    public string RetentionHoursInput
     {
-        get => _selectedRetentionDays;
-        set => SetProperty(ref _selectedRetentionDays, value);
+        get => _retentionHoursInput;
+        set => SetProperty(ref _retentionHoursInput, value);
     }
 
     public ThemeMode SelectedTheme
@@ -156,11 +163,11 @@ public sealed class MainViewModel : ObservableObject
 
         return new VaktrConfig
         {
-            ScrapeIntervalSeconds = SelectedIntervalSeconds,
+            ScrapeIntervalSeconds = EffectiveScrapeIntervalSeconds,
             GraphWindowMinutes = SelectedWindowMinutes,
-            Retention = (RetentionPreset)SelectedRetentionDays,
+            MaxRetentionHours = EffectiveRetentionHours,
             Theme = SelectedTheme,
-            StorageDirectory = StorageDirectory,
+            StorageDirectory = EffectiveStorageDirectory,
             LaunchOnStartup = LaunchOnStartup,
             MinimizeToTray = MinimizeToTray,
             PanelVisibility = visibility,
@@ -170,10 +177,17 @@ public sealed class MainViewModel : ObservableObject
     public void ApplyConfig(VaktrConfig config)
     {
         var normalized = config.Normalize();
-        StorageDirectory = normalized.StorageDirectory;
+        StorageDirectory = string.Equals(normalized.StorageDirectory, VaktrConfig.DefaultStorageDirectory, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : normalized.StorageDirectory;
+        ScrapeIntervalInput = normalized.ScrapeIntervalSeconds == VaktrConfig.DefaultScrapeIntervalSeconds
+            ? string.Empty
+            : normalized.ScrapeIntervalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        RetentionHoursInput = normalized.MaxRetentionHours == VaktrConfig.DefaultMaxRetentionHours
+            ? string.Empty
+            : normalized.MaxRetentionHours.ToString(System.Globalization.CultureInfo.InvariantCulture);
         SelectedIntervalSeconds = normalized.ScrapeIntervalSeconds;
         SelectedWindowMinutes = normalized.GraphWindowMinutes;
-        SelectedRetentionDays = (int)normalized.Retention;
         SelectedTheme = normalized.Theme;
         LaunchOnStartup = normalized.LaunchOnStartup;
         MinimizeToTray = normalized.MinimizeToTray;
@@ -241,6 +255,17 @@ public sealed class MainViewModel : ObservableObject
 
         SyncDashboardPanels();
     }
+
+    public int EffectiveScrapeIntervalSeconds =>
+        ParseOptionalInt(ScrapeIntervalInput, VaktrConfig.DefaultScrapeIntervalSeconds, 1, 60);
+
+    public int EffectiveRetentionHours =>
+        ParseOptionalInt(RetentionHoursInput, VaktrConfig.DefaultMaxRetentionHours, 1, 24 * 3650);
+
+    public string EffectiveStorageDirectory =>
+        string.IsNullOrWhiteSpace(StorageDirectory)
+            ? VaktrConfig.DefaultStorageDirectory
+            : StorageDirectory.Trim();
 
     private MetricPanelViewModel GetOrCreatePanel(string panelKey, string title, MetricCategory category, MetricUnit unit)
     {
@@ -324,8 +349,8 @@ public sealed class MainViewModel : ObservableObject
         var totalMemory = usedMemory + availableMemory;
         var memoryPct = totalMemory > 0 ? usedMemory / totalMemory * 100d : 0d;
         SummaryCards[1].Update(
-            $"{usedMemory:0.0} GB",
-            totalMemory > 0 ? $"{memoryPct:0.#}% of {totalMemory:0.0} GB" : "Memory in play");
+            FormatCapacityForSummary(usedMemory),
+            totalMemory > 0 ? $"{memoryPct:0.#}% of {FormatCapacityForSummary(totalMemory)}" : "Memory in play");
 
         var diskRead = snapshot.Samples.Where(sample => sample.Category == MetricCategory.Disk && sample.SeriesKey == "read").Sum(sample => sample.Value);
         var diskWrite = snapshot.Samples.Where(sample => sample.Category == MetricCategory.Disk && sample.SeriesKey == "write").Sum(sample => sample.Value);
@@ -347,6 +372,28 @@ public sealed class MainViewModel : ObservableObject
         <= 15 => TimeRangePreset.FifteenMinutes,
         _ => TimeRangePreset.OneHour,
     };
+
+    private static int ParseOptionalInt(string? text, int fallback, int minValue, int maxValue)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return fallback;
+        }
+
+        return int.TryParse(text.Trim(), out var parsed) && parsed >= minValue && parsed <= maxValue
+            ? parsed
+            : fallback;
+    }
+
+    private static string FormatCapacityForSummary(double gigabytes)
+    {
+        if (gigabytes >= 1024d)
+        {
+            return $"{gigabytes / 1024d:0.0} TiB";
+        }
+
+        return $"{gigabytes:0.0} GiB";
+    }
 }
 
 public sealed class SelectionOption
@@ -444,10 +491,14 @@ public sealed class MetricPanelViewModel : ObservableObject
     private string _currentValue = "Waiting";
     private string _secondaryValue = "Collecting hardware samples";
     private string _footerText = "arming";
+    private string _scaleLabel = string.Empty;
+    private double _chartCeilingValue;
     private bool _isVisible;
     private TimeRangePreset _selectedRange = TimeRangePreset.FifteenMinutes;
     private DateTimeOffset _windowStartUtc = DateTimeOffset.UtcNow.AddMinutes(-15);
     private DateTimeOffset _windowEndUtc = DateTimeOffset.UtcNow;
+    private DateTimeOffset? _zoomWindowStartUtc;
+    private DateTimeOffset? _zoomWindowEndUtc;
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
     {
@@ -514,6 +565,8 @@ public sealed class MetricPanelViewModel : ObservableObject
                 return;
             }
 
+            _zoomWindowStartUtc = null;
+            _zoomWindowEndUtc = null;
             RefreshPresentation();
         }
     }
@@ -542,12 +595,26 @@ public sealed class MetricPanelViewModel : ObservableObject
         private set => SetProperty(ref _footerText, value);
     }
 
+    public string ScaleLabel
+    {
+        get => _scaleLabel;
+        private set => SetProperty(ref _scaleLabel, value);
+    }
+
+    public double ChartCeilingValue
+    {
+        get => _chartCeilingValue;
+        private set => SetProperty(ref _chartCeilingValue, value);
+    }
+
     public double GaugeValue =>
         !PrefersGaugeVisual || VisibleSeries.Count == 0 || VisibleSeries[0].Points.Count == 0
             ? 0d
             : Math.Clamp(VisibleSeries[0].Points[^1].Value, 0d, 100d);
 
     public event EventHandler? ExpandRequested;
+
+    public bool IsZoomed => _zoomWindowStartUtc.HasValue && _zoomWindowEndUtc.HasValue;
 
     public DateTimeOffset WindowStartUtc
     {
@@ -626,16 +693,54 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     public void RequestExpand() => ExpandRequested?.Invoke(this, EventArgs.Empty);
 
+    public void ApplyRangePreset(TimeRangePreset preset)
+    {
+        _zoomWindowStartUtc = null;
+        _zoomWindowEndUtc = null;
+        if (_selectedRange != preset)
+        {
+            SelectedRange = preset;
+            return;
+        }
+
+        RefreshPresentation();
+    }
+
+    public void ZoomToWindow(DateTimeOffset startUtc, DateTimeOffset endUtc)
+    {
+        if (endUtc <= startUtc)
+        {
+            return;
+        }
+
+        _zoomWindowStartUtc = startUtc;
+        _zoomWindowEndUtc = endUtc;
+        RefreshPresentation();
+    }
+
+    public void ResetZoom()
+    {
+        if (!IsZoomed)
+        {
+            return;
+        }
+
+        _zoomWindowStartUtc = null;
+        _zoomWindowEndUtc = null;
+        RefreshPresentation();
+    }
+
     private void RefreshPresentation(DateTimeOffset? anchor = null)
     {
         var latestPoint = _buffers.Values.SelectMany(buffer => buffer.Points).LastOrDefault();
-        var end = anchor ?? latestPoint?.Timestamp ?? DateTimeOffset.UtcNow;
-
-        var start = end.AddMinutes(-(int)SelectedRange);
+        var liveAnchor = anchor ?? latestPoint?.Timestamp ?? DateTimeOffset.UtcNow;
+        var end = IsZoomed ? _zoomWindowEndUtc!.Value : liveAnchor;
+        var start = IsZoomed ? _zoomWindowStartUtc!.Value : end.AddMinutes(-(int)SelectedRange);
         WindowStartUtc = start;
         WindowEndUtc = end;
 
         var visibleSeries = _buffers.Values
+            .Where(ShouldShowSeries)
             .Select((buffer, index) =>
             {
                 var points = buffer.Points.Where(point => point.Timestamp >= start && point.Timestamp <= end).ToArray();
@@ -649,17 +754,24 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         VisibleSeries = visibleSeries;
         UpdateSummaryText();
-        FooterText = PrefersGaugeVisual
-            ? $"capacity // {(int)SelectedRange}m replay"
-            : $"{(int)SelectedRange}m replay";
+        FooterText = BuildFooterText(start, end);
     }
 
     private void UpdateSummaryText()
     {
+        var latestByKey = _buffers
+            .Where(entry => entry.Value.Points.Count > 0)
+            .ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value.Points[^1].Value,
+                StringComparer.OrdinalIgnoreCase);
+
         if (VisibleSeries.Count == 0)
         {
             CurrentValue = "Waiting";
             SecondaryValue = "Collecting hardware samples";
+            ScaleLabel = string.Empty;
+            ChartCeilingValue = Unit == MetricUnit.Percent ? 100d : 0d;
             return;
         }
 
@@ -673,37 +785,63 @@ public sealed class MetricPanelViewModel : ObservableObject
             case MetricCategory.Cpu when string.Equals(PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase):
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
                 SecondaryValue = "Total processor load";
+                ScaleLabel = "Ceiling 100%";
+                ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Cpu:
                 var averageCore = latestBySeries.Count > 0 ? latestBySeries.Values.Average() : 0d;
                 CurrentValue = $"{averageCore:0.#}% avg";
-                SecondaryValue = $"{latestBySeries.Count} core lanes active";
+                SecondaryValue = latestBySeries.Count == 1 ? "1 core lane active" : $"{latestBySeries.Count} core lanes active";
+                ScaleLabel = $"100% per core // {latestBySeries.Count} cores";
+                ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Memory:
                 var used = latestBySeries.GetValueOrDefault("Used");
                 var available = latestBySeries.GetValueOrDefault("Available");
                 var total = used + available;
                 var percent = total > 0 ? used / total * 100d : 0d;
-                CurrentValue = $"{used:0.0} GB used";
-                SecondaryValue = $"{percent:0.#}% of {total:0.0} GB";
+                CurrentValue = $"{FormatCapacity(used)} used";
+                SecondaryValue = $"{percent:0.#}% of {FormatCapacity(total)}";
+                ScaleLabel = $"{FormatCapacity(total)} total";
+                ChartCeilingValue = Math.Max(total, 1d);
                 break;
             case MetricCategory.Disk when PrefersGaugeVisual:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Used"):0.#}% used";
-                SecondaryValue = "Drive capacity";
+                var totalGb = latestByKey.GetValueOrDefault("total-gb");
+                var usedGb = latestByKey.GetValueOrDefault("used-gb");
+                SecondaryValue = totalGb > 0 ? $"{FormatCapacity(usedGb)} of {FormatCapacity(totalGb)}" : "Drive capacity";
+                ScaleLabel = totalGb > 0 ? $"{FormatCapacity(totalGb)} total" : "Ceiling 100%";
+                ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Disk:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Read"):0.0} MB/s read";
                 SecondaryValue = $"{latestBySeries.GetValueOrDefault("Write"):0.0} MB/s write";
+                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
+                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Network:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Down"):0.0} Mbps down";
                 SecondaryValue = $"{latestBySeries.GetValueOrDefault("Up"):0.0} Mbps up";
+                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
+                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             default:
                 CurrentValue = FormatValue(VisibleSeries[0].Points.Last().Value, Unit);
                 SecondaryValue = "Live metric";
+                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 1d);
+                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
                 break;
         }
+    }
+
+    private bool ShouldShowSeries(SeriesBuffer buffer)
+    {
+        if (!PrefersGaugeVisual)
+        {
+            return true;
+        }
+
+        return string.Equals(buffer.Key, "used-percent", StringComparison.OrdinalIgnoreCase);
     }
 
     private SolidColorBrush ResolveBrush(int index)
@@ -733,12 +871,46 @@ public sealed class MetricPanelViewModel : ObservableObject
     private static string FormatValue(double value, MetricUnit unit) => unit switch
     {
         MetricUnit.Percent => $"{value:0.#}%",
-        MetricUnit.Gigabytes => $"{value:0.0} GB",
+        MetricUnit.Gigabytes => FormatCapacity(value),
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
         MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
         MetricUnit.Megahertz => $"{value / 1000d:0.00} GHz",
         _ => $"{value:0.##}",
     };
+
+    private static string FormatCapacity(double gigabytes)
+    {
+        if (gigabytes >= 1024d)
+        {
+            return $"{gigabytes / 1024d:0.0} TiB";
+        }
+
+        return $"{gigabytes:0.0} GiB";
+    }
+
+    private static double ResolveDynamicCeiling(IReadOnlyList<ChartSeriesViewModel> series, double minimum)
+    {
+        var peak = series.SelectMany(item => item.Points).DefaultIfEmpty(new MetricPoint(DateTimeOffset.UtcNow, minimum)).Max(point => point.Value);
+        return Math.Max(minimum, peak * 1.12d);
+    }
+
+    private string BuildFooterText(DateTimeOffset start, DateTimeOffset end)
+    {
+        if (IsZoomed)
+        {
+            var span = end - start;
+            var spanText = span.TotalMinutes >= 1d
+                ? $"{span.TotalMinutes:0.#}m"
+                : $"{span.TotalSeconds:0.#}s";
+            return PrefersGaugeVisual
+                ? $"capacity // zoomed {spanText}"
+                : $"zoomed {spanText}";
+        }
+
+        return PrefersGaugeVisual
+            ? $"capacity // {(int)SelectedRange}m replay"
+            : $"{(int)SelectedRange}m replay";
+    }
 
     private sealed class SeriesBuffer
     {

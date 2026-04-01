@@ -1,10 +1,17 @@
 using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
+using Microsoft.UI.Xaml.Input;
 
 namespace Vaktr.App.Controls;
 
 public sealed class TelemetryChart : UserControl
 {
+    private const double LeftPadding = 10d;
+    private const double RightPadding = 10d;
+    private const double TopPadding = 10d;
+    private const double BottomPadding = 28d;
+    private const double MinimumSelectionWidth = 18d;
+
     public static readonly DependencyProperty SeriesProperty =
         DependencyProperty.Register(
             nameof(Series),
@@ -33,15 +40,39 @@ public sealed class TelemetryChart : UserControl
             typeof(TelemetryChart),
             new PropertyMetadata(default(DateTimeOffset), OnChartPropertyChanged));
 
+    public static readonly DependencyProperty CeilingValueProperty =
+        DependencyProperty.Register(
+            nameof(CeilingValue),
+            typeof(double),
+            typeof(TelemetryChart),
+            new PropertyMetadata(0d, OnChartPropertyChanged));
+
     private readonly Canvas _canvas;
+    private readonly Canvas _interactionCanvas;
+    private readonly Rectangle _selectionRectangle;
     private readonly TextBlock _emptyStateText;
+    private bool _isSelecting;
     private bool _redrawQueued;
+    private double _selectionStartX;
+    private double _selectionCurrentX;
 
     public TelemetryChart()
     {
         UseLayoutRounding = true;
 
         _canvas = new Canvas();
+        _interactionCanvas = new Canvas();
+        _selectionRectangle = new Rectangle
+        {
+            Visibility = Visibility.Collapsed,
+            Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
+            StrokeThickness = 1,
+            Fill = BrushFactory.CreateBrush("#203BB7FF"),
+            RadiusX = 8,
+            RadiusY = 8,
+            IsHitTestVisible = false,
+        };
+        _interactionCanvas.Children.Add(_selectionRectangle);
         _emptyStateText = new TextBlock
         {
             Margin = new Thickness(10, 8, 0, 0),
@@ -56,13 +87,23 @@ public sealed class TelemetryChart : UserControl
             Children =
             {
                 _canvas,
+                _interactionCanvas,
                 _emptyStateText,
             },
         };
 
         Loaded += (_, _) => ScheduleRedraw();
         SizeChanged += (_, _) => ScheduleRedraw();
+        PointerPressed += OnPointerPressed;
+        PointerMoved += OnPointerMoved;
+        PointerReleased += OnPointerReleased;
+        PointerCaptureLost += OnPointerCaptureLost;
+        DoubleTapped += (_, _) => ZoomResetRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    public event EventHandler<ChartZoomSelectionEventArgs>? ZoomSelectionRequested;
+
+    public event EventHandler? ZoomResetRequested;
 
     public IReadOnlyList<ChartSeriesViewModel> Series
     {
@@ -86,6 +127,12 @@ public sealed class TelemetryChart : UserControl
     {
         get => (DateTimeOffset)GetValue(WindowEndUtcProperty);
         set => SetValue(WindowEndUtcProperty, value);
+    }
+
+    public double CeilingValue
+    {
+        get => (double)GetValue(CeilingValueProperty);
+        set => SetValue(CeilingValueProperty, value);
     }
 
     private static void OnChartPropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
@@ -117,13 +164,12 @@ public sealed class TelemetryChart : UserControl
             return;
         }
 
-        _canvas.Children.Clear();
-        DrawGrid(width, height);
-
         var series = Series ?? Array.Empty<ChartSeriesViewModel>();
         var allPoints = series.SelectMany(item => item.Points).ToArray();
         if (allPoints.Length == 0)
         {
+            _canvas.Children.Clear();
+            DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(Array.Empty<MetricPoint>()));
             _emptyStateText.Visibility = Visibility.Visible;
             return;
         }
@@ -138,6 +184,11 @@ public sealed class TelemetryChart : UserControl
         }
 
         var maxValue = ResolveMaxValue(allPoints);
+        var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
+        var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
+
+        _canvas.Children.Clear();
+        DrawGrid(width, height, start, end, maxValue);
         foreach (var item in series)
         {
             if (item.Points.Count == 0)
@@ -146,7 +197,7 @@ public sealed class TelemetryChart : UserControl
             }
 
             var projected = Downsample(item.Points, Math.Max(48, (int)Math.Round(width * 1.35)))
-                .Select(point => Project(point, width, height, start, end, maxValue))
+                .Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue))
                 .ToArray();
 
             if (projected.Length == 0)
@@ -162,7 +213,7 @@ public sealed class TelemetryChart : UserControl
 
             _canvas.Children.Add(new Path
             {
-                Data = BuildAreaGeometry(projected, height),
+                Data = BuildAreaGeometry(projected, TopPadding + plotHeight),
                 Fill = item.FillBrush,
                 Opacity = 0.7,
             });
@@ -181,30 +232,82 @@ public sealed class TelemetryChart : UserControl
         }
     }
 
-    private void DrawGrid(double width, double height)
+    private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue)
     {
         var gridBrush = ResolveBrush("SurfaceGridBrush", "#22405C");
-        for (var index = 1; index <= 4; index++)
+        var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
+        var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
+        var bottomY = TopPadding + plotHeight;
+
+        for (var index = 0; index <= 5; index++)
         {
-            var y = (height / 5d) * index;
+            var y = TopPadding + ((plotHeight / 5d) * index);
             _canvas.Children.Add(new Line
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index == 4 ? 0.18 : 0.12,
-                X1 = 0,
-                X2 = width,
+                Opacity = index is 0 or 5 ? 0.22 : 0.14,
+                StrokeDashArray = new DoubleCollection { 3, 5 },
+                X1 = LeftPadding,
+                X2 = LeftPadding + plotWidth,
                 Y1 = y,
                 Y2 = y,
             });
         }
+
+        for (var index = 0; index <= 5; index++)
+        {
+            var x = LeftPadding + ((plotWidth / 5d) * index);
+            _canvas.Children.Add(new Line
+            {
+                Stroke = gridBrush,
+                StrokeThickness = 1,
+                Opacity = index is 0 or 5 ? 0.18 : 0.1,
+                StrokeDashArray = new DoubleCollection { 3, 5 },
+                X1 = x,
+                X2 = x,
+                Y1 = TopPadding,
+                Y2 = bottomY,
+            });
+
+            var tick = start + TimeSpan.FromTicks((end - start).Ticks / 5 * index);
+            var label = new TextBlock
+            {
+                FontSize = 10,
+                Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+                Text = FormatTimeLabel(tick, end - start),
+            };
+            _canvas.Children.Add(label);
+            Canvas.SetLeft(label, Math.Clamp(x - 20, LeftPadding, width - 56));
+            Canvas.SetTop(label, bottomY + 4);
+        }
+
+        var ceiling = new TextBlock
+        {
+            FontSize = 10,
+            Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+            Text = FormatAxisValue(maxValue, Unit),
+        };
+        _canvas.Children.Add(ceiling);
+        Canvas.SetLeft(ceiling, LeftPadding);
+        Canvas.SetTop(ceiling, 0);
     }
 
     private double ResolveMaxValue(IReadOnlyList<MetricPoint> points)
     {
+        if (CeilingValue > 0d)
+        {
+            return CeilingValue;
+        }
+
         if (Unit == MetricUnit.Percent)
         {
             return 100d;
+        }
+
+        if (points.Count == 0)
+        {
+            return Unit == MetricUnit.Gigabytes ? 1d : 100d;
         }
 
         var peak = points.Max(point => point.Value);
@@ -245,8 +348,10 @@ public sealed class TelemetryChart : UserControl
 
     private static Windows.Foundation.Point Project(
         MetricPoint point,
-        double width,
-        double height,
+        double leftPadding,
+        double topPadding,
+        double plotWidth,
+        double plotHeight,
         DateTimeOffset start,
         DateTimeOffset end,
         double maxValue)
@@ -256,8 +361,8 @@ public sealed class TelemetryChart : UserControl
         var yRatio = maxValue <= 0d ? 0d : point.Value / maxValue;
 
         return new Windows.Foundation.Point(
-            Math.Clamp(xRatio, 0d, 1d) * width,
-            height - (Math.Clamp(yRatio, 0d, 1d) * height));
+            leftPadding + (Math.Clamp(xRatio, 0d, 1d) * plotWidth),
+            topPadding + plotHeight - (Math.Clamp(yRatio, 0d, 1d) * plotHeight));
     }
 
     private static Geometry BuildLineGeometry(IReadOnlyList<Windows.Foundation.Point> points)
@@ -319,4 +424,132 @@ public sealed class TelemetryChart : UserControl
 
         return BrushFactory.CreateBrush(fallbackHex);
     }
+
+    private static string FormatTimeLabel(DateTimeOffset timestamp, TimeSpan window)
+    {
+        return window <= TimeSpan.FromMinutes(5)
+            ? timestamp.LocalDateTime.ToString("HH:mm:ss")
+            : timestamp.LocalDateTime.ToString("HH:mm");
+    }
+
+    private static string FormatAxisValue(double value, MetricUnit unit) => unit switch
+    {
+        MetricUnit.Percent => $"{value:0.#}%",
+        MetricUnit.Gigabytes when value >= 1024d => $"{value / 1024d:0.0} TiB",
+        MetricUnit.Gigabytes => $"{value:0.0} GiB",
+        MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
+        MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
+        MetricUnit.Megahertz => $"{value / 1000d:0.00} GHz",
+        _ => $"{value:0.##}",
+    };
+
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(this);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        _isSelecting = true;
+        _selectionStartX = point.Position.X;
+        _selectionCurrentX = _selectionStartX;
+        UpdateSelectionVisual();
+        CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isSelecting)
+        {
+            return;
+        }
+
+        _selectionCurrentX = e.GetCurrentPoint(this).Position.X;
+        UpdateSelectionVisual();
+        e.Handled = true;
+    }
+
+    private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isSelecting)
+        {
+            return;
+        }
+
+        ReleasePointerCaptures();
+        CompleteSelection();
+        e.Handled = true;
+    }
+
+    private void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isSelecting)
+        {
+            return;
+        }
+
+        CompleteSelection();
+    }
+
+    private void CompleteSelection()
+    {
+        _isSelecting = false;
+        _selectionRectangle.Visibility = Visibility.Collapsed;
+
+        if (WindowEndUtc <= WindowStartUtc)
+        {
+            return;
+        }
+
+        var left = Math.Min(_selectionStartX, _selectionCurrentX);
+        var right = Math.Max(_selectionStartX, _selectionCurrentX);
+        if (right - left < MinimumSelectionWidth)
+        {
+            return;
+        }
+
+        var plotWidth = Math.Max(16d, ActualWidth - LeftPadding - RightPadding);
+        var clampedLeft = Math.Clamp(left, LeftPadding, LeftPadding + plotWidth);
+        var clampedRight = Math.Clamp(right, LeftPadding, LeftPadding + plotWidth);
+        if (clampedRight - clampedLeft < MinimumSelectionWidth)
+        {
+            return;
+        }
+
+        var normalizedLeft = (clampedLeft - LeftPadding) / plotWidth;
+        var normalizedRight = (clampedRight - LeftPadding) / plotWidth;
+        var start = WindowStartUtc + TimeSpan.FromTicks((long)((WindowEndUtc - WindowStartUtc).Ticks * normalizedLeft));
+        var end = WindowStartUtc + TimeSpan.FromTicks((long)((WindowEndUtc - WindowStartUtc).Ticks * normalizedRight));
+
+        if (end > start)
+        {
+            ZoomSelectionRequested?.Invoke(this, new ChartZoomSelectionEventArgs(start, end));
+        }
+    }
+
+    private void UpdateSelectionVisual()
+    {
+        var left = Math.Min(_selectionStartX, _selectionCurrentX);
+        var width = Math.Abs(_selectionCurrentX - _selectionStartX);
+        _selectionRectangle.Visibility = width >= 2 ? Visibility.Visible : Visibility.Collapsed;
+        _selectionRectangle.Width = width;
+        _selectionRectangle.Height = Math.Max(0d, ActualHeight - BottomPadding);
+        Canvas.SetLeft(_selectionRectangle, left);
+        Canvas.SetTop(_selectionRectangle, 0);
+    }
+}
+
+public sealed class ChartZoomSelectionEventArgs : EventArgs
+{
+    public ChartZoomSelectionEventArgs(DateTimeOffset startUtc, DateTimeOffset endUtc)
+    {
+        StartUtc = startUtc;
+        EndUtc = endUtc;
+    }
+
+    public DateTimeOffset StartUtc { get; }
+
+    public DateTimeOffset EndUtc { get; }
 }

@@ -14,8 +14,8 @@ public sealed class JsonConfigStore : IConfigStore
 
     public async Task<VaktrConfig> LoadAsync(CancellationToken cancellationToken)
     {
-        var path = VaktrConfig.GetConfigPath();
-        if (!File.Exists(path))
+        var path = ResolveConfigPath();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             return VaktrConfig.CreateDefault().Normalize();
         }
@@ -29,11 +29,24 @@ public sealed class JsonConfigStore : IConfigStore
 
     public async Task SaveAsync(VaktrConfig config, CancellationToken cancellationToken)
     {
+        config = config.Normalize();
         Directory.CreateDirectory(VaktrConfig.SettingsDirectory);
         Directory.CreateDirectory(config.StorageDirectory);
 
         await using var stream = File.Create(VaktrConfig.GetConfigPath());
-        await JsonSerializer.SerializeAsync(stream, config.Normalize(), JsonOptions, cancellationToken)
+        await JsonSerializer.SerializeAsync(stream, config, JsonOptions, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static string ResolveConfigPath()
+    {
+        var currentPath = VaktrConfig.GetConfigPath();
+        if (File.Exists(currentPath))
+        {
+            return currentPath;
+        }
+
+        var legacyPath = VaktrConfig.GetLegacyConfigPath();
+        return File.Exists(legacyPath) ? legacyPath : currentPath;
     }
 }

@@ -6,17 +6,25 @@ namespace Vaktr.Store.Persistence;
 
 public sealed class SqliteMetricStore : IMetricStore
 {
+    private static readonly TimeSpan RawResolutionWindow = TimeSpan.FromHours(6);
+    private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromMinutes(15);
+    private const long MinuteBucketMilliseconds = 60_000;
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _connectionString;
+    private VaktrConfig? _config;
+    private DateTimeOffset _nextMaintenanceUtc = DateTimeOffset.MinValue;
 
     public async Task InitializeAsync(VaktrConfig config, CancellationToken cancellationToken)
     {
+        config = config.Normalize();
         Directory.CreateDirectory(config.StorageDirectory);
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = config.GetDatabasePath(),
             Mode = SqliteOpenMode.ReadWriteCreate,
         }.ToString();
+        _config = config;
 
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -24,6 +32,11 @@ public sealed class SqliteMetricStore : IMetricStore
         var command = connection.CreateCommand();
         command.CommandText =
             """
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA auto_vacuum = INCREMENTAL;
+
             CREATE TABLE IF NOT EXISTS metric_samples (
                 panel_key TEXT NOT NULL,
                 panel_title TEXT NOT NULL,
@@ -40,6 +53,23 @@ public sealed class SqliteMetricStore : IMetricStore
 
             CREATE INDEX IF NOT EXISTS idx_metric_samples_panel_series_time
                 ON metric_samples(panel_key, series_key, timestamp_ms);
+
+            CREATE TABLE IF NOT EXISTS metric_rollups_1m (
+                panel_key TEXT NOT NULL,
+                panel_title TEXT NOT NULL,
+                series_key TEXT NOT NULL,
+                series_name TEXT NOT NULL,
+                category INTEGER NOT NULL,
+                unit INTEGER NOT NULL,
+                timestamp_ms INTEGER NOT NULL,
+                value REAL NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_metric_rollups_identity
+                ON metric_rollups_1m(panel_key, series_key, timestamp_ms);
+
+            CREATE INDEX IF NOT EXISTS idx_metric_rollups_timestamp
+                ON metric_rollups_1m(timestamp_ms);
             """;
 
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -133,6 +163,7 @@ public sealed class SqliteMetricStore : IMetricStore
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            await MaybeMaintainAsync(connection, snapshot.Timestamp, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -160,8 +191,33 @@ public sealed class SqliteMetricStore : IMetricStore
                 unit,
                 timestamp_ms,
                 value
-            FROM metric_samples
-            WHERE timestamp_ms >= $fromTimestamp
+            FROM (
+                SELECT
+                    panel_key,
+                    panel_title,
+                    series_key,
+                    series_name,
+                    category,
+                    unit,
+                    timestamp_ms,
+                    value
+                FROM metric_rollups_1m
+                WHERE timestamp_ms >= $fromTimestamp
+
+                UNION ALL
+
+                SELECT
+                    panel_key,
+                    panel_title,
+                    series_key,
+                    series_name,
+                    category,
+                    unit,
+                    timestamp_ms,
+                    value
+                FROM metric_samples
+                WHERE timestamp_ms >= $fromTimestamp
+            )
             ORDER BY panel_key, series_key, timestamp_ms;
             """;
         command.Parameters.AddWithValue("$fromTimestamp", fromUtc.ToUnixTimeMilliseconds());
@@ -196,20 +252,20 @@ public sealed class SqliteMetricStore : IMetricStore
 
     public async Task PruneAsync(VaktrConfig config, CancellationToken cancellationToken)
     {
-        if (config.Retention == RetentionPreset.Unlimited)
-        {
-            return;
-        }
-
         var connectionString = EnsureInitialized();
-        await using var connection = new SqliteConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-(int)config.Retention);
-        var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM metric_samples WHERE timestamp_ms < $cutoff;";
-        command.Parameters.AddWithValue("$cutoff", cutoff.ToUnixTimeMilliseconds());
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _config = config.Normalize();
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await CompactAndPruneAsync(connection, _config, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            _nextMaintenanceUtc = DateTimeOffset.UtcNow.Add(MaintenanceInterval);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public ValueTask DisposeAsync()
@@ -220,6 +276,90 @@ public sealed class SqliteMetricStore : IMetricStore
 
     private string EnsureInitialized() =>
         _connectionString ?? throw new InvalidOperationException("The SQLite store has not been initialized.");
+
+    private async Task MaybeMaintainAsync(SqliteConnection connection, DateTimeOffset timestamp, CancellationToken cancellationToken)
+    {
+        if (_config is null || timestamp < _nextMaintenanceUtc)
+        {
+            return;
+        }
+
+        await CompactAndPruneAsync(connection, _config, timestamp, cancellationToken).ConfigureAwait(false);
+        _nextMaintenanceUtc = timestamp.Add(MaintenanceInterval);
+    }
+
+    private static async Task CompactAndPruneAsync(
+        SqliteConnection connection,
+        VaktrConfig config,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var retentionCutoffMs = now.AddHours(-config.MaxRetentionHours).ToUnixTimeMilliseconds();
+        var rawCutoffMs = now.Subtract(RawResolutionWindow).ToUnixTimeMilliseconds();
+
+        if (retentionCutoffMs < rawCutoffMs)
+        {
+            var compactCommand = connection.CreateCommand();
+            compactCommand.CommandText =
+                """
+                INSERT OR REPLACE INTO metric_rollups_1m (
+                    panel_key,
+                    panel_title,
+                    series_key,
+                    series_name,
+                    category,
+                    unit,
+                    timestamp_ms,
+                    value
+                )
+                SELECT
+                    panel_key,
+                    panel_title,
+                    series_key,
+                    series_name,
+                    category,
+                    unit,
+                    (timestamp_ms / $bucketMs) * $bucketMs AS timestamp_ms,
+                    AVG(value) AS value
+                FROM metric_samples
+                WHERE timestamp_ms >= $retentionCutoff
+                  AND timestamp_ms < $rawCutoff
+                GROUP BY
+                    panel_key,
+                    panel_title,
+                    series_key,
+                    series_name,
+                    category,
+                    unit,
+                    (timestamp_ms / $bucketMs);
+                """;
+            compactCommand.Parameters.AddWithValue("$retentionCutoff", retentionCutoffMs);
+            compactCommand.Parameters.AddWithValue("$rawCutoff", rawCutoffMs);
+            compactCommand.Parameters.AddWithValue("$bucketMs", MinuteBucketMilliseconds);
+            await compactCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var rawDeleteCutoffMs = Math.Max(retentionCutoffMs, rawCutoffMs);
+
+        var deleteRawCommand = connection.CreateCommand();
+        deleteRawCommand.CommandText = "DELETE FROM metric_samples WHERE timestamp_ms < $cutoff;";
+        deleteRawCommand.Parameters.AddWithValue("$cutoff", rawDeleteCutoffMs);
+        await deleteRawCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        var deleteRollupCommand = connection.CreateCommand();
+        deleteRollupCommand.CommandText = "DELETE FROM metric_rollups_1m WHERE timestamp_ms < $cutoff;";
+        deleteRollupCommand.Parameters.AddWithValue("$cutoff", retentionCutoffMs);
+        await deleteRollupCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        var maintenanceCommand = connection.CreateCommand();
+        maintenanceCommand.CommandText =
+            """
+            PRAGMA optimize;
+            PRAGMA wal_checkpoint(PASSIVE);
+            PRAGMA incremental_vacuum(64);
+            """;
+        await maintenanceCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private sealed class PanelAccumulator
     {

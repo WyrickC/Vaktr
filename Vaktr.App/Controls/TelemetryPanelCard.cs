@@ -17,8 +17,10 @@ public sealed class TelemetryPanelCard : UserControl
 
     private readonly Border _cardBorder;
     private readonly Border _badgeBorder;
+    private readonly Border _accentBar;
     private readonly TextBlock _badgeText;
     private readonly TextBlock _footerText;
+    private readonly TextBlock _scaleText;
     private readonly TextBlock _titleText;
     private readonly TextBlock _currentValueText;
     private readonly TextBlock _secondaryValueText;
@@ -27,42 +29,41 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly Grid _visualGrid;
     private readonly Border _chartFrame;
     private readonly StackPanel _legendHost;
-    private readonly Button _oneMinuteButton;
-    private readonly Button _fiveMinuteButton;
-    private readonly Button _fifteenMinuteButton;
-    private readonly Button _oneHourButton;
+    private readonly ScrollViewer _legendScroller;
+    private readonly ActionChip _oneMinuteButton;
+    private readonly ActionChip _fiveMinuteButton;
+    private readonly ActionChip _fifteenMinuteButton;
+    private readonly ActionChip _oneHourButton;
+    private readonly Dictionary<string, (Border Row, TextBlock ValueText)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
     private MetricPanelViewModel? _observedPanel;
+    private bool _refreshQueued;
 
     public TelemetryPanelCard()
     {
         MinHeight = 360;
         HorizontalAlignment = HorizontalAlignment.Stretch;
-        Transitions = new TransitionCollection
-        {
-            new EntranceThemeTransition
-            {
-                FromVerticalOffset = 18,
-            },
-        };
-
-        RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
-        RenderTransform = new ScaleTransform
-        {
-            ScaleX = 1,
-            ScaleY = 1,
-        };
 
         _badgeText = CreateTextBlock("Bahnschrift", 11, FontWeights.SemiBold);
         _footerText = CreateTextBlock(fontSize: 11);
+        _scaleText = CreateTextBlock("Bahnschrift", 11, FontWeights.SemiBold);
         _titleText = CreateTextBlock("Segoe UI", 22, FontWeights.SemiBold);
         _currentValueText = CreateTextBlock("Bahnschrift", 28, FontWeights.SemiBold);
         _secondaryValueText = CreateTextBlock(fontSize: 13);
 
         _badgeBorder = new Border
         {
-            CornerRadius = new CornerRadius(999),
+            CornerRadius = new CornerRadius(12),
             Padding = new Thickness(10, 4, 10, 4),
             Child = _badgeText,
+        };
+
+        _accentBar = new Border
+        {
+            Width = 110,
+            Height = 4,
+            CornerRadius = new CornerRadius(999),
+            Background = ResolveBrush("AccentBrush", "#66E7FF"),
+            Opacity = 0.9,
         };
 
         _oneMinuteButton = CreateRangeButton("1m", TimeRangePreset.OneMinute);
@@ -91,6 +92,8 @@ public sealed class TelemetryPanelCard : UserControl
             MinHeight = 158,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        _chart.ZoomSelectionRequested += OnChartZoomSelectionRequested;
+        _chart.ZoomResetRequested += OnChartZoomResetRequested;
 
         _chartFrame = new Border
         {
@@ -110,6 +113,16 @@ public sealed class TelemetryPanelCard : UserControl
         {
             Spacing = 8,
         };
+        _legendScroller = new ScrollViewer
+        {
+            MaxHeight = 188,
+            VerticalScrollMode = ScrollMode.Enabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            ZoomMode = ZoomMode.Disabled,
+            Content = _legendHost,
+        };
 
         var rangeHost = new StackPanel
         {
@@ -124,6 +137,22 @@ public sealed class TelemetryPanelCard : UserControl
             },
         };
 
+        var metaGrid = new Grid();
+        metaGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        metaGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        metaGrid.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Children =
+            {
+                _badgeBorder,
+                _footerText,
+            },
+        });
+        metaGrid.Children.Add(_scaleText);
+        Grid.SetColumn(_scaleText, 1);
+
         var headerGrid = new Grid();
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -132,16 +161,7 @@ public sealed class TelemetryPanelCard : UserControl
             Spacing = 8,
             Children =
             {
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    Children =
-                    {
-                        _badgeBorder,
-                        _footerText,
-                    },
-                },
+                metaGrid,
                 _titleText,
                 _currentValueText,
                 _secondaryValueText,
@@ -162,9 +182,10 @@ public sealed class TelemetryPanelCard : UserControl
                 Spacing = 16,
                 Children =
                 {
+                    _accentBar,
                     headerGrid,
                     _visualGrid,
-                    _legendHost,
+                    _legendScroller,
                 },
             },
         };
@@ -215,7 +236,17 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void OnPanelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        _ = DispatcherQueue.TryEnqueue(RefreshFromPanel);
+        if (_refreshQueued)
+        {
+            return;
+        }
+
+        _refreshQueued = true;
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            _refreshQueued = false;
+            RefreshFromPanel();
+        });
     }
 
     private void RefreshFromPanel()
@@ -225,11 +256,14 @@ public sealed class TelemetryPanelCard : UserControl
         {
             _badgeText.Text = "LIVE";
             _footerText.Text = string.Empty;
+            _scaleText.Text = string.Empty;
             _titleText.Text = "Telemetry";
             _currentValueText.Text = "Waiting";
             _secondaryValueText.Text = "Collecting hardware samples";
             _chart.Series = Array.Empty<ChartSeriesViewModel>();
+            _chart.CeilingValue = 0d;
             _legendHost.Children.Clear();
+            _legendRows.Clear();
             _legendHost.Children.Add(CreateEmptyText("Waiting for samples"));
             RefreshRangeButtons(null);
             RefreshVisualMode(null);
@@ -241,15 +275,17 @@ public sealed class TelemetryPanelCard : UserControl
         _titleText.Text = panel.Title;
         _currentValueText.Text = panel.CurrentValue;
         _secondaryValueText.Text = panel.SecondaryValue;
+        _scaleText.Text = panel.ScaleLabel;
 
         _chart.Series = panel.VisibleSeries;
         _chart.Unit = panel.Unit;
         _chart.WindowStartUtc = panel.WindowStartUtc;
         _chart.WindowEndUtc = panel.WindowEndUtc;
+        _chart.CeilingValue = panel.ChartCeilingValue;
 
         _gauge.Value = panel.GaugeValue;
         _gauge.AccentBrush = panel.AccentBrush;
-        _gauge.Caption = panel.PrefersGaugeVisual ? "Drive usage" : "Live";
+        _gauge.Caption = panel.PrefersGaugeVisual ? "Capacity" : "Live";
 
         RefreshLegend(panel);
         RefreshRangeButtons(panel);
@@ -259,68 +295,46 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void RefreshLegend(MetricPanelViewModel panel)
     {
-        _legendHost.Children.Clear();
-
         if (panel.VisibleSeries.Count == 0)
         {
+            _legendRows.Clear();
+            _legendHost.Children.Clear();
             _legendHost.Children.Add(CreateEmptyText("Waiting for samples"));
             return;
         }
 
-        foreach (var series in panel.VisibleSeries.Take(4))
+        if (_legendRows.Count == 0 && _legendHost.Children.Count > 0)
         {
+            _legendHost.Children.Clear();
+        }
+
+        var activeKeys = new HashSet<string>(panel.VisibleSeries.Select(series => series.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (var staleKey in _legendRows.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
+        {
+            _legendHost.Children.Remove(_legendRows[staleKey].Row);
+            _legendRows.Remove(staleKey);
+        }
+
+        for (var index = 0; index < panel.VisibleSeries.Count; index++)
+        {
+            var series = panel.VisibleSeries[index];
             var value = series.Points.Count == 0
                 ? "--"
                 : FormatValue(series.Points[^1].Value, panel.Unit);
 
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            row.Children.Add(new Ellipse
+            if (!_legendRows.TryGetValue(series.Name, out var rowParts))
             {
-                Width = 8,
-                Height = 8,
-                Margin = new Thickness(0, 4, 10, 0),
-                Fill = series.StrokeBrush,
-            });
+                rowParts = CreateLegendRow(series.Name, series.StrokeBrush);
+                _legendRows.Add(series.Name, rowParts);
+                _legendHost.Children.Add(rowParts.Row);
+            }
 
-            var nameText = new TextBlock
+            rowParts.ValueText.Text = value;
+            if (_legendHost.Children.IndexOf(rowParts.Row) != index)
             {
-                FontSize = 12,
-                Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1"),
-                Text = series.Name,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            };
-            row.Children.Add(nameText);
-            Grid.SetColumn(nameText, 1);
-
-            var valueText = new TextBlock
-            {
-                FontFamily = new FontFamily("Bahnschrift"),
-                FontSize = 12,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
-                Text = value,
-            };
-            row.Children.Add(valueText);
-            Grid.SetColumn(valueText, 2);
-
-            _legendHost.Children.Add(new Border
-            {
-                Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-                BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(14),
-                Padding = new Thickness(12, 10, 12, 10),
-                Child = row,
-            });
-        }
-
-        if (panel.VisibleSeries.Count > 4)
-        {
-            _legendHost.Children.Add(CreateEmptyText($"+{panel.VisibleSeries.Count - 4} more series"));
+                _legendHost.Children.Remove(rowParts.Row);
+                _legendHost.Children.Insert(index, rowParts.Row);
+            }
         }
     }
 
@@ -328,23 +342,27 @@ public sealed class TelemetryPanelCard : UserControl
     {
         var showGauge = panel?.PrefersGaugeVisual == true;
         _gauge.Visibility = showGauge ? Visibility.Visible : Visibility.Collapsed;
+        Grid.SetColumn(_chartFrame, showGauge ? 1 : 0);
         Grid.SetColumnSpan(_chartFrame, showGauge ? 1 : 2);
     }
 
     private void RefreshRangeButtons(MetricPanelViewModel? panel)
     {
-        ApplyRangeState(_oneMinuteButton, panel?.SelectedRange == TimeRangePreset.OneMinute);
-        ApplyRangeState(_fiveMinuteButton, panel?.SelectedRange == TimeRangePreset.FiveMinutes);
-        ApplyRangeState(_fifteenMinuteButton, panel?.SelectedRange == TimeRangePreset.FifteenMinutes);
-        ApplyRangeState(_oneHourButton, panel?.SelectedRange == TimeRangePreset.OneHour);
+        var allowPresetHighlight = panel?.IsZoomed != true;
+        ApplyRangeState(_oneMinuteButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.OneMinute);
+        ApplyRangeState(_fiveMinuteButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.FiveMinutes);
+        ApplyRangeState(_fifteenMinuteButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.FifteenMinutes);
+        ApplyRangeState(_oneHourButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.OneHour);
     }
 
     private void ApplyPalette(MetricPanelViewModel panel)
     {
         _badgeBorder.Background = panel.AccentBrush;
         _badgeBorder.Opacity = 0.18;
+        _accentBar.Background = panel.AccentBrush;
         _badgeText.Foreground = panel.AccentBrush;
         _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _scaleText.Foreground = ResolveBrush("AccentStrongBrush", "#B7F7FF");
         _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _secondaryValueText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
@@ -352,45 +370,96 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void SetHoverState(bool isHovered)
     {
-        if (RenderTransform is not ScaleTransform transform)
-        {
-            return;
-        }
-
-        transform.ScaleX = isHovered ? 1.01 : 1;
-        transform.ScaleY = isHovered ? 1.01 : 1;
         _cardBorder.BorderBrush = isHovered
             ? ResolveBrush("AccentStrongBrush", "#B7F7FF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _cardBorder.Background = isHovered
+            ? ResolveBrush("SurfaceElevatedBrush", "#15283B")
+            : ResolveBrush("SurfaceBrush", "#102131");
     }
 
-    private static Button CreateRangeButton(string text, TimeRangePreset preset)
+    private static ActionChip CreateRangeButton(string text, TimeRangePreset preset)
     {
-        var button = new Button
+        var button = new ActionChip
         {
-            Content = text,
             Tag = preset,
-            Padding = new Thickness(10, 6, 10, 6),
             MinHeight = 32,
-            FontFamily = new FontFamily("Bahnschrift"),
-            FontSize = 12,
+            MinWidth = 42,
+            Text = text,
         };
 
         button.Click += OnRangeClick;
         return button;
     }
 
-    private static void OnRangeClick(object sender, RoutedEventArgs e)
+    private static void OnRangeClick(object? sender, EventArgs e)
     {
-        if (sender is Button { Tag: TimeRangePreset preset } button &&
+        if (sender is ActionChip { Tag: TimeRangePreset preset } button &&
             button.Parent is FrameworkElement parent)
         {
             var card = FindParent<TelemetryPanelCard>(parent);
             if (card?.Panel is not null)
             {
-                card.Panel.SelectedRange = preset;
+                card.Panel.ApplyRangePreset(preset);
             }
         }
+    }
+
+    private void OnChartZoomSelectionRequested(object? sender, ChartZoomSelectionEventArgs e)
+    {
+        Panel?.ZoomToWindow(e.StartUtc, e.EndUtc);
+    }
+
+    private void OnChartZoomResetRequested(object? sender, EventArgs e)
+    {
+        Panel?.ResetZoom();
+    }
+
+    private static (Border Row, TextBlock ValueText) CreateLegendRow(string name, Brush strokeBrush)
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        row.Children.Add(new Ellipse
+        {
+            Width = 8,
+            Height = 8,
+            Margin = new Thickness(0, 4, 10, 0),
+            Fill = strokeBrush,
+        });
+
+        var nameText = new TextBlock
+        {
+            FontSize = 12,
+            Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1"),
+            Text = name,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        row.Children.Add(nameText);
+        Grid.SetColumn(nameText, 1);
+
+        var valueText = new TextBlock
+        {
+            FontFamily = new FontFamily("Bahnschrift"),
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+            Text = "--",
+        };
+        row.Children.Add(valueText);
+        Grid.SetColumn(valueText, 2);
+
+        return (new Border
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = row,
+        }, valueText);
     }
 
     private static T? FindParent<T>(DependencyObject? start)
@@ -410,17 +479,11 @@ public sealed class TelemetryPanelCard : UserControl
         return null;
     }
 
-    private static void ApplyRangeState(Button control, bool isActive)
+    private static void ApplyRangeState(ActionChip control, bool isActive)
     {
-        control.Opacity = isActive ? 1 : 0.62;
-        control.Background = isActive
-            ? ResolveBrush("AccentSoftBrush", "#10394D")
-            : ResolveBrush("SurfaceStrongBrush", "#183148");
-        control.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-        control.BorderBrush = isActive
-            ? ResolveBrush("AccentStrongBrush", "#B7F7FF")
-            : ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        control.BorderThickness = new Thickness(1);
+        control.IsActive = isActive;
+        control.IsFilled = isActive;
+        control.Opacity = isActive ? 1 : 0.68;
     }
 
     private static TextBlock CreateTextBlock(string? fontFamily = null, double fontSize = 12, Windows.UI.Text.FontWeight? fontWeight = null) =>
@@ -453,7 +516,8 @@ public sealed class TelemetryPanelCard : UserControl
     private static string FormatValue(double value, MetricUnit unit) => unit switch
     {
         MetricUnit.Percent => $"{value:0.#}%",
-        MetricUnit.Gigabytes => $"{value:0.0} GB",
+        MetricUnit.Gigabytes when value >= 1024d => $"{value / 1024d:0.0} TiB",
+        MetricUnit.Gigabytes => $"{value:0.0} GiB",
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
         MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
         MetricUnit.Megahertz => $"{value / 1000d:0.00} GHz",

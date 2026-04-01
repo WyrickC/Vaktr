@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Vaktr.App.Services;
 using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
@@ -24,6 +25,7 @@ public sealed class App : Application
         base.OnLaunched(args);
         StartupTrace.Write("App.OnLaunched start");
         EnsureResourcesInitialized();
+        StartupTrace.Write("Resources initialized // launch-cut-v18");
         ApplyThemeResources(ThemeMode.Dark);
         StartupTrace.Write("Default theme applied");
 
@@ -42,7 +44,7 @@ public sealed class App : Application
 
         var metricStore = new SqliteMetricStore();
         var viewModel = new MainViewModel(config);
-        StartupTrace.Write("Stores and view model created // launch-cut-v10");
+        StartupTrace.Write("Stores and view model created // launch-cut-v18");
         ApplyThemeResources(config.Theme);
         StartupTrace.Write("Configured theme applied");
 
@@ -51,7 +53,7 @@ public sealed class App : Application
             metricStore,
             configStore,
             new AutoLaunchService());
-        StartupTrace.Write("ShellWindow created // polished-v10");
+        StartupTrace.Write("ShellWindow created // polished-v18");
 
         _window.ApplyTheme(config.Theme);
         StartupTrace.Write("Window theme applied");
@@ -146,7 +148,69 @@ public sealed class App : Application
 
     private void EnsureResourcesInitialized()
     {
+        StartupTrace.Write("EnsureResourcesInitialized start");
         Resources ??= new ResourceDictionary();
+        EnsureFrameworkFallbackResources();
+
+        var hasWinUiResources = Resources.MergedDictionaries.OfType<XamlControlsResources>().Any();
+        if (!hasWinUiResources)
+        {
+            try
+            {
+                StartupTrace.Write("Creating XamlControlsResources");
+                var controlsResources = new XamlControlsResources();
+                Resources.MergedDictionaries.Add(controlsResources);
+                StartupTrace.Write("XamlControlsResources merged");
+            }
+            catch (Exception ex)
+            {
+                StartupTrace.WriteException("XamlControlsResources merge", ex);
+            }
+        }
+
+        StartupTrace.Write("EnsureResourcesInitialized complete");
+    }
+
+    private void EnsureFrameworkFallbackResources()
+    {
+        SetBrushFallback("AcrylicBackgroundFillColorDefaultBrush", "#15283B");
+        SetBrushFallback("AcrylicInAppFillColorDefaultBrush", "#183148");
+        SetBrushFallback("LayerFillColorDefaultBrush", "#102131");
+        SetBrushFallback("LayerFillColorAltBrush", "#15283B");
+        SetBrushFallback("CardStrokeColorDefaultBrush", "#27425E");
+        StartupTrace.Write("Framework fallback resources seeded");
+    }
+
+    private void SetBrushFallback(string key, string hex)
+    {
+        if (!Resources.TryGetValue(key, out _))
+        {
+            Resources[key] = BrushFactory.CreateBrush(hex);
+        }
+
+        EnsureThemeBrushFallback("Default", key, hex);
+        EnsureThemeBrushFallback("Dark", key, hex);
+        EnsureThemeBrushFallback("Light", key, hex);
+    }
+
+    private void EnsureThemeBrushFallback(string themeKey, string resourceKey, string hex)
+    {
+        if (Resources.ThemeDictionaries.TryGetValue(themeKey, out var existing) &&
+            existing is ResourceDictionary existingDictionary)
+        {
+            if (!existingDictionary.TryGetValue(resourceKey, out _))
+            {
+                existingDictionary[resourceKey] = BrushFactory.CreateBrush(hex);
+            }
+
+            return;
+        }
+
+        var dictionary = new ResourceDictionary
+        {
+            [resourceKey] = BrushFactory.CreateBrush(hex),
+        };
+        Resources.ThemeDictionaries[themeKey] = dictionary;
     }
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)

@@ -1,8 +1,14 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
+using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
+using WinRT.Interop;
 using Vaktr.App.Controls;
 using Vaktr.App.Services;
 using Vaktr.App.ViewModels;
@@ -15,6 +21,8 @@ namespace Vaktr.App;
 public sealed partial class ShellWindow : Window
 {
     private static readonly TimeSpan StartupYieldDelay = TimeSpan.FromMilliseconds(30);
+    private static readonly int[] ScrapeIntervalPresets = [1, 2, 5, 10, 15, 30, 60];
+    private static readonly int[] RetentionHourPresets = [1, 6, 12, 24, 48, 72, 168, 336, 720, 2160, 8760];
 
     private readonly MainViewModel _viewModel;
     private readonly IMetricStore _metricStore;
@@ -23,15 +31,20 @@ public sealed partial class ShellWindow : Window
     private readonly Dictionary<string, TelemetryPanelCard> _panelCards = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Grid _rootLayout;
-    private readonly StackPanel _controlsBodyHost;
+    private readonly Border _controlsBodyHost;
+    private readonly Border _brandHost;
     private readonly StackPanel _summaryHost;
     private readonly Grid _dashboardGrid;
-    private readonly StackPanel _panelToggleHost;
     private readonly TextBlock _statusText;
 
     private CollectorService? _collectorService;
+    private nint _windowIconHandle;
+    private bool _controlDeckEditableActive;
     private bool _dashboardRefreshQueued;
     private bool _initialized;
+    private int _lastDashboardColumnCount;
+    private bool _windowIconApplied;
+    private bool _summaryCardsBound;
 
     public ShellWindow(
         MainViewModel viewModel,
@@ -39,7 +52,7 @@ public sealed partial class ShellWindow : Window
         IConfigStore configStore,
         AutoLaunchService autoLaunchService)
     {
-        StartupTrace.Write("ShellWindow ctor start // polished-v10");
+        StartupTrace.Write("ShellWindow ctor start // polished-v17");
         _viewModel = viewModel;
         _metricStore = metricStore;
         _configStore = configStore;
@@ -48,10 +61,8 @@ public sealed partial class ShellWindow : Window
         Title = "Vaktr";
 
         _statusText = CreateSecondaryText(string.Empty, 12);
-        _controlsBodyHost = new StackPanel
-        {
-            Spacing = 14,
-        };
+        _controlsBodyHost = new Border();
+        _brandHost = CreateBrandPlaceholder();
         _summaryHost = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -62,11 +73,6 @@ public sealed partial class ShellWindow : Window
             ColumnSpacing = 18,
             RowSpacing = 18,
         };
-        _panelToggleHost = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-        };
 
         _rootLayout = BuildRootLayout();
         Content = _rootLayout;
@@ -75,13 +81,14 @@ public sealed partial class ShellWindow : Window
         _viewModel.DashboardPanels.CollectionChanged += OnDashboardPanelsChanged;
         _viewModel.PanelToggles.CollectionChanged += OnPanelTogglesChanged;
         Closed += OnWindowClosed;
+        Activated += OnWindowActivated;
 
-        RenderStartupControls();
+        RenderControlDeckSummary();
         RenderSummaryPlaceholders();
         RefreshDashboardPanels();
         UpdateStatusText();
         ApplyTheme(_viewModel.SelectedTheme);
-        StartupTrace.Write("ShellWindow ctor complete // polished-v10");
+        StartupTrace.Write("ShellWindow ctor complete // polished-v17");
     }
 
     public void ApplyTheme(ThemeMode mode)
@@ -91,7 +98,12 @@ public sealed partial class ShellWindow : Window
 
     private void BuildSummaryCards()
     {
-        StartupTrace.Write("BuildSummaryCards // polished-v10");
+        if (_summaryCardsBound)
+        {
+            return;
+        }
+
+        StartupTrace.Write("BuildSummaryCards // polished-v17");
         _summaryHost.Children.Clear();
         foreach (var card in _viewModel.SummaryCards)
         {
@@ -165,16 +177,17 @@ public sealed partial class ShellWindow : Window
                 Child = row,
             });
         }
+
+        _summaryCardsBound = true;
     }
 
     private void RefreshPanelToggles()
     {
-        StartupTrace.Write("RefreshPanelToggles // polished-v10");
     }
 
     private void RefreshDashboardPanels()
     {
-        StartupTrace.Write("RefreshDashboardPanels // polished-v10");
+        StartupTrace.Write("RefreshDashboardPanels // polished-v17");
         var panels = _viewModel.DashboardPanels.ToArray();
         var activeKeys = new HashSet<string>(panels.Select(panel => panel.PanelKey), StringComparer.OrdinalIgnoreCase);
         foreach (var staleKey in _panelCards.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
@@ -206,6 +219,7 @@ public sealed partial class ShellWindow : Window
         }
 
         var columns = DetermineDashboardColumns();
+        _lastDashboardColumnCount = columns;
         for (var column = 0; column < columns; column++)
         {
             _dashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -240,20 +254,25 @@ public sealed partial class ShellWindow : Window
         }
 
         _initialized = true;
-        StartupTrace.Write("OnRootLoaded start // polished-v10");
+        StartupTrace.Write("OnRootLoaded start // polished-v17");
 
         try
         {
             await Task.Delay(StartupYieldDelay);
             var config = _viewModel.BuildConfig();
-            StartupTrace.Write("OnRootLoaded resumed after first paint // polished-v10");
-            RenderAdvancedControls();
+            StartupTrace.Write("OnRootLoaded resumed after first paint // polished-v17");
             App.CurrentApp.ApplyTheme(config.Theme);
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
             await TryLoadHistoryAsync(config);
             await EnsureCollectorRunningAsync(config);
             App.CurrentApp.MarkStartupSettled();
-            StartupTrace.Write("OnRootLoaded complete // polished-v10");
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                RenderEditableControlDeck();
+                TryApplyWindowIcon();
+                TryLoadBrandImage();
+            });
+            StartupTrace.Write("OnRootLoaded complete // polished-v17");
         }
         catch (Exception ex)
         {
@@ -269,6 +288,13 @@ public sealed partial class ShellWindow : Window
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.DashboardPanels.CollectionChanged -= OnDashboardPanelsChanged;
         _viewModel.PanelToggles.CollectionChanged -= OnPanelTogglesChanged;
+        Activated -= OnWindowActivated;
+
+        if (_windowIconHandle != 0)
+        {
+            NativeWindowMethods.DestroyIcon(_windowIconHandle);
+            _windowIconHandle = 0;
+        }
 
         if (_collectorService is not null)
         {
@@ -278,7 +304,17 @@ public sealed partial class ShellWindow : Window
         }
     }
 
-    private async void OnSaveSettingsClick(object sender, RoutedEventArgs e)
+    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (_windowIconApplied)
+        {
+            return;
+        }
+
+        _ = DispatcherQueue.TryEnqueue(TryApplyWindowIcon);
+    }
+
+    private async void OnSaveSettingsClick(object? sender, EventArgs e)
     {
         try
         {
@@ -287,6 +323,8 @@ public sealed partial class ShellWindow : Window
 
             _viewModel.ApplyPanelVisibility();
             var config = _viewModel.BuildConfig();
+            _viewModel.ApplyConfig(config);
+            RenderEditableControlDeck();
             App.CurrentApp.ApplyTheme(config.Theme);
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
             await _configStore.SaveAsync(config, CancellationToken.None);
@@ -309,13 +347,17 @@ public sealed partial class ShellWindow : Window
         }
     }
 
-    private void OnThemeQuickToggle(object sender, RoutedEventArgs e)
+    private void OnThemeQuickToggle(object? sender, EventArgs e)
     {
         _viewModel.SelectedTheme = _viewModel.SelectedTheme == ThemeMode.Dark
             ? ThemeMode.Light
             : ThemeMode.Dark;
 
         App.CurrentApp.ApplyTheme(_viewModel.SelectedTheme);
+        if (_controlDeckEditableActive)
+        {
+            RenderEditableControlDeck();
+        }
     }
 
     private void OnSnapshotCollected(object? sender, MetricSnapshot snapshot)
@@ -323,7 +365,6 @@ public sealed partial class ShellWindow : Window
         _ = DispatcherQueue.TryEnqueue(() =>
         {
             _viewModel.ApplySnapshot(snapshot);
-            BuildSummaryCards();
             UpdateStatusText();
         });
     }
@@ -356,7 +397,7 @@ public sealed partial class ShellWindow : Window
                 return;
             }
 
-            StartupTrace.Write("Queued dashboard refresh after resize // polished-v10");
+            StartupTrace.Write("Queued dashboard refresh after resize // polished-v17");
             RefreshDashboardPanels();
         });
     }
@@ -368,19 +409,127 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
+        var nextColumnCount = DetermineDashboardColumns();
+        if (nextColumnCount == _lastDashboardColumnCount)
+        {
+            return;
+        }
+
         QueueDashboardRefresh();
     }
 
-    private void OnDashboardPanelsChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshDashboardPanels();
+    private void OnDashboardPanelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_initialized)
+        {
+            QueueDashboardRefresh();
+            return;
+        }
 
-    private void OnPanelTogglesChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshPanelToggles();
+        RefreshDashboardPanels();
+    }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (string.Equals(e.PropertyName, nameof(MainViewModel.StatusText), StringComparison.Ordinal))
         {
             UpdateStatusText();
+            return;
         }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.StorageDirectory), StringComparison.Ordinal) ||
+            string.Equals(e.PropertyName, nameof(MainViewModel.ScrapeIntervalInput), StringComparison.Ordinal) ||
+            string.Equals(e.PropertyName, nameof(MainViewModel.RetentionHoursInput), StringComparison.Ordinal) ||
+            string.Equals(e.PropertyName, nameof(MainViewModel.LaunchOnStartup), StringComparison.Ordinal) ||
+            string.Equals(e.PropertyName, nameof(MainViewModel.MinimizeToTray), StringComparison.Ordinal))
+        {
+            if (!_controlDeckEditableActive)
+            {
+                RenderControlDeckSummary();
+            }
+        }
+    }
+
+    private void OnPanelTogglesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+    }
+
+    private void StepScrapeInterval(int direction)
+    {
+        var next = MoveThroughPresets(_viewModel.EffectiveScrapeIntervalSeconds, ScrapeIntervalPresets, direction);
+        _viewModel.ScrapeIntervalInput = next == VaktrConfig.DefaultScrapeIntervalSeconds
+            ? string.Empty
+            : next.ToString(CultureInfo.InvariantCulture);
+        RenderEditableControlDeck();
+    }
+
+    private void ResetScrapeInterval()
+    {
+        _viewModel.ScrapeIntervalInput = string.Empty;
+        RenderEditableControlDeck();
+    }
+
+    private void StepRetentionHours(int direction)
+    {
+        var next = MoveThroughPresets(_viewModel.EffectiveRetentionHours, RetentionHourPresets, direction);
+        _viewModel.RetentionHoursInput = next == VaktrConfig.DefaultMaxRetentionHours
+            ? string.Empty
+            : next.ToString(CultureInfo.InvariantCulture);
+        RenderEditableControlDeck();
+    }
+
+    private void ResetRetentionHours()
+    {
+        _viewModel.RetentionHoursInput = string.Empty;
+        RenderEditableControlDeck();
+    }
+
+    private void ResetStorageDirectory()
+    {
+        _viewModel.StorageDirectory = string.Empty;
+        RenderEditableControlDeck();
+    }
+
+    private void SetStorageDirectory(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        _viewModel.StorageDirectory = value.Trim();
+        RenderEditableControlDeck();
+    }
+
+    private static int MoveThroughPresets(int currentValue, IReadOnlyList<int> presets, int direction)
+    {
+        if (presets.Count == 0)
+        {
+            return currentValue;
+        }
+
+        if (direction > 0)
+        {
+            foreach (var preset in presets)
+            {
+                if (preset > currentValue)
+                {
+                    return preset;
+                }
+            }
+
+            return presets[^1];
+        }
+
+        for (var index = presets.Count - 1; index >= 0; index--)
+        {
+            if (presets[index] < currentValue)
+            {
+                return presets[index];
+            }
+        }
+
+        return presets[0];
     }
 
     private void UpdateStatusText()
@@ -388,8 +537,75 @@ public sealed partial class ShellWindow : Window
         _statusText.Text = _viewModel.StatusText;
     }
 
+    private void TryApplyWindowIcon()
+    {
+        if (_windowIconApplied)
+        {
+            return;
+        }
+
+        try
+        {
+            var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Vaktr.ico");
+            if (File.Exists(iconPath))
+            {
+                AppWindow.SetIcon(iconPath);
+                var windowHandle = WindowNative.GetWindowHandle(this);
+                if (windowHandle != 0)
+                {
+                    if (_windowIconHandle != 0)
+                    {
+                        NativeWindowMethods.DestroyIcon(_windowIconHandle);
+                        _windowIconHandle = 0;
+                    }
+
+                    _windowIconHandle = NativeWindowMethods.LoadWindowIcon(iconPath);
+                    if (_windowIconHandle != 0)
+                    {
+                        NativeWindowMethods.ApplyWindowIcon(windowHandle, _windowIconHandle);
+                        _windowIconApplied = true;
+                        StartupTrace.Write("Window icon applied // polished-v17");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("ApplyWindowIcon", ex);
+        }
+    }
+
+    private void TryLoadBrandImage()
+    {
+        try
+        {
+            var imagePath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "vaktr.png");
+            if (!File.Exists(imagePath))
+            {
+                return;
+            }
+
+            StartupTrace.Write("TryLoadBrandImage start // polished-v17");
+            var bitmap = new BitmapImage();
+            bitmap.UriSource = new Uri(imagePath);
+
+            _brandHost.Padding = new Thickness(6);
+            _brandHost.Child = new Microsoft.UI.Xaml.Controls.Image
+            {
+                Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
+                Source = bitmap,
+            };
+            StartupTrace.Write("TryLoadBrandImage complete // polished-v17");
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("TryLoadBrandImage", ex);
+        }
+    }
+
     private void RenderSummaryPlaceholders()
     {
+        _summaryCardsBound = false;
         _summaryHost.Children.Clear();
         _summaryHost.Children.Add(CreatePlaceholderCard("CPU", "Waiting for first sample"));
         _summaryHost.Children.Add(CreatePlaceholderCard("Memory", "Loading local history"));
@@ -431,7 +647,50 @@ public sealed partial class ShellWindow : Window
         UpdateStatusText();
         await _collectorService.StartAsync(config, CancellationToken.None);
 
+        if (!_summaryCardsBound)
+        {
+            BuildSummaryCards();
+        }
         _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0 ? "Streaming local telemetry" : "Waiting for first sample";
         UpdateStatusText();
     }
+}
+
+internal static class NativeWindowMethods
+{
+    private const uint ImageIcon = 1;
+    private const uint LoadFromFile = 0x0010;
+    private const uint DefaultSize = 0x0040;
+    private const uint WindowSetIcon = 0x0080;
+    private const int IconSmall = 0;
+    private const int IconBig = 1;
+
+    public static nint LoadWindowIcon(string iconPath) =>
+        LoadImageW(0, iconPath, ImageIcon, 0, 0, LoadFromFile | DefaultSize);
+
+    public static void ApplyWindowIcon(nint windowHandle, nint iconHandle)
+    {
+        SendMessageW(windowHandle, WindowSetIcon, (nint)IconSmall, iconHandle);
+        SendMessageW(windowHandle, WindowSetIcon, (nint)IconBig, iconHandle);
+    }
+
+    [DllImport("user32.dll", EntryPoint = "LoadImageW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint LoadImageW(
+        nint instanceHandle,
+        string name,
+        uint imageType,
+        int desiredWidth,
+        int desiredHeight,
+        uint loadFlags);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
+    private static extern nint SendMessageW(
+        nint windowHandle,
+        uint message,
+        nint wordParameter,
+        nint longParameter);
+
+    [DllImport("user32.dll", EntryPoint = "DestroyIcon", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(nint iconHandle);
 }

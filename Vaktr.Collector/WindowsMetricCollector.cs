@@ -288,6 +288,8 @@ public sealed class WindowsMetricCollector : IMetricCollector
                     continue;
                 }
 
+                var totalGb = totalBytes / 1024d / 1024d / 1024d;
+                var usedGb = Math.Max(0d, totalGb - (drive.AvailableFreeSpace / 1024d / 1024d / 1024d));
                 var usedPercent = Math.Clamp((1d - (drive.AvailableFreeSpace / (double)totalBytes)) * 100d, 0d, 100d);
                 var driveLabel = drive.Name.TrimEnd('\\');
                 samples.Add(new MetricSample(
@@ -298,6 +300,26 @@ public sealed class WindowsMetricCollector : IMetricCollector
                     MetricCategory.Disk,
                     MetricUnit.Percent,
                     usedPercent,
+                    timestamp));
+
+                samples.Add(new MetricSample(
+                    $"volume-{Sanitize(driveLabel)}",
+                    $"Drive {driveLabel} Usage",
+                    "used-gb",
+                    "Used GiB",
+                    MetricCategory.Disk,
+                    MetricUnit.Gigabytes,
+                    usedGb,
+                    timestamp));
+
+                samples.Add(new MetricSample(
+                    $"volume-{Sanitize(driveLabel)}",
+                    $"Drive {driveLabel} Usage",
+                    "total-gb",
+                    "Total GiB",
+                    MetricCategory.Disk,
+                    MetricUnit.Gigabytes,
+                    totalGb,
                     timestamp));
             }
             catch (IOException)
