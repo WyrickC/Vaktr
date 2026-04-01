@@ -55,7 +55,7 @@ public sealed class TelemetryPanelCard : UserControl
             VerticalAlignment = VerticalAlignment.Center,
         };
         _footerText = CreateTextBlock(fontSize: 11);
-        _scaleText = CreateTextBlock("Bahnschrift", 11, FontWeights.SemiBold);
+        _scaleText = CreateTextBlock("Segoe UI Variable Text", 11, FontWeights.Medium);
         _titleText = CreateTextBlock("Segoe UI Variable Display", 22, FontWeights.SemiBold);
         _currentValueText = CreateTextBlock("Segoe UI Variable Display", 27, FontWeights.SemiBold);
         _secondaryValueText = CreateTextBlock(fontSize: 13);

@@ -5,6 +5,9 @@ namespace Vaktr.Collector;
 
 public sealed class CollectorService : IAsyncDisposable
 {
+    private static readonly TimeSpan InitialCollectionTimeout = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan RecurringCollectionTimeout = TimeSpan.FromSeconds(8);
+
     private readonly IMetricCollector _collector;
     private readonly IMetricStore _store;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -33,6 +36,7 @@ public sealed class CollectorService : IAsyncDisposable
             await _store.PruneAsync(config, cancellationToken).ConfigureAwait(false);
 
             _loopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            await CollectOnceAsync(_loopCancellation.Token, InitialCollectionTimeout).ConfigureAwait(false);
             _timer = new PeriodicTimer(TimeSpan.FromSeconds(config.ScrapeIntervalSeconds));
             _loopTask = Task.Run(() => RunLoopAsync(_timer, _loopCancellation.Token));
         }
@@ -65,8 +69,6 @@ public sealed class CollectorService : IAsyncDisposable
 
     private async Task RunLoopAsync(PeriodicTimer timer, CancellationToken cancellationToken)
     {
-        await CollectOnceAsync(cancellationToken).ConfigureAwait(false);
-
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -81,17 +83,24 @@ public sealed class CollectorService : IAsyncDisposable
                 break;
             }
 
-            await CollectOnceAsync(cancellationToken).ConfigureAwait(false);
+            await CollectOnceAsync(cancellationToken, RecurringCollectionTimeout).ConfigureAwait(false);
         }
     }
 
-    private async Task CollectOnceAsync(CancellationToken cancellationToken)
+    private async Task CollectOnceAsync(CancellationToken cancellationToken, TimeSpan timeout)
     {
+        using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCancellation.CancelAfter(timeout);
+
         try
         {
-            var snapshot = await _collector.CollectAsync(cancellationToken).ConfigureAwait(false);
-            await _store.AppendSnapshotAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            var snapshot = await _collector.CollectAsync(timeoutCancellation.Token).ConfigureAwait(false);
+            await _store.AppendSnapshotAsync(snapshot, timeoutCancellation.Token).ConfigureAwait(false);
             SnapshotCollected?.Invoke(this, snapshot);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            CollectionFailed?.Invoke(this, new TimeoutException($"Telemetry sampling exceeded {timeout.TotalSeconds:0.#} seconds."));
         }
         catch (OperationCanceledException)
         {

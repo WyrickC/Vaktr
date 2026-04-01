@@ -40,6 +40,7 @@ public sealed class SqliteMetricStore : IMetricStore
             _insertCommand is not null)
         {
             _config = config;
+            _nextMaintenanceUtc = DateTimeOffset.UtcNow.Add(MaintenanceInterval);
             return;
         }
 
@@ -161,6 +162,8 @@ public sealed class SqliteMetricStore : IMetricStore
         _valueParameter = _insertCommand.CreateParameter();
         _valueParameter.ParameterName = "$value";
         _insertCommand.Parameters.Add(_valueParameter);
+
+        _nextMaintenanceUtc = DateTimeOffset.UtcNow.Add(MaintenanceInterval);
     }
 
     public async Task AppendSnapshotAsync(MetricSnapshot snapshot, CancellationToken cancellationToken)

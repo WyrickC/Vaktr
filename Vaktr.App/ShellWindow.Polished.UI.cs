@@ -147,7 +147,7 @@ public sealed partial class ShellWindow
                 new TextBlock
                 {
                     Text = "\u203A",
-                    FontFamily = new FontFamily("Bahnschrift"),
+                    FontFamily = new FontFamily("Segoe UI Variable Display"),
                     FontSize = 18,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1"),
@@ -430,12 +430,14 @@ public sealed partial class ShellWindow
         var actionRow = new Grid
         {
             ColumnSpacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
         };
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         actionRow.Children.Add(new StackPanel
         {
             Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
                 CreateSecondaryText($"Default: {VaktrConfig.DefaultStorageDirectory} // drag charts to zoom, double-click to reset.", 12),

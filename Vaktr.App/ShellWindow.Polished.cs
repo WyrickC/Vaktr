@@ -44,11 +44,13 @@ public sealed partial class ShellWindow : Window
     private nint _windowIconHandle;
     private bool _controlDeckEditableActive;
     private bool _dashboardRefreshQueued;
+    private bool _hasReceivedFirstSnapshot;
     private bool _initialized;
     private int _lastDashboardColumnCount;
     private int _lastSummaryColumnCount;
     private bool _windowIconApplied;
     private bool _summaryCardsBound;
+    private string _lastRenderedStatusText = string.Empty;
 
     public ShellWindow(
         MainViewModel viewModel,
@@ -88,7 +90,7 @@ public sealed partial class ShellWindow : Window
         Activated += OnWindowActivated;
 
         RenderControlDeckSummary();
-        RenderSummaryPlaceholders();
+        BuildSummaryCards();
         RefreshDashboardPanels();
         UpdateStatusText();
         ApplyTheme(_viewModel.SelectedTheme);
@@ -135,7 +137,7 @@ public sealed partial class ShellWindow : Window
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
             var valueText = CreatePrimaryText(string.Empty, 28, true);
-            valueText.FontFamily = new FontFamily("Bahnschrift");
+            valueText.FontFamily = new FontFamily("Segoe UI Variable Display");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
             var captionText = CreateSecondaryText(string.Empty, 12);
@@ -429,6 +431,12 @@ public sealed partial class ShellWindow : Window
     {
         _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
+            if (!_hasReceivedFirstSnapshot)
+            {
+                _hasReceivedFirstSnapshot = true;
+                StartupTrace.Write($"First snapshot collected // samples={snapshot.Samples.Count}");
+            }
+
             _viewModel.ApplySnapshot(snapshot);
             UpdateStatusText();
         });
@@ -438,6 +446,7 @@ public sealed partial class ShellWindow : Window
     {
         _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
+            StartupTrace.WriteException("Collection failed", ex);
             if (_viewModel.DashboardPanels.Count == 0)
             {
                 _viewModel.StatusText = $"Telemetry retrying: {ex.Message}";
@@ -730,11 +739,6 @@ public sealed partial class ShellWindow : Window
         return presets[0];
     }
 
-    private void UpdateStatusText()
-    {
-        _statusText.Text = _viewModel.StatusText;
-    }
-
     private void TryApplyWindowIcon()
     {
         if (_windowIconApplied)
@@ -863,6 +867,7 @@ public sealed partial class ShellWindow : Window
     {
         try
         {
+            StartupTrace.Write("TryLoadHistoryAsync start");
             _viewModel.StatusText = "Loading local history";
             UpdateStatusText();
 
@@ -873,6 +878,7 @@ public sealed partial class ShellWindow : Window
             _viewModel.LoadHistory(history);
             BuildSummaryCards();
             RefreshDashboardPanels();
+            StartupTrace.Write($"TryLoadHistoryAsync complete // panels={history.Count}");
         }
         catch (Exception ex)
         {
@@ -884,6 +890,7 @@ public sealed partial class ShellWindow : Window
 
     private async Task EnsureCollectorRunningAsync(VaktrConfig config)
     {
+        StartupTrace.Write("EnsureCollectorRunningAsync start");
         _collectorService ??= new CollectorService(new WindowsMetricCollector(), _metricStore);
         _collectorService.SnapshotCollected -= OnSnapshotCollected;
         _collectorService.CollectionFailed -= OnCollectionFailed;
@@ -900,6 +907,19 @@ public sealed partial class ShellWindow : Window
         }
         _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0 ? "Streaming local telemetry" : "Waiting for first sample";
         UpdateStatusText();
+        StartupTrace.Write($"EnsureCollectorRunningAsync complete // dashboardPanels={_viewModel.DashboardPanels.Count}");
+    }
+
+    private void UpdateStatusText()
+    {
+        var text = _viewModel.StatusText;
+        _statusText.Text = text;
+
+        if (!string.Equals(_lastRenderedStatusText, text, StringComparison.Ordinal))
+        {
+            _lastRenderedStatusText = text;
+            StartupTrace.Write($"StatusText -> {text}");
+        }
     }
 }
 
