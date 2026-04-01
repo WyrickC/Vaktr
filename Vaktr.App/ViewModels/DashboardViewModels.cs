@@ -185,7 +185,7 @@ public sealed class MainViewModel : ObservableObject
             : normalized.ScrapeIntervalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         RetentionHoursInput = normalized.MaxRetentionHours == VaktrConfig.DefaultMaxRetentionHours
             ? string.Empty
-            : normalized.MaxRetentionHours.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            : FormatRetentionInput(normalized.MaxRetentionHours);
         SelectedIntervalSeconds = normalized.ScrapeIntervalSeconds;
         SelectedWindowMinutes = normalized.GraphWindowMinutes;
         SelectedTheme = normalized.Theme;
@@ -260,12 +260,92 @@ public sealed class MainViewModel : ObservableObject
         ParseOptionalInt(ScrapeIntervalInput, VaktrConfig.DefaultScrapeIntervalSeconds, 1, 60);
 
     public int EffectiveRetentionHours =>
-        ParseOptionalInt(RetentionHoursInput, VaktrConfig.DefaultMaxRetentionHours, 1, 24 * 3650);
+        TryParseRetentionInput(RetentionHoursInput, out var hours, out _)
+            ? hours
+            : VaktrConfig.DefaultMaxRetentionHours;
 
     public string EffectiveStorageDirectory =>
         string.IsNullOrWhiteSpace(StorageDirectory)
             ? VaktrConfig.DefaultStorageDirectory
             : StorageDirectory.Trim();
+
+    public bool HasValidRetentionInput =>
+        TryParseRetentionInput(RetentionHoursInput, out _, out _);
+
+    public static bool TryParseRetentionInput(string? text, out int hours, out string normalizedText)
+    {
+        hours = VaktrConfig.DefaultMaxRetentionHours;
+        normalizedText = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        var trimmed = text.Trim();
+        if (trimmed.Length < 2)
+        {
+            return false;
+        }
+
+        var unit = char.ToLowerInvariant(trimmed[^1]);
+        var amountText = trimmed[..^1].Trim();
+        if (!int.TryParse(amountText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var amount) ||
+            amount <= 0)
+        {
+            return false;
+        }
+
+        switch (unit)
+        {
+            case 'm':
+            {
+                var maxMinutes = 24 * 3650 * 60;
+                if (amount > maxMinutes)
+                {
+                    return false;
+                }
+
+                hours = Math.Clamp((int)Math.Ceiling(amount / 60d), 1, 24 * 3650);
+                normalizedText = $"{amount}m";
+                return true;
+            }
+            case 'h':
+            {
+                if (amount > 24 * 3650)
+                {
+                    return false;
+                }
+
+                hours = amount;
+                normalizedText = $"{amount}h";
+                return true;
+            }
+            case 'd':
+            {
+                if (amount > 3650)
+                {
+                    return false;
+                }
+
+                hours = amount * 24;
+                normalizedText = $"{amount}d";
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
+    public static string FormatRetentionInput(int hours)
+    {
+        if (hours > 0 && hours % 24 == 0)
+        {
+            return $"{hours / 24}d";
+        }
+
+        return $"{hours}h";
+    }
 
     private MetricPanelViewModel GetOrCreatePanel(string panelKey, string title, MetricCategory category, MetricUnit unit)
     {
@@ -484,6 +564,7 @@ public sealed class PanelToggleViewModel : ObservableObject
 public sealed class MetricPanelViewModel : ObservableObject
 {
     private static readonly TimeSpan LiveBufferWindow = TimeSpan.FromMinutes(75);
+    private static readonly TimeSpan BufferTrimInterval = TimeSpan.FromSeconds(20);
     private readonly Dictionary<string, SeriesBuffer> _buffers = new(StringComparer.OrdinalIgnoreCase);
     private readonly SolidColorBrush _accentBrush;
 
@@ -631,9 +712,17 @@ public sealed class MetricPanelViewModel : ObservableObject
     public void LoadHistory(MetricSeriesHistory history)
     {
         _buffers.Clear();
+        var paletteIndex = 0;
         foreach (var series in history.Series)
         {
-            _buffers[series.SeriesKey] = new SeriesBuffer(series.SeriesKey, series.SeriesName, series.Points.ToList());
+            _buffers[series.SeriesKey] = new SeriesBuffer(
+                series.SeriesKey,
+                series.SeriesName,
+                series.Points.ToList(),
+                ResolveBrush(paletteIndex),
+                ResolveFillBrush(paletteIndex),
+                series.Points.LastOrDefault()?.Timestamp ?? DateTimeOffset.UtcNow);
+            paletteIndex++;
         }
 
         RefreshPresentation();
@@ -643,13 +732,24 @@ public sealed class MetricPanelViewModel : ObservableObject
     {
         if (!_buffers.TryGetValue(sample.SeriesKey, out var buffer))
         {
-            buffer = new SeriesBuffer(sample.SeriesKey, sample.SeriesName, []);
+            var paletteIndex = _buffers.Count;
+            buffer = new SeriesBuffer(
+                sample.SeriesKey,
+                sample.SeriesName,
+                [],
+                ResolveBrush(paletteIndex),
+                ResolveFillBrush(paletteIndex),
+                sample.Timestamp);
             _buffers.Add(sample.SeriesKey, buffer);
         }
 
         buffer.Points.Add(new MetricPoint(sample.Timestamp, sample.Value));
-        var keepAfter = sample.Timestamp - LiveBufferWindow;
-        buffer.Points.RemoveAll(point => point.Timestamp < keepAfter);
+        if (sample.Timestamp - buffer.LastTrimUtc >= BufferTrimInterval)
+        {
+            var keepAfter = sample.Timestamp - LiveBufferWindow;
+            buffer.Points.RemoveAll(point => point.Timestamp < keepAfter);
+            buffer.LastTrimUtc = sample.Timestamp;
+        }
 
         RefreshPresentation(sample.Timestamp);
     }
@@ -741,12 +841,12 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         var visibleSeries = _buffers.Values
             .Where(ShouldShowSeries)
-            .Select((buffer, index) =>
+            .Select(buffer =>
             {
                 var points = buffer.Points.Where(point => point.Timestamp >= start && point.Timestamp <= end).ToArray();
                 return points.Length == 0
                     ? null
-                    : new ChartSeriesViewModel(buffer.Name, points, ResolveBrush(index), ResolveFillBrush(index));
+                    : new ChartSeriesViewModel(buffer.Name, points, buffer.StrokeBrush, buffer.FillBrush);
             })
             .Where(series => series is not null)
             .Cast<ChartSeriesViewModel>()
@@ -914,11 +1014,20 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private sealed class SeriesBuffer
     {
-        public SeriesBuffer(string key, string name, List<MetricPoint> points)
+        public SeriesBuffer(
+            string key,
+            string name,
+            List<MetricPoint> points,
+            SolidColorBrush strokeBrush,
+            SolidColorBrush fillBrush,
+            DateTimeOffset lastTrimUtc)
         {
             Key = key;
             Name = name;
             Points = points;
+            StrokeBrush = strokeBrush;
+            FillBrush = fillBrush;
+            LastTrimUtc = lastTrimUtc;
         }
 
         public string Key { get; }
@@ -926,6 +1035,12 @@ public sealed class MetricPanelViewModel : ObservableObject
         public string Name { get; }
 
         public List<MetricPoint> Points { get; }
+
+        public SolidColorBrush StrokeBrush { get; }
+
+        public SolidColorBrush FillBrush { get; }
+
+        public DateTimeOffset LastTrimUtc { get; set; }
     }
 }
 

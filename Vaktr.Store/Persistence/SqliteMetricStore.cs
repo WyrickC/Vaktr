@@ -13,23 +13,54 @@ public sealed class SqliteMetricStore : IMetricStore
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _connectionString;
     private VaktrConfig? _config;
+    private SqliteConnection? _writeConnection;
+    private SqliteCommand? _insertCommand;
+    private SqliteParameter? _panelKeyParameter;
+    private SqliteParameter? _panelTitleParameter;
+    private SqliteParameter? _seriesKeyParameter;
+    private SqliteParameter? _seriesNameParameter;
+    private SqliteParameter? _categoryParameter;
+    private SqliteParameter? _unitParameter;
+    private SqliteParameter? _timestampMsParameter;
+    private SqliteParameter? _valueParameter;
     private DateTimeOffset _nextMaintenanceUtc = DateTimeOffset.MinValue;
 
     public async Task InitializeAsync(VaktrConfig config, CancellationToken cancellationToken)
     {
         config = config.Normalize();
         Directory.CreateDirectory(config.StorageDirectory);
-        _connectionString = new SqliteConnectionStringBuilder
+        var nextConnectionString = new SqliteConnectionStringBuilder
         {
             DataSource = config.GetDatabasePath(),
             Mode = SqliteOpenMode.ReadWriteCreate,
         }.ToString();
+
+        if (string.Equals(_connectionString, nextConnectionString, StringComparison.Ordinal) &&
+            _writeConnection is not null &&
+            _insertCommand is not null)
+        {
+            _config = config;
+            return;
+        }
+
+        _connectionString = nextConnectionString;
         _config = config;
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        if (_insertCommand is not null)
+        {
+            await _insertCommand.DisposeAsync().ConfigureAwait(false);
+            _insertCommand = null;
+        }
 
-        var command = connection.CreateCommand();
+        if (_writeConnection is not null)
+        {
+            await _writeConnection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _writeConnection = new SqliteConnection(_connectionString);
+        await _writeConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        var command = _writeConnection.CreateCommand();
         command.CommandText =
             """
             PRAGMA journal_mode = WAL;
@@ -73,6 +104,63 @@ public sealed class SqliteMetricStore : IMetricStore
             """;
 
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        _insertCommand = _writeConnection.CreateCommand();
+        _insertCommand.CommandText =
+            """
+            INSERT INTO metric_samples (
+                panel_key,
+                panel_title,
+                series_key,
+                series_name,
+                category,
+                unit,
+                timestamp_ms,
+                value
+            )
+            VALUES (
+                $panelKey,
+                $panelTitle,
+                $seriesKey,
+                $seriesName,
+                $category,
+                $unit,
+                $timestampMs,
+                $value
+            );
+            """;
+
+        _panelKeyParameter = _insertCommand.CreateParameter();
+        _panelKeyParameter.ParameterName = "$panelKey";
+        _insertCommand.Parameters.Add(_panelKeyParameter);
+
+        _panelTitleParameter = _insertCommand.CreateParameter();
+        _panelTitleParameter.ParameterName = "$panelTitle";
+        _insertCommand.Parameters.Add(_panelTitleParameter);
+
+        _seriesKeyParameter = _insertCommand.CreateParameter();
+        _seriesKeyParameter.ParameterName = "$seriesKey";
+        _insertCommand.Parameters.Add(_seriesKeyParameter);
+
+        _seriesNameParameter = _insertCommand.CreateParameter();
+        _seriesNameParameter.ParameterName = "$seriesName";
+        _insertCommand.Parameters.Add(_seriesNameParameter);
+
+        _categoryParameter = _insertCommand.CreateParameter();
+        _categoryParameter.ParameterName = "$category";
+        _insertCommand.Parameters.Add(_categoryParameter);
+
+        _unitParameter = _insertCommand.CreateParameter();
+        _unitParameter.ParameterName = "$unit";
+        _insertCommand.Parameters.Add(_unitParameter);
+
+        _timestampMsParameter = _insertCommand.CreateParameter();
+        _timestampMsParameter.ParameterName = "$timestampMs";
+        _insertCommand.Parameters.Add(_timestampMsParameter);
+
+        _valueParameter = _insertCommand.CreateParameter();
+        _valueParameter.ParameterName = "$value";
+        _insertCommand.Parameters.Add(_valueParameter);
     }
 
     public async Task AppendSnapshotAsync(MetricSnapshot snapshot, CancellationToken cancellationToken)
@@ -86,83 +174,32 @@ public sealed class SqliteMetricStore : IMetricStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var connection = EnsureWriteConnectionInitialized();
+            var command = EnsureInsertCommandInitialized();
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-
-            var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText =
-                """
-                INSERT INTO metric_samples (
-                    panel_key,
-                    panel_title,
-                    series_key,
-                    series_name,
-                    category,
-                    unit,
-                    timestamp_ms,
-                    value
-                )
-                VALUES (
-                    $panelKey,
-                    $panelTitle,
-                    $seriesKey,
-                    $seriesName,
-                    $category,
-                    $unit,
-                    $timestampMs,
-                    $value
-                );
-                """;
-
-            var panelKey = command.CreateParameter();
-            panelKey.ParameterName = "$panelKey";
-            command.Parameters.Add(panelKey);
-
-            var panelTitle = command.CreateParameter();
-            panelTitle.ParameterName = "$panelTitle";
-            command.Parameters.Add(panelTitle);
-
-            var seriesKey = command.CreateParameter();
-            seriesKey.ParameterName = "$seriesKey";
-            command.Parameters.Add(seriesKey);
-
-            var seriesName = command.CreateParameter();
-            seriesName.ParameterName = "$seriesName";
-            command.Parameters.Add(seriesName);
-
-            var category = command.CreateParameter();
-            category.ParameterName = "$category";
-            command.Parameters.Add(category);
-
-            var unit = command.CreateParameter();
-            unit.ParameterName = "$unit";
-            command.Parameters.Add(unit);
-
-            var timestampMs = command.CreateParameter();
-            timestampMs.ParameterName = "$timestampMs";
-            command.Parameters.Add(timestampMs);
-
-            var value = command.CreateParameter();
-            value.ParameterName = "$value";
-            command.Parameters.Add(value);
-
-            foreach (var sample in snapshot.Samples)
+            try
             {
-                panelKey.Value = sample.PanelKey;
-                panelTitle.Value = sample.PanelTitle;
-                seriesKey.Value = sample.SeriesKey;
-                seriesName.Value = sample.SeriesName;
-                category.Value = (int)sample.Category;
-                unit.Value = (int)sample.Unit;
-                timestampMs.Value = sample.Timestamp.ToUnixTimeMilliseconds();
-                value.Value = sample.Value;
+                foreach (var sample in snapshot.Samples)
+                {
+                    _panelKeyParameter!.Value = sample.PanelKey;
+                    _panelTitleParameter!.Value = sample.PanelTitle;
+                    _seriesKeyParameter!.Value = sample.SeriesKey;
+                    _seriesNameParameter!.Value = sample.SeriesName;
+                    _categoryParameter!.Value = (int)sample.Category;
+                    _unitParameter!.Value = (int)sample.Unit;
+                    _timestampMsParameter!.Value = sample.Timestamp.ToUnixTimeMilliseconds();
+                    _valueParameter!.Value = sample.Value;
 
-                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
-
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            finally
+            {
+                command.Transaction = null;
+            }
             await MaybeMaintainAsync(connection, snapshot.Timestamp, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -252,13 +289,12 @@ public sealed class SqliteMetricStore : IMetricStore
 
     public async Task PruneAsync(VaktrConfig config, CancellationToken cancellationToken)
     {
-        var connectionString = EnsureInitialized();
+        _ = EnsureInitialized();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             _config = config.Normalize();
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var connection = EnsureWriteConnectionInitialized();
             await CompactAndPruneAsync(connection, _config, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
             _nextMaintenanceUtc = DateTimeOffset.UtcNow.Add(MaintenanceInterval);
         }
@@ -271,11 +307,17 @@ public sealed class SqliteMetricStore : IMetricStore
     public ValueTask DisposeAsync()
     {
         _gate.Dispose();
-        return ValueTask.CompletedTask;
+        return DisposeCoreAsync();
     }
 
     private string EnsureInitialized() =>
         _connectionString ?? throw new InvalidOperationException("The SQLite store has not been initialized.");
+
+    private SqliteConnection EnsureWriteConnectionInitialized() =>
+        _writeConnection ?? throw new InvalidOperationException("The SQLite write connection has not been initialized.");
+
+    private SqliteCommand EnsureInsertCommandInitialized() =>
+        _insertCommand ?? throw new InvalidOperationException("The SQLite insert command has not been initialized.");
 
     private async Task MaybeMaintainAsync(SqliteConnection connection, DateTimeOffset timestamp, CancellationToken cancellationToken)
     {
@@ -359,6 +401,21 @@ public sealed class SqliteMetricStore : IMetricStore
             PRAGMA incremental_vacuum(64);
             """;
         await maintenanceCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask DisposeCoreAsync()
+    {
+        if (_insertCommand is not null)
+        {
+            await _insertCommand.DisposeAsync().ConfigureAwait(false);
+            _insertCommand = null;
+        }
+
+        if (_writeConnection is not null)
+        {
+            await _writeConnection.DisposeAsync().ConfigureAwait(false);
+            _writeConnection = null;
+        }
     }
 
     private sealed class PanelAccumulator

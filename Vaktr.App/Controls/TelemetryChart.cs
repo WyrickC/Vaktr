@@ -1,6 +1,7 @@
 using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Dispatching;
 
 namespace Vaktr.App.Controls;
 
@@ -148,7 +149,7 @@ public sealed class TelemetryChart : UserControl
         }
 
         _redrawQueued = true;
-        _ = DispatcherQueue.TryEnqueue(() =>
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             _redrawQueued = false;
             Redraw();
@@ -165,27 +166,31 @@ public sealed class TelemetryChart : UserControl
         }
 
         var series = Series ?? Array.Empty<ChartSeriesViewModel>();
-        var allPoints = series.SelectMany(item => item.Points).ToArray();
-        if (allPoints.Length == 0)
+        if (!TryGetPointBounds(series, out var minTimestamp, out var maxTimestamp, out var maxObservedValue))
         {
             _canvas.Children.Clear();
-            DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(Array.Empty<MetricPoint>()));
+            DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(0d));
             _emptyStateText.Visibility = Visibility.Visible;
             return;
         }
 
         _emptyStateText.Visibility = Visibility.Collapsed;
 
-        var start = WindowStartUtc == default ? allPoints.Min(point => point.Timestamp) : WindowStartUtc;
-        var end = WindowEndUtc == default ? allPoints.Max(point => point.Timestamp) : WindowEndUtc;
+        var start = WindowStartUtc == default ? minTimestamp : WindowStartUtc;
+        var end = WindowEndUtc == default ? maxTimestamp : WindowEndUtc;
         if (end <= start)
         {
             end = start.AddMinutes(1);
         }
 
-        var maxValue = ResolveMaxValue(allPoints);
+        var maxValue = ResolveMaxValue(maxObservedValue);
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
         var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
+        var seriesCount = series.Count;
+        var drawFilledArea = seriesCount <= 3;
+        var drawPointMarkers = seriesCount <= 4;
+        var pointBudget = ResolvePointBudget(width, seriesCount);
+        var strokeThickness = seriesCount <= 2 ? 2d : seriesCount <= 6 ? 1.7d : 1.35d;
 
         _canvas.Children.Clear();
         DrawGrid(width, height, start, end, maxValue);
@@ -196,7 +201,7 @@ public sealed class TelemetryChart : UserControl
                 continue;
             }
 
-            var projected = Downsample(item.Points, Math.Max(48, (int)Math.Round(width * 1.35)))
+            var projected = Downsample(item.Points, pointBudget)
                 .Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue))
                 .ToArray();
 
@@ -211,12 +216,15 @@ public sealed class TelemetryChart : UserControl
                 continue;
             }
 
-            _canvas.Children.Add(new Path
+            if (drawFilledArea)
             {
-                Data = BuildAreaGeometry(projected, TopPadding + plotHeight),
-                Fill = item.FillBrush,
-                Opacity = 0.7,
-            });
+                _canvas.Children.Add(new Path
+                {
+                    Data = BuildAreaGeometry(projected, TopPadding + plotHeight),
+                    Fill = item.FillBrush,
+                    Opacity = seriesCount == 1 ? 0.7 : 0.5,
+                });
+            }
 
             _canvas.Children.Add(new Path
             {
@@ -225,10 +233,13 @@ public sealed class TelemetryChart : UserControl
                 StrokeLineJoin = PenLineJoin.Round,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
-                StrokeThickness = 2,
+                StrokeThickness = strokeThickness,
             });
 
-            DrawPoint(projected[^1], item.StrokeBrush, 5);
+            if (drawPointMarkers)
+            {
+                DrawPoint(projected[^1], item.StrokeBrush, 5);
+            }
         }
     }
 
@@ -238,15 +249,16 @@ public sealed class TelemetryChart : UserControl
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
         var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
         var bottomY = TopPadding + plotHeight;
+        var divisions = width >= 620 ? 5 : 4;
 
-        for (var index = 0; index <= 5; index++)
+        for (var index = 0; index <= divisions; index++)
         {
-            var y = TopPadding + ((plotHeight / 5d) * index);
+            var y = TopPadding + ((plotHeight / divisions) * index);
             _canvas.Children.Add(new Line
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 or 5 ? 0.22 : 0.14,
+                Opacity = index is 0 || index == divisions ? 0.22 : 0.14,
                 StrokeDashArray = new DoubleCollection { 3, 5 },
                 X1 = LeftPadding,
                 X2 = LeftPadding + plotWidth,
@@ -255,14 +267,14 @@ public sealed class TelemetryChart : UserControl
             });
         }
 
-        for (var index = 0; index <= 5; index++)
+        for (var index = 0; index <= divisions; index++)
         {
-            var x = LeftPadding + ((plotWidth / 5d) * index);
+            var x = LeftPadding + ((plotWidth / divisions) * index);
             _canvas.Children.Add(new Line
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 or 5 ? 0.18 : 0.1,
+                Opacity = index is 0 || index == divisions ? 0.18 : 0.1,
                 StrokeDashArray = new DoubleCollection { 3, 5 },
                 X1 = x,
                 X2 = x,
@@ -270,7 +282,7 @@ public sealed class TelemetryChart : UserControl
                 Y2 = bottomY,
             });
 
-            var tick = start + TimeSpan.FromTicks((end - start).Ticks / 5 * index);
+            var tick = start + TimeSpan.FromTicks((end - start).Ticks / divisions * index);
             var label = new TextBlock
             {
                 FontSize = 10,
@@ -293,7 +305,7 @@ public sealed class TelemetryChart : UserControl
         Canvas.SetTop(ceiling, 0);
     }
 
-    private double ResolveMaxValue(IReadOnlyList<MetricPoint> points)
+    private double ResolveMaxValue(double peak)
     {
         if (CeilingValue > 0d)
         {
@@ -305,13 +317,12 @@ public sealed class TelemetryChart : UserControl
             return 100d;
         }
 
-        if (points.Count == 0)
+        if (peak <= 0d)
         {
             return Unit == MetricUnit.Gigabytes ? 1d : 100d;
         }
 
-        var peak = points.Max(point => point.Value);
-        return peak <= 0 ? 1d : peak * 1.14d;
+        return peak * 1.14d;
     }
 
     private void DrawPoint(Windows.Foundation.Point point, Brush brush, double size)
@@ -344,6 +355,64 @@ public sealed class TelemetryChart : UserControl
         }
 
         return sampled;
+    }
+
+    private static int ResolvePointBudget(double width, int seriesCount)
+    {
+        var density = seriesCount switch
+        {
+            <= 1 => 0.95d,
+            2 => 0.8d,
+            <= 4 => 0.6d,
+            <= 8 => 0.42d,
+            _ => 0.3d,
+        };
+
+        return Math.Max(36, (int)Math.Round(width * density));
+    }
+
+    private static bool TryGetPointBounds(
+        IReadOnlyList<ChartSeriesViewModel> series,
+        out DateTimeOffset minTimestamp,
+        out DateTimeOffset maxTimestamp,
+        out double maxObservedValue)
+    {
+        minTimestamp = default;
+        maxTimestamp = default;
+        maxObservedValue = 0d;
+        var found = false;
+
+        foreach (var item in series)
+        {
+            foreach (var point in item.Points)
+            {
+                if (!found)
+                {
+                    minTimestamp = point.Timestamp;
+                    maxTimestamp = point.Timestamp;
+                    maxObservedValue = point.Value;
+                    found = true;
+                    continue;
+                }
+
+                if (point.Timestamp < minTimestamp)
+                {
+                    minTimestamp = point.Timestamp;
+                }
+
+                if (point.Timestamp > maxTimestamp)
+                {
+                    maxTimestamp = point.Timestamp;
+                }
+
+                if (point.Value > maxObservedValue)
+                {
+                    maxObservedValue = point.Value;
+                }
+            }
+        }
+
+        return found;
     }
 
     private static Windows.Foundation.Point Project(

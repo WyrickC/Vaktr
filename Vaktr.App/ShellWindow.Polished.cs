@@ -3,11 +3,13 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Storage.Pickers;
 using WinRT.Interop;
 using Vaktr.App.Controls;
 using Vaktr.App.Services;
@@ -23,6 +25,7 @@ public sealed partial class ShellWindow : Window
     private static readonly TimeSpan StartupYieldDelay = TimeSpan.FromMilliseconds(30);
     private static readonly int[] ScrapeIntervalPresets = [1, 2, 5, 10, 15, 30, 60];
     private static readonly int[] RetentionHourPresets = [1, 6, 12, 24, 48, 72, 168, 336, 720, 2160, 8760];
+    private DeckEditorMode _activeDeckEditor = DeckEditorMode.Scrape;
 
     private readonly MainViewModel _viewModel;
     private readonly IMetricStore _metricStore;
@@ -33,7 +36,7 @@ public sealed partial class ShellWindow : Window
     private readonly Grid _rootLayout;
     private readonly Border _controlsBodyHost;
     private readonly Border _brandHost;
-    private readonly StackPanel _summaryHost;
+    private readonly Grid _summaryHost;
     private readonly Grid _dashboardGrid;
     private readonly TextBlock _statusText;
 
@@ -43,6 +46,7 @@ public sealed partial class ShellWindow : Window
     private bool _dashboardRefreshQueued;
     private bool _initialized;
     private int _lastDashboardColumnCount;
+    private int _lastSummaryColumnCount;
     private bool _windowIconApplied;
     private bool _summaryCardsBound;
 
@@ -52,7 +56,7 @@ public sealed partial class ShellWindow : Window
         IConfigStore configStore,
         AutoLaunchService autoLaunchService)
     {
-        StartupTrace.Write("ShellWindow ctor start // polished-v17");
+        StartupTrace.Write("ShellWindow ctor start // polished-v19");
         _viewModel = viewModel;
         _metricStore = metricStore;
         _configStore = configStore;
@@ -63,10 +67,10 @@ public sealed partial class ShellWindow : Window
         _statusText = CreateSecondaryText(string.Empty, 12);
         _controlsBodyHost = new Border();
         _brandHost = CreateBrandPlaceholder();
-        _summaryHost = new StackPanel
+        _summaryHost = new Grid
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 14,
+            ColumnSpacing = 14,
+            RowSpacing = 14,
         };
         _dashboardGrid = new Grid
         {
@@ -88,7 +92,7 @@ public sealed partial class ShellWindow : Window
         RefreshDashboardPanels();
         UpdateStatusText();
         ApplyTheme(_viewModel.SelectedTheme);
-        StartupTrace.Write("ShellWindow ctor complete // polished-v17");
+        StartupTrace.Write("ShellWindow ctor complete // polished-v19");
     }
 
     public void ApplyTheme(ThemeMode mode)
@@ -103,8 +107,17 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        StartupTrace.Write("BuildSummaryCards // polished-v17");
+        StartupTrace.Write("BuildSummaryCards // polished-v19");
         _summaryHost.Children.Clear();
+        _summaryHost.RowDefinitions.Clear();
+        _summaryHost.ColumnDefinitions.Clear();
+        var summaryColumns = DetermineSummaryColumns();
+        _lastSummaryColumnCount = summaryColumns;
+        for (var column = 0; column < summaryColumns; column++)
+        {
+            _summaryHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
         foreach (var card in _viewModel.SummaryCards)
         {
             var glyphText = new TextBlock
@@ -165,7 +178,7 @@ public sealed partial class ShellWindow : Window
             row.Children.Add(details);
             Grid.SetColumn(details, 1);
 
-            _summaryHost.Children.Add(new Border
+            var summaryCard = new Border
             {
                 DataContext = card,
                 Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
@@ -173,9 +186,17 @@ public sealed partial class ShellWindow : Window
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(18),
                 Padding = new Thickness(14),
-                Width = 250,
                 Child = row,
-            });
+            };
+            _summaryHost.Children.Add(summaryCard);
+            var index = _summaryHost.Children.Count - 1;
+            while (_summaryHost.RowDefinitions.Count <= index / summaryColumns)
+            {
+                _summaryHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            }
+
+            Grid.SetColumn(summaryCard, index % summaryColumns);
+            Grid.SetRow(summaryCard, index / summaryColumns);
         }
 
         _summaryCardsBound = true;
@@ -187,7 +208,7 @@ public sealed partial class ShellWindow : Window
 
     private void RefreshDashboardPanels()
     {
-        StartupTrace.Write("RefreshDashboardPanels // polished-v17");
+        StartupTrace.Write("RefreshDashboardPanels // polished-v19");
         var panels = _viewModel.DashboardPanels.ToArray();
         var activeKeys = new HashSet<string>(panels.Select(panel => panel.PanelKey), StringComparer.OrdinalIgnoreCase);
         foreach (var staleKey in _panelCards.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
@@ -254,13 +275,13 @@ public sealed partial class ShellWindow : Window
         }
 
         _initialized = true;
-        StartupTrace.Write("OnRootLoaded start // polished-v17");
+        StartupTrace.Write("OnRootLoaded start // polished-v19");
 
         try
         {
             await Task.Delay(StartupYieldDelay);
             var config = _viewModel.BuildConfig();
-            StartupTrace.Write("OnRootLoaded resumed after first paint // polished-v17");
+            StartupTrace.Write("OnRootLoaded resumed after first paint // polished-v19");
             App.CurrentApp.ApplyTheme(config.Theme);
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
             await TryLoadHistoryAsync(config);
@@ -272,7 +293,7 @@ public sealed partial class ShellWindow : Window
                 TryApplyWindowIcon();
                 TryLoadBrandImage();
             });
-            StartupTrace.Write("OnRootLoaded complete // polished-v17");
+            StartupTrace.Write("OnRootLoaded complete // polished-v19");
         }
         catch (Exception ex)
         {
@@ -318,6 +339,17 @@ public sealed partial class ShellWindow : Window
     {
         try
         {
+            if (!MainViewModel.TryParseRetentionInput(_viewModel.RetentionHoursInput, out _, out var normalizedRetentionInput))
+            {
+                _activeDeckEditor = DeckEditorMode.Retention;
+                _viewModel.StatusText = "Retention must use m, h, or d. Try 30m, 24h, or 7d.";
+                UpdateStatusText();
+                RenderEditableControlDeck();
+                return;
+            }
+
+            _viewModel.RetentionHoursInput = normalizedRetentionInput;
+
             _viewModel.StatusText = "Applying settings";
             UpdateStatusText();
 
@@ -362,7 +394,7 @@ public sealed partial class ShellWindow : Window
 
     private void OnSnapshotCollected(object? sender, MetricSnapshot snapshot)
     {
-        _ = DispatcherQueue.TryEnqueue(() =>
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             _viewModel.ApplySnapshot(snapshot);
             UpdateStatusText();
@@ -371,7 +403,7 @@ public sealed partial class ShellWindow : Window
 
     private void OnCollectionFailed(object? sender, Exception ex)
     {
-        _ = DispatcherQueue.TryEnqueue(() =>
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             if (_viewModel.DashboardPanels.Count == 0)
             {
@@ -397,7 +429,7 @@ public sealed partial class ShellWindow : Window
                 return;
             }
 
-            StartupTrace.Write("Queued dashboard refresh after resize // polished-v17");
+            StartupTrace.Write("Queued dashboard refresh after resize // polished-v19");
             RefreshDashboardPanels();
         });
     }
@@ -412,6 +444,11 @@ public sealed partial class ShellWindow : Window
         var nextColumnCount = DetermineDashboardColumns();
         if (nextColumnCount == _lastDashboardColumnCount)
         {
+            if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
+            {
+                BuildSummaryCards();
+            }
+
             return;
         }
 
@@ -454,6 +491,32 @@ public sealed partial class ShellWindow : Window
     {
     }
 
+    private void OnScrapeFieldClick(object? sender, EventArgs e)
+    {
+        _activeDeckEditor = DeckEditorMode.Scrape;
+        RenderEditableControlDeck();
+    }
+
+    private void OnRetentionFieldClick(object? sender, EventArgs e)
+    {
+        _activeDeckEditor = DeckEditorMode.Retention;
+        RenderEditableControlDeck();
+    }
+
+    private void OnStorageFieldClick(object? sender, EventArgs e)
+    {
+        _activeDeckEditor = DeckEditorMode.Storage;
+        RenderEditableControlDeck();
+    }
+
+    private void OnRetentionInputChanged(object? sender, EventArgs e)
+    {
+        if (sender is InlineTextEntry entry)
+        {
+            _viewModel.RetentionHoursInput = entry.Text;
+        }
+    }
+
     private void StepScrapeInterval(int direction)
     {
         var next = MoveThroughPresets(_viewModel.EffectiveScrapeIntervalSeconds, ScrapeIntervalPresets, direction);
@@ -463,9 +526,29 @@ public sealed partial class ShellWindow : Window
         RenderEditableControlDeck();
     }
 
+    private void SetScrapeInterval(int seconds)
+    {
+        _viewModel.ScrapeIntervalInput = seconds == VaktrConfig.DefaultScrapeIntervalSeconds
+            ? string.Empty
+            : seconds.ToString(CultureInfo.InvariantCulture);
+        RenderEditableControlDeck();
+    }
+
+    private void NudgeScrapeInterval(int delta)
+    {
+        var next = Math.Clamp(_viewModel.EffectiveScrapeIntervalSeconds + delta, 1, 60);
+        SetScrapeInterval(next);
+    }
+
     private void ResetScrapeInterval()
     {
         _viewModel.ScrapeIntervalInput = string.Empty;
+        RenderEditableControlDeck();
+    }
+
+    private void SetRetentionInput(string value)
+    {
+        _viewModel.RetentionHoursInput = value;
         RenderEditableControlDeck();
     }
 
@@ -476,6 +559,20 @@ public sealed partial class ShellWindow : Window
             ? string.Empty
             : next.ToString(CultureInfo.InvariantCulture);
         RenderEditableControlDeck();
+    }
+
+    private void SetRetentionHours(int hours)
+    {
+        _viewModel.RetentionHoursInput = hours == VaktrConfig.DefaultMaxRetentionHours
+            ? string.Empty
+            : hours.ToString(CultureInfo.InvariantCulture);
+        RenderEditableControlDeck();
+    }
+
+    private void NudgeRetentionHours(int delta)
+    {
+        var next = Math.Clamp(_viewModel.EffectiveRetentionHours + delta, 1, 24 * 3650);
+        SetRetentionHours(next);
     }
 
     private void ResetRetentionHours()
@@ -499,6 +596,34 @@ public sealed partial class ShellWindow : Window
 
         _viewModel.StorageDirectory = value.Trim();
         RenderEditableControlDeck();
+    }
+
+    private async void OnBrowseStorageClick(object? sender, EventArgs e)
+    {
+        try
+        {
+            _activeDeckEditor = DeckEditorMode.Storage;
+            var picker = new FolderPicker
+            {
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            };
+            picker.FileTypeFilter.Add("*");
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is null)
+            {
+                return;
+            }
+
+            SetStorageDirectory(folder.Path);
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("BrowseStorageClick", ex);
+            _viewModel.StatusText = $"Storage picker issue: {ex.Message}";
+            UpdateStatusText();
+        }
     }
 
     private static int MoveThroughPresets(int currentValue, IReadOnlyList<int> presets, int direction)
@@ -564,7 +689,7 @@ public sealed partial class ShellWindow : Window
                     {
                         NativeWindowMethods.ApplyWindowIcon(windowHandle, _windowIconHandle);
                         _windowIconApplied = true;
-                        StartupTrace.Write("Window icon applied // polished-v17");
+                        StartupTrace.Write("Window icon applied // polished-v19");
                     }
                 }
             }
@@ -585,7 +710,7 @@ public sealed partial class ShellWindow : Window
                 return;
             }
 
-            StartupTrace.Write("TryLoadBrandImage start // polished-v17");
+            StartupTrace.Write("TryLoadBrandImage start // polished-v19");
             var bitmap = new BitmapImage();
             bitmap.UriSource = new Uri(imagePath);
 
@@ -595,7 +720,7 @@ public sealed partial class ShellWindow : Window
                 Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
                 Source = bitmap,
             };
-            StartupTrace.Write("TryLoadBrandImage complete // polished-v17");
+            StartupTrace.Write("TryLoadBrandImage complete // polished-v19");
         }
         catch (Exception ex)
         {
@@ -607,9 +732,40 @@ public sealed partial class ShellWindow : Window
     {
         _summaryCardsBound = false;
         _summaryHost.Children.Clear();
-        _summaryHost.Children.Add(CreatePlaceholderCard("CPU", "Waiting for first sample"));
-        _summaryHost.Children.Add(CreatePlaceholderCard("Memory", "Loading local history"));
-        _summaryHost.Children.Add(CreatePlaceholderCard("Disk", "Preparing local boards"));
+        _summaryHost.RowDefinitions.Clear();
+        _summaryHost.ColumnDefinitions.Clear();
+        var summaryColumns = DetermineSummaryColumns();
+        _lastSummaryColumnCount = summaryColumns;
+        for (var column = 0; column < summaryColumns; column++)
+        {
+            _summaryHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        var placeholders = new[]
+        {
+            CreatePlaceholderCard("CPU", "Waiting for first sample"),
+            CreatePlaceholderCard("Memory", "Loading local history"),
+            CreatePlaceholderCard("Disk", "Preparing local boards"),
+            CreatePlaceholderCard("Network", "Warming link metrics"),
+        };
+
+        for (var index = 0; index < placeholders.Length; index++)
+        {
+            while (_summaryHost.RowDefinitions.Count <= index / summaryColumns)
+            {
+                _summaryHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            }
+
+            _summaryHost.Children.Add(placeholders[index]);
+            Grid.SetColumn(placeholders[index], index % summaryColumns);
+            Grid.SetRow(placeholders[index], index / summaryColumns);
+        }
+    }
+
+    private int DetermineSummaryColumns()
+    {
+        var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
+        return width >= 1600 ? 4 : width >= 900 ? 2 : 1;
     }
 
     private async Task TryLoadHistoryAsync(VaktrConfig config)
@@ -654,6 +810,13 @@ public sealed partial class ShellWindow : Window
         _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0 ? "Streaming local telemetry" : "Waiting for first sample";
         UpdateStatusText();
     }
+}
+
+internal enum DeckEditorMode
+{
+    Scrape,
+    Retention,
+    Storage,
 }
 
 internal static class NativeWindowMethods

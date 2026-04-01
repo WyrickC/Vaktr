@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Media.Animation;
 using Vaktr.App.ViewModels;
@@ -242,7 +243,7 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         _refreshQueued = true;
-        _ = DispatcherQueue.TryEnqueue(() =>
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             _refreshQueued = false;
             RefreshFromPanel();
@@ -373,9 +374,7 @@ public sealed class TelemetryPanelCard : UserControl
         _cardBorder.BorderBrush = isHovered
             ? ResolveBrush("AccentStrongBrush", "#B7F7FF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _cardBorder.Background = isHovered
-            ? ResolveBrush("SurfaceElevatedBrush", "#15283B")
-            : ResolveBrush("SurfaceBrush", "#102131");
+        _cardBorder.Opacity = isHovered ? 0.985 : 1.0;
     }
 
     private static ActionChip CreateRangeButton(string text, TimeRangePreset preset)

@@ -43,6 +43,8 @@ From Visual Studio:
 - Settings: `%LocalAppData%\Vaktr\vaktr-settings.json`
 - Metrics database: `%LocalAppData%\Vaktr\Data\vaktr-metrics.db`
 
+`%LocalAppData%` is intentional here. Vaktr tracks machine-local telemetry, so the data should stay on the local node instead of roaming with a Windows profile.
+
 ## Defaults
 
 - Scrape interval defaults to `2` seconds if you leave the setting blank.

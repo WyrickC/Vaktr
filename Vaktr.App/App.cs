@@ -25,7 +25,7 @@ public sealed class App : Application
         base.OnLaunched(args);
         StartupTrace.Write("App.OnLaunched start");
         EnsureResourcesInitialized();
-        StartupTrace.Write("Resources initialized // launch-cut-v18");
+        StartupTrace.Write("Resources initialized // launch-cut-v19");
         ApplyThemeResources(ThemeMode.Dark);
         StartupTrace.Write("Default theme applied");
 
@@ -44,7 +44,7 @@ public sealed class App : Application
 
         var metricStore = new SqliteMetricStore();
         var viewModel = new MainViewModel(config);
-        StartupTrace.Write("Stores and view model created // launch-cut-v18");
+        StartupTrace.Write("Stores and view model created // launch-cut-v19");
         ApplyThemeResources(config.Theme);
         StartupTrace.Write("Configured theme applied");
 
@@ -53,7 +53,7 @@ public sealed class App : Application
             metricStore,
             configStore,
             new AutoLaunchService());
-        StartupTrace.Write("ShellWindow created // polished-v18");
+        StartupTrace.Write("ShellWindow created // polished-v19");
 
         _window.ApplyTheme(config.Theme);
         StartupTrace.Write("Window theme applied");
@@ -151,23 +151,7 @@ public sealed class App : Application
         StartupTrace.Write("EnsureResourcesInitialized start");
         Resources ??= new ResourceDictionary();
         EnsureFrameworkFallbackResources();
-
-        var hasWinUiResources = Resources.MergedDictionaries.OfType<XamlControlsResources>().Any();
-        if (!hasWinUiResources)
-        {
-            try
-            {
-                StartupTrace.Write("Creating XamlControlsResources");
-                var controlsResources = new XamlControlsResources();
-                Resources.MergedDictionaries.Add(controlsResources);
-                StartupTrace.Write("XamlControlsResources merged");
-            }
-            catch (Exception ex)
-            {
-                StartupTrace.WriteException("XamlControlsResources merge", ex);
-            }
-        }
-
+        StartupTrace.Write("Skipping XamlControlsResources merge for custom shell");
         StartupTrace.Write("EnsureResourcesInitialized complete");
     }
 

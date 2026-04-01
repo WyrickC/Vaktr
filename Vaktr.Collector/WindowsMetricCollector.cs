@@ -12,6 +12,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
 {
     private const double BytesPerMegabyte = 1024d * 1024d;
     private const double BitsPerMegabit = 1_000_000d;
+    private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(30);
 
     private readonly nint _query;
     private readonly nint _cpuTotalCounter;
@@ -23,11 +24,13 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly nint _networkSendCounter;
     private readonly bool _hasAnyPdhCounters;
     private readonly Dictionary<string, NetworkBaseline> _networkBaselines = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<CachedMetricValue> _cachedDriveUsageValues = [];
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
     private ulong _previousUserTime;
     private bool _cpuFallbackInitialized;
+    private DateTimeOffset _lastDriveUsageRefreshUtc = DateTimeOffset.MinValue;
 
     public WindowsMetricCollector()
     {
@@ -271,8 +274,15 @@ public sealed class WindowsMetricCollector : IMetricCollector
         }
     }
 
-    private static void AddDriveUsage(List<MetricSample> samples, DateTimeOffset timestamp)
+    private void AddDriveUsage(List<MetricSample> samples, DateTimeOffset timestamp)
     {
+        var shouldRefresh = _cachedDriveUsageValues.Count == 0 || timestamp - _lastDriveUsageRefreshUtc >= DriveUsageRefreshInterval;
+        if (!shouldRefresh)
+        {
+            return;
+        }
+
+        _cachedDriveUsageValues.Clear();
         foreach (var drive in DriveInfo.GetDrives())
         {
             try
@@ -292,35 +302,35 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 var usedGb = Math.Max(0d, totalGb - (drive.AvailableFreeSpace / 1024d / 1024d / 1024d));
                 var usedPercent = Math.Clamp((1d - (drive.AvailableFreeSpace / (double)totalBytes)) * 100d, 0d, 100d);
                 var driveLabel = drive.Name.TrimEnd('\\');
-                samples.Add(new MetricSample(
-                    $"volume-{Sanitize(driveLabel)}",
-                    $"Drive {driveLabel} Usage",
+                var panelKey = $"volume-{Sanitize(driveLabel)}";
+                var panelTitle = $"Drive {driveLabel} Usage";
+
+                _cachedDriveUsageValues.Add(new CachedMetricValue(
+                    panelKey,
+                    panelTitle,
                     "used-percent",
                     "Used",
                     MetricCategory.Disk,
                     MetricUnit.Percent,
-                    usedPercent,
-                    timestamp));
+                    usedPercent));
 
-                samples.Add(new MetricSample(
-                    $"volume-{Sanitize(driveLabel)}",
-                    $"Drive {driveLabel} Usage",
+                _cachedDriveUsageValues.Add(new CachedMetricValue(
+                    panelKey,
+                    panelTitle,
                     "used-gb",
                     "Used GiB",
                     MetricCategory.Disk,
                     MetricUnit.Gigabytes,
-                    usedGb,
-                    timestamp));
+                    usedGb));
 
-                samples.Add(new MetricSample(
-                    $"volume-{Sanitize(driveLabel)}",
-                    $"Drive {driveLabel} Usage",
+                _cachedDriveUsageValues.Add(new CachedMetricValue(
+                    panelKey,
+                    panelTitle,
                     "total-gb",
                     "Total GiB",
                     MetricCategory.Disk,
                     MetricUnit.Gigabytes,
-                    totalGb,
-                    timestamp));
+                    totalGb));
             }
             catch (IOException)
             {
@@ -328,6 +338,21 @@ public sealed class WindowsMetricCollector : IMetricCollector
             catch (UnauthorizedAccessException)
             {
             }
+        }
+
+        _lastDriveUsageRefreshUtc = timestamp;
+
+        foreach (var cachedValue in _cachedDriveUsageValues)
+        {
+            samples.Add(new MetricSample(
+                cachedValue.PanelKey,
+                cachedValue.PanelTitle,
+                cachedValue.SeriesKey,
+                cachedValue.SeriesName,
+                cachedValue.Category,
+                cachedValue.Unit,
+                cachedValue.Value,
+                timestamp));
         }
     }
 
@@ -588,6 +613,15 @@ public sealed class WindowsMetricCollector : IMetricCollector
     }
 
     private readonly record struct NetworkBaseline(long BytesReceived, long BytesSent, DateTimeOffset Timestamp);
+
+    private readonly record struct CachedMetricValue(
+        string PanelKey,
+        string PanelTitle,
+        string SeriesKey,
+        string SeriesName,
+        MetricCategory Category,
+        MetricUnit Unit,
+        double Value);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

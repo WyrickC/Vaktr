@@ -47,6 +47,10 @@ public sealed class VaktrConfig
     public static string DefaultStorageDirectory =>
         Path.Combine(SettingsDirectory, "Data");
 
+    [JsonIgnore]
+    public static string LegacyDefaultStorageDirectory =>
+        Path.Combine(LegacySettingsDirectory, "Data");
+
     public string GetDatabasePath() => Path.Combine(StorageDirectory, "vaktr-metrics.db");
 
     public static string GetConfigPath() => Path.Combine(SettingsDirectory, "vaktr-settings.json");
@@ -55,6 +59,11 @@ public sealed class VaktrConfig
 
     public VaktrConfig Normalize()
     {
+        var migratedFromLegacyStorage = string.Equals(
+            StorageDirectory?.Trim(),
+            LegacyDefaultStorageDirectory,
+            StringComparison.OrdinalIgnoreCase);
+
         if (ScrapeIntervalSeconds is < 1 or > 60)
         {
             ScrapeIntervalSeconds = DefaultScrapeIntervalSecondsValue;
@@ -76,6 +85,17 @@ public sealed class VaktrConfig
                 RetentionPreset.Unlimited => DefaultMaxRetentionHoursValue,
                 _ => DefaultMaxRetentionHoursValue,
             };
+        }
+
+        if (!Enum.IsDefined(typeof(ThemeMode), Theme))
+        {
+            Theme = ThemeMode.Dark;
+        }
+
+        if (migratedFromLegacyStorage)
+        {
+            StorageDirectory = DefaultStorageDirectory;
+            Theme = ThemeMode.Dark;
         }
 
         Retention = MaxRetentionHours switch
