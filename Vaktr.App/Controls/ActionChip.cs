@@ -18,9 +18,9 @@ public sealed class ActionChip : UserControl
     {
         _surface = new Border
         {
-            CornerRadius = new CornerRadius(14),
+            CornerRadius = new CornerRadius(999),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(12, 8, 12, 8),
+            Padding = new Thickness(14, 8, 14, 8),
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
         };
@@ -124,9 +124,9 @@ public sealed class ActionChip : UserControl
     {
         var useAccent = _isActive || _isFilled;
         var backgroundKey = useAccent ? "AccentSoftBrush" : "SurfaceElevatedBrush";
-        var backgroundHex = useAccent ? "#10394D" : "#15283B";
+        var backgroundHex = useAccent ? "#113A4E" : "#15283B";
         var hoverKey = useAccent ? "AccentHaloBrush" : "SurfaceStrongBrush";
-        var hoverHex = useAccent ? "#1B68DAFF" : "#183148";
+        var hoverHex = useAccent ? "#184F68" : "#183148";
 
         _surface.Background = _isHovered
             ? ResolveBrush(hoverKey, hoverHex)
@@ -136,7 +136,7 @@ public sealed class ActionChip : UserControl
             ? ResolveBrush("AccentStrongBrush", "#B7F7FF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
 
-        Opacity = _isPressed ? 0.84 : 1.0;
+        Opacity = _isPressed ? 0.9 : 1.0;
         _label.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
     }
 

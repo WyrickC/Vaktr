@@ -34,9 +34,9 @@ public sealed class InlineTextEntry : UserControl
             Background = ResolveBrush("SurfaceBrush", "#102131"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(12, 10, 12, 10),
-            MinHeight = 42,
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(14, 11, 14, 11),
+            MinHeight = 44,
             Child = _label,
         };
 
@@ -173,7 +173,7 @@ public sealed class InlineTextEntry : UserControl
             _isFocused || _isHovered ? "#183148" : "#102131");
         _surface.BorderBrush = ResolveBrush(_isFocused ? "AccentStrongBrush" : "SurfaceStrokeBrush",
             _isFocused ? "#B7F7FF" : "#27425E");
-        Opacity = _isPressed ? 0.9 : 1.0;
+        Opacity = _isPressed ? 0.94 : 1.0;
 
         var displayText = _text;
         if (string.IsNullOrWhiteSpace(displayText))

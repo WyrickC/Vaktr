@@ -7,10 +7,10 @@ namespace Vaktr.App.Controls;
 
 public sealed class TelemetryChart : UserControl
 {
-    private const double LeftPadding = 10d;
-    private const double RightPadding = 10d;
-    private const double TopPadding = 10d;
-    private const double BottomPadding = 28d;
+    private const double LeftPadding = 12d;
+    private const double RightPadding = 12d;
+    private const double TopPadding = 16d;
+    private const double BottomPadding = 30d;
     private const double MinimumSelectionWidth = 18d;
 
     public static readonly DependencyProperty SeriesProperty =
@@ -193,6 +193,7 @@ public sealed class TelemetryChart : UserControl
         var strokeThickness = seriesCount <= 2 ? 2d : seriesCount <= 6 ? 1.7d : 1.35d;
 
         _canvas.Children.Clear();
+        DrawPlotSurface(plotWidth, plotHeight);
         DrawGrid(width, height, start, end, maxValue);
         foreach (var item in series)
         {
@@ -243,13 +244,32 @@ public sealed class TelemetryChart : UserControl
         }
     }
 
+    private void DrawPlotSurface(double plotWidth, double plotHeight)
+    {
+        var frame = new Rectangle
+        {
+            Width = plotWidth,
+            Height = plotHeight,
+            RadiusX = 16,
+            RadiusY = 16,
+            Stroke = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            StrokeThickness = 1,
+            Fill = BrushFactory.CreateBrush("#081E2B"),
+            Opacity = 0.88,
+        };
+
+        Canvas.SetLeft(frame, LeftPadding);
+        Canvas.SetTop(frame, TopPadding);
+        _canvas.Children.Add(frame);
+    }
+
     private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue)
     {
         var gridBrush = ResolveBrush("SurfaceGridBrush", "#22405C");
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
         var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
         var bottomY = TopPadding + plotHeight;
-        var divisions = width >= 620 ? 5 : 4;
+        var divisions = width >= 760 ? 6 : width >= 540 ? 5 : 4;
 
         for (var index = 0; index <= divisions; index++)
         {
@@ -258,8 +278,8 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.22 : 0.14,
-                StrokeDashArray = new DoubleCollection { 3, 5 },
+                Opacity = index is 0 || index == divisions ? 0.22 : 0.12,
+                StrokeDashArray = new DoubleCollection { 2, 6 },
                 X1 = LeftPadding,
                 X2 = LeftPadding + plotWidth,
                 Y1 = y,
@@ -274,8 +294,8 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.18 : 0.1,
-                StrokeDashArray = new DoubleCollection { 3, 5 },
+                Opacity = index is 0 || index == divisions ? 0.14 : 0.08,
+                StrokeDashArray = new DoubleCollection { 2, 8 },
                 X1 = x,
                 X2 = x,
                 Y1 = TopPadding,
@@ -302,7 +322,17 @@ public sealed class TelemetryChart : UserControl
         };
         _canvas.Children.Add(ceiling);
         Canvas.SetLeft(ceiling, LeftPadding);
-        Canvas.SetTop(ceiling, 0);
+        Canvas.SetTop(ceiling, 2);
+
+        var floor = new TextBlock
+        {
+            FontSize = 10,
+            Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+            Text = FormatAxisValue(0d, Unit),
+        };
+        _canvas.Children.Add(floor);
+        Canvas.SetLeft(floor, LeftPadding);
+        Canvas.SetTop(floor, bottomY - 14);
     }
 
     private double ResolveMaxValue(double peak)

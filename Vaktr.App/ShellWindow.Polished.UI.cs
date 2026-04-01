@@ -67,7 +67,7 @@ public sealed partial class ShellWindow
                 BuildControlsSurface(),
                 CreateSectionBand("AT A GLANCE", "Fast launch, low overhead, and local-only telemetry with sensible defaults."),
                 BuildSummarySurface(),
-                CreateSectionBand("LIVE BOARD", "Time-series panels for CPU, memory, disk I/O, network activity, and drive-usage gauges."),
+                BuildBoardSectionBand(),
                 _dashboardGrid,
                 BuildFooter(),
             },
@@ -113,13 +113,6 @@ public sealed partial class ShellWindow
         topRail.Children.Add(topRailStatus);
         Grid.SetColumn(topRailStatus, 2);
 
-        var heroGrid = new Grid
-        {
-            ColumnSpacing = 24,
-        };
-        heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
         var brandRow = new Grid
         {
             ColumnSpacing = 18,
@@ -136,38 +129,11 @@ public sealed partial class ShellWindow
             {
                 CreatePrimaryText("Vaktr", 38, true),
                 CreateSecondaryText("A local-first telemetry board for this Windows machine, with live timelines, compact gauges, and zero backend setup.", 17),
-                CreateMutedText("Defaults stay sane: dark mode, 2 second scrape, 24 hour retention, and machine-local SQLite storage.", 13),
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    Children =
-                    {
-                        CreateHeroSpecPill("Theme", "Dark"),
-                        CreateHeroSpecPill("Scrape", "2s live lane"),
-                        CreateHeroSpecPill("Storage", "Local app data"),
-                    },
-                },
+                CreateSecondaryText("Defaults: dark theme, 2 second scrape, 24 hour retention, machine-local storage.", 13),
             },
         };
         brandRow.Children.Add(titleStack);
         Grid.SetColumn(titleStack, 1);
-
-        var metricsRail = new StackPanel
-        {
-            Spacing = 12,
-            Width = 308,
-            Children =
-            {
-                CreateInfoPanel("Last sample", "The board updates live as soon as the local collector streams a new scrape."),
-                CreateInfoPanel("Interaction", "Drag any chart to zoom a time slice. Double-click to reset back out."),
-                CreateInfoPanel("Storage", "SQLite stays local to this machine and compacts older samples automatically."),
-            },
-        };
-
-        heroGrid.Children.Add(brandRow);
-        heroGrid.Children.Add(metricsRail);
-        Grid.SetColumn(metricsRail, 1);
 
         var heroBorder = new Border
         {
@@ -190,7 +156,7 @@ public sealed partial class ShellWindow
                         Opacity = 0.88,
                         HorizontalAlignment = HorizontalAlignment.Center,
                     },
-                    heroGrid,
+                    brandRow,
                 },
             },
         };
@@ -214,7 +180,7 @@ public sealed partial class ShellWindow
             Spacing = 16,
             Children =
             {
-                CreateSectionHeader("CONTROL DECK", "Tune scrape timing, retention, and storage in place. Defaults stay safe and machine-local if you leave them alone."),
+                CreateSectionHeader("CONTROL DECK", "Click or type right in the deck to tune scrape timing, retention, and storage. Defaults stay local and safe if you leave them alone."),
                 _controlsBodyHost,
             },
         };
@@ -279,55 +245,125 @@ public sealed partial class ShellWindow
         StartupTrace.Write("RenderEditableControlDeck // polished-v19");
         _controlDeckEditableActive = true;
 
-        StartupTrace.Write("RenderEditableControlDeck // build collection grid");
+        var scrapeBox = CreateDeckInlineEntry(
+            string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput) ? string.Empty : _viewModel.ScrapeIntervalInput,
+            "2");
+        scrapeBox.TextChanged += OnScrapeInputChanged;
+
+        var retentionBox = CreateDeckInlineEntry(_viewModel.RetentionHoursInput, "24h");
+        retentionBox.TextChanged += OnRetentionInputChanged;
+
+        var storageBox = CreateDeckInlineEntry(
+            string.IsNullOrWhiteSpace(_viewModel.StorageDirectory) ? string.Empty : _viewModel.StorageDirectory.Trim(),
+            VaktrConfig.DefaultStorageDirectory);
+        storageBox.TextChanged += OnStorageInputChanged;
+
+        var storageDropSurface = new Border
+        {
+            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(12),
+            AllowDrop = true,
+            Child = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    CreateFieldLabel("Storage directory"),
+                    storageBox,
+                    CreateMutedText("Drop a folder here, browse for one, or leave this blank to use the safe local default.", 12),
+                },
+            },
+        };
+        storageDropSurface.DragOver += OnStoragePathDragOver;
+        storageDropSurface.Drop += OnStoragePathDrop;
+
         var fieldGrid = new Grid
         {
             ColumnSpacing = 16,
-            RowSpacing = 12,
+            RowSpacing = 14,
         };
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        AddCardToGrid(fieldGrid, 0, 0, CreateSettingFieldCard(
-            "Scrape interval",
+        AddCardToGrid(fieldGrid, 0, 0, CreateControlEditorCard(
+            "COL",
+            "COLLECTION",
             FormatScrapeInterval(_viewModel.EffectiveScrapeIntervalSeconds),
-            string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput)
-                ? "Default lane active"
-                : "Custom lane active",
-            _activeDeckEditor == DeckEditorMode.Scrape,
-            OnScrapeFieldClick));
-        AddCardToGrid(fieldGrid, 0, 1, CreateSettingFieldCard(
-            "Max retention",
-            GetRetentionFieldValue(),
-            GetRetentionFieldCaption(),
-            _activeDeckEditor == DeckEditorMode.Retention,
-            OnRetentionFieldClick));
-        AddCardToGrid(fieldGrid, 0, 2, CreateSettingFieldCard(
-            "Storage path",
-            GetStorageFieldTitle(),
-            GetStorageFieldCaption(),
-            _activeDeckEditor == DeckEditorMode.Storage,
-            OnStorageFieldClick));
-        StartupTrace.Write("RenderEditableControlDeck // wrap editor");
-        var editorCard = new Border
-        {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(24),
-            Padding = new Thickness(18),
-            Child = new StackPanel
+            string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput) ? "Default lane active" : "Custom lane active",
+            new StackPanel
             {
-                Spacing = 16,
+                Spacing = 12,
                 Children =
                 {
-                    CreateSectionHeader("COLLECTION", "Click a field to edit it right here. Presets stay fast, and typed values give you finer control when you need it."),
-                    fieldGrid,
-                    CreateActiveDeckEditorSurface(),
+                    new StackPanel
+                    {
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateFieldLabel("Scrape interval (seconds)"),
+                            scrapeBox,
+                            CreateMutedText("Valid range: 1 to 60 seconds. Blank keeps the default 2 second cadence.", 12),
+                        },
+                    },
+                    CreateChipWrapRow(
+                        CreatePresetChip("1s", _viewModel.EffectiveScrapeIntervalSeconds == 1, (_, _) => SetScrapeInterval(1)),
+                        CreatePresetChip("2s", string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput), (_, _) => ResetScrapeInterval()),
+                        CreatePresetChip("5s", _viewModel.EffectiveScrapeIntervalSeconds == 5, (_, _) => SetScrapeInterval(5)),
+                        CreatePresetChip("10s", _viewModel.EffectiveScrapeIntervalSeconds == 10, (_, _) => SetScrapeInterval(10)),
+                        CreatePresetChip("15s", _viewModel.EffectiveScrapeIntervalSeconds == 15, (_, _) => SetScrapeInterval(15))),
                 },
-            },
-        };
+            }));
+
+        AddCardToGrid(fieldGrid, 0, 1, CreateControlEditorCard(
+            "RET",
+            "RETENTION",
+            GetRetentionFieldValue(),
+            GetRetentionFieldCaption(),
+            new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new StackPanel
+                    {
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateFieldLabel("Retention window"),
+                            retentionBox,
+                            CreateMutedText("Accepted formats: 30m, 24h, 7d. Older data compacts automatically after the first 6 hours.", 12),
+                        },
+                    },
+                    CreateChipWrapRow(
+                        CreatePresetChip("6h", _viewModel.EffectiveRetentionHours == 6, (_, _) => SetRetentionInput("6h")),
+                        CreatePresetChip("12h", _viewModel.EffectiveRetentionHours == 12, (_, _) => SetRetentionInput("12h")),
+                        CreatePresetChip("24h", _viewModel.EffectiveRetentionHours == 24, (_, _) => ResetRetentionHours()),
+                        CreatePresetChip("7d", _viewModel.EffectiveRetentionHours == 168, (_, _) => SetRetentionInput("7d")),
+                        CreatePresetChip("30d", _viewModel.EffectiveRetentionHours == 720, (_, _) => SetRetentionInput("30d")),
+                        CreatePresetChip("90d", _viewModel.EffectiveRetentionHours == 2160, (_, _) => SetRetentionInput("90d"))),
+                },
+            }));
+
+        AddCardToGrid(fieldGrid, 0, 2, CreateControlEditorCard(
+            "STO",
+            "STORAGE PATH",
+            GetStorageFieldTitle(),
+            GetStorageFieldCaption(),
+            new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    storageDropSurface,
+                    CreateChipWrapRow(
+                        CreateActionChip("Browse folder", OnBrowseStorageClick, filled: true),
+                        CreateActionChip("Use default", (_, _) => ResetStorageDirectory())),
+                },
+            }));
 
         var actionRow = new Grid
         {
@@ -340,8 +376,8 @@ public sealed partial class ShellWindow
             Spacing = 4,
             Children =
             {
-                CreateMutedText("Default storage stays machine-local, not roaming.", 12),
-                CreateSecondaryText($"{VaktrConfig.DefaultStorageDirectory} // drag a folder in or type one directly", 12),
+                CreateMutedText($"Storage path: {VaktrConfig.DefaultStorageDirectory} // machine-local, not roaming", 12),
+                CreateSecondaryText("Drag on any graph to zoom into a smaller time slice. Double-click a chart to reset back out.", 12),
             },
         });
 
@@ -359,9 +395,8 @@ public sealed partial class ShellWindow
             Spacing = 14,
             Children =
             {
-                editorCard,
+                fieldGrid,
                 actionRow,
-                CreateMutedText("Drag on any graph to zoom into a smaller time slice. Double-click a chart to reset back out.", 12),
             },
         };
         StartupTrace.Write("RenderEditableControlDeck // complete");
@@ -674,7 +709,7 @@ public sealed partial class ShellWindow
         topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         topGrid.Children.Add(token);
-        topGrid.Children.Add(new StackPanel
+        var titleStack = new StackPanel
         {
             Margin = new Thickness(12, 0, 0, 0),
             Spacing = 6,
@@ -683,8 +718,9 @@ public sealed partial class ShellWindow
                 CreateAccentText(title.ToUpperInvariant(), 10, 70),
                 CreatePrimaryText(value, 17, true),
             },
-        });
-        Grid.SetColumn(topGrid.Children[^1], 1);
+        };
+        topGrid.Children.Add(titleStack);
+        Grid.SetColumn(titleStack, 1);
 
         var border = new Border
         {
@@ -907,6 +943,33 @@ public sealed partial class ShellWindow
             },
         };
 
+    private Grid BuildBoardSectionBand()
+    {
+        var grid = new Grid
+        {
+            Margin = new Thickness(4, 2, 4, 0),
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        grid.Children.Add(new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                CreateAccentText("LIVE BOARD", 11, 90),
+                CreateSecondaryText("Time-series panels for CPU, memory, disk I/O, network activity, and drive-usage gauges.", 14),
+            },
+        });
+
+        var actions = CreateChipRow(
+            CreateActionChip(GetGlobalWindowLabel(), OnCycleWindowRangeClick),
+            CreateActionChip("Reset zoom", OnResetAllZoomClick));
+        grid.Children.Add(actions);
+        Grid.SetColumn(actions, 1);
+        return grid;
+    }
+
     private static Grid CreateSectionBand(string eyebrow, string text)
     {
         var grid = new Grid
@@ -937,6 +1000,69 @@ public sealed partial class ShellWindow
         grid.Children.Add(line);
         Grid.SetColumn(line, 1);
         return grid;
+    }
+
+    private static Border CreateControlEditorCard(string tokenText, string eyebrow, string headline, string caption, FrameworkElement body)
+    {
+        var token = new Border
+        {
+            Width = 42,
+            Height = 42,
+            CornerRadius = new CornerRadius(21),
+            BorderThickness = new Thickness(1),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            Child = new TextBlock
+            {
+                Text = tokenText,
+                FontFamily = new FontFamily("Bahnschrift"),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ResolveBrush("AccentBrush", "#66E7FF"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+
+        var headerGrid = new Grid
+        {
+            ColumnSpacing = 12,
+        };
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.Children.Add(token);
+
+        var labelStack = new StackPanel
+        {
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                CreateAccentText(eyebrow, 10, 70),
+                CreatePrimaryText(headline, 18, true),
+            },
+        };
+        headerGrid.Children.Add(labelStack);
+        Grid.SetColumn(labelStack, 1);
+
+        return new Border
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(24),
+            Padding = new Thickness(18),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    headerGrid,
+                    CreateSecondaryText(caption, 12),
+                    body,
+                },
+            },
+        };
     }
 
     private static Border CreateTopStatusPill(UIElement content) =>
@@ -985,26 +1111,6 @@ public sealed partial class ShellWindow
                 Children =
                 {
                     CreateAccentText(title.ToUpperInvariant(), 10, 70),
-                    CreateSecondaryText(value, 12),
-                },
-            },
-        };
-
-    private static Border CreateHeroSpecPill(string label, string value) =>
-        new()
-        {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(999),
-            Padding = new Thickness(12, 8, 12, 8),
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 8,
-                Children =
-                {
-                    CreateMutedText(label, 12),
                     CreateSecondaryText(value, 12),
                 },
             },
@@ -1128,4 +1234,12 @@ public sealed partial class ShellWindow
         var tray = _viewModel.MinimizeToTray ? "close => tray" : "close => exit";
         return $"{startup} // {tray}";
     }
+
+    private string GetGlobalWindowLabel() => _viewModel.SelectedWindowMinutes switch
+    {
+        <= 1 => "1 min",
+        <= 5 => "5 min",
+        <= 15 => "15 min",
+        _ => "1 hour",
+    };
 }

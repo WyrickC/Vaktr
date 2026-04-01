@@ -201,23 +201,8 @@ public sealed partial class ShellWindow : Window
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(22),
                 Padding = new Thickness(18, 16, 18, 16),
-                MinHeight = 122,
-                Child = new StackPanel
-                {
-                    Spacing = 14,
-                    Children =
-                    {
-                        new Border
-                        {
-                            Width = 96,
-                            Height = 3,
-                            CornerRadius = new CornerRadius(999),
-                            Background = ResolveBrush("AccentBrush", "#66E7FF"),
-                            Opacity = 0.55,
-                        },
-                        contentGrid,
-                    },
-                },
+                MinHeight = 110,
+                Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);
             var index = _summaryHost.Children.Count - 1;
@@ -295,7 +280,7 @@ public sealed partial class ShellWindow : Window
     private int DetermineDashboardColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        return width >= 1800 ? 3 : width >= 1120 ? 2 : 1;
+        return width >= 1360 ? 3 : width >= 980 ? 2 : 1;
     }
 
     private async void OnRootLoaded(object sender, RoutedEventArgs e)
@@ -431,6 +416,25 @@ public sealed partial class ShellWindow : Window
         if (_controlDeckEditableActive)
         {
             RenderEditableControlDeck();
+        }
+    }
+
+    private void OnCycleWindowRangeClick(object? sender, EventArgs e)
+    {
+        _viewModel.SelectedWindowMinutes = _viewModel.SelectedWindowMinutes switch
+        {
+            <= 1 => 5,
+            <= 5 => 15,
+            <= 15 => 60,
+            _ => 1,
+        };
+    }
+
+    private void OnResetAllZoomClick(object? sender, EventArgs e)
+    {
+        foreach (var panel in _viewModel.DashboardPanels)
+        {
+            panel.ResetZoom();
         }
     }
 
@@ -847,7 +851,7 @@ public sealed partial class ShellWindow : Window
     private int DetermineSummaryColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        return width >= 1520 ? 4 : width >= 860 ? 2 : 1;
+        return width >= 1180 ? 4 : width >= 860 ? 2 : 1;
     }
 
     private async Task TryLoadHistoryAsync(VaktrConfig config)
