@@ -12,6 +12,8 @@ It keeps the collector and storage pipeline simple:
 - Sleek, gamer-friendly hardware monitoring
 - Fast startup and low overhead
 - Local-only storage
+- Out-of-the-box time-series charts for CPU, memory, disk I/O, and network
+- Drive-usage gauges for local volumes
 - Simple controls for interval, retention, theme, startup, and visible panels
 
 ## Run It
@@ -38,6 +40,7 @@ From Visual Studio:
 
 ## Notes
 
-- The app is designed to stay responsive by keeping sampling local, retaining only a bounded in-memory window for live charts, and persisting history to SQLite.
+- The app is designed to stay responsive by deferring telemetry startup until after the first paint, keeping only a bounded in-memory live window, and persisting history to SQLite.
+- The WinUI shell uses lightweight code-only controls for charts and gauges so it stays fast without extra runtime dependencies.
 - Closing can minimize to the tray if that option is enabled in the control deck.
 - If the solution has stale Visual Studio cache issues, close Visual Studio and delete the `.vs` folder once before reopening the solution.

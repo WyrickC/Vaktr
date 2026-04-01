@@ -9,7 +9,7 @@ public static class Program
     private static void Main(string[] args)
     {
         StartupTrace.Reset();
-        StartupTrace.Write("Program.Main start // launch-cut-v4");
+        StartupTrace.Write("Program.Main start // launch-cut-v10");
         StartupTrace.Write($"Assembly path: {typeof(Program).Assembly.Location}");
         StartupTrace.Write($"Assembly timestamp: {File.GetLastWriteTime(typeof(Program).Assembly.Location):O}");
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>

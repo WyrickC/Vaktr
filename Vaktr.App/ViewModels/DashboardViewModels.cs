@@ -438,6 +438,7 @@ public sealed class MetricPanelViewModel : ObservableObject
 {
     private static readonly TimeSpan LiveBufferWindow = TimeSpan.FromMinutes(75);
     private readonly Dictionary<string, SeriesBuffer> _buffers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SolidColorBrush _accentBrush;
 
     private IReadOnlyList<ChartSeriesViewModel> _visibleSeries = Array.Empty<ChartSeriesViewModel>();
     private string _currentValue = "Waiting";
@@ -454,6 +455,7 @@ public sealed class MetricPanelViewModel : ObservableObject
         Title = title;
         Category = category;
         Unit = unit;
+        _accentBrush = ResolveBrush(0);
     }
 
     public string PanelKey { get; }
@@ -473,19 +475,28 @@ public sealed class MetricPanelViewModel : ObservableObject
         "cpu-total" => 0,
         "cpu-cores" => 1,
         "memory" => 2,
-        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) => 3,
-        _ when PanelKey.StartsWith("net-", StringComparison.OrdinalIgnoreCase) => 4,
-        _ => 5,
+        _ when PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) => 3,
+        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) => 4,
+        _ when PanelKey.StartsWith("net-", StringComparison.OrdinalIgnoreCase) => 5,
+        _ => 6,
     };
 
     public string Badge => Category switch
     {
+        MetricCategory.Disk when PrefersGaugeVisual => "DRV",
         MetricCategory.Cpu => "CPU",
         MetricCategory.Memory => "MEM",
         MetricCategory.Disk => "DSK",
         MetricCategory.Network => "NET",
         _ => "LIVE",
     };
+
+    public Brush AccentBrush => _accentBrush;
+
+    public bool PrefersGaugeVisual =>
+        Category == MetricCategory.Disk &&
+        Unit == MetricUnit.Percent &&
+        PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase);
 
     public bool IsVisible
     {
@@ -530,6 +541,11 @@ public sealed class MetricPanelViewModel : ObservableObject
         get => _footerText;
         private set => SetProperty(ref _footerText, value);
     }
+
+    public double GaugeValue =>
+        !PrefersGaugeVisual || VisibleSeries.Count == 0 || VisibleSeries[0].Points.Count == 0
+            ? 0d
+            : Math.Clamp(VisibleSeries[0].Points[^1].Value, 0d, 100d);
 
     public event EventHandler? ExpandRequested;
 
@@ -633,7 +649,9 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         VisibleSeries = visibleSeries;
         UpdateSummaryText();
-        FooterText = $"{(int)SelectedRange}m replay";
+        FooterText = PrefersGaugeVisual
+            ? $"capacity // {(int)SelectedRange}m replay"
+            : $"{(int)SelectedRange}m replay";
     }
 
     private void UpdateSummaryText()
@@ -668,6 +686,10 @@ public sealed class MetricPanelViewModel : ObservableObject
                 var percent = total > 0 ? used / total * 100d : 0d;
                 CurrentValue = $"{used:0.0} GB used";
                 SecondaryValue = $"{percent:0.#}% of {total:0.0} GB";
+                break;
+            case MetricCategory.Disk when PrefersGaugeVisual:
+                CurrentValue = $"{latestBySeries.GetValueOrDefault("Used"):0.#}% used";
+                SecondaryValue = "Drive capacity";
                 break;
             case MetricCategory.Disk:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Read"):0.0} MB/s read";

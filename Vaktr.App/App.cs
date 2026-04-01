@@ -9,6 +9,7 @@ namespace Vaktr.App;
 public sealed class App : Application
 {
     private ShellWindow? _window;
+    private bool _startupGuardActive = true;
 
     public static App CurrentApp => (App)Current;
 
@@ -41,7 +42,7 @@ public sealed class App : Application
 
         var metricStore = new SqliteMetricStore();
         var viewModel = new MainViewModel(config);
-        StartupTrace.Write("Stores and view model created // launch-cut-v4");
+        StartupTrace.Write("Stores and view model created // launch-cut-v10");
         ApplyThemeResources(config.Theme);
         StartupTrace.Write("Configured theme applied");
 
@@ -50,7 +51,7 @@ public sealed class App : Application
             metricStore,
             configStore,
             new AutoLaunchService());
-        StartupTrace.Write("ShellWindow created // minimal-v4");
+        StartupTrace.Write("ShellWindow created // polished-v10");
 
         _window.ApplyTheme(config.Theme);
         StartupTrace.Write("Window theme applied");
@@ -62,6 +63,12 @@ public sealed class App : Application
     {
         ApplyThemeResources(mode);
         _window?.ApplyTheme(mode);
+    }
+
+    public void MarkStartupSettled()
+    {
+        _startupGuardActive = false;
+        StartupTrace.Write("Startup guard disarmed");
     }
 
     private void ApplyThemeResources(ThemeMode mode)
@@ -147,6 +154,12 @@ public sealed class App : Application
         if (e.Exception is not null)
         {
             StartupTrace.WriteException("App.UnhandledException", e.Exception);
+
+            if (_startupGuardActive && e.Exception is System.Runtime.InteropServices.COMException)
+            {
+                e.Handled = true;
+                StartupTrace.Write("Startup COMException handled to preserve shell");
+            }
         }
     }
 

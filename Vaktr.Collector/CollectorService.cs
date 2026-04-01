@@ -20,6 +20,7 @@ public sealed class CollectorService : IAsyncDisposable
     }
 
     public event EventHandler<MetricSnapshot>? SnapshotCollected;
+    public event EventHandler<Exception>? CollectionFailed;
 
     public async Task StartAsync(VaktrConfig config, CancellationToken cancellationToken)
     {
@@ -94,6 +95,10 @@ public sealed class CollectorService : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (Exception ex)
+        {
+            CollectionFailed?.Invoke(this, ex);
         }
     }
 

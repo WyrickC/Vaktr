@@ -37,6 +37,7 @@
     <Compile Remove="obj_winui3\**\*.cs" />
     <Compile Remove="Services\TrayIconHost.cs" />
     <Compile Remove="ShellWindow.cs" />
+    <Compile Remove="ShellWindow.Minimal.cs" />
     <Compile Remove="ShellWindow.xaml.cs" />
     <Compile Remove="Controls\MetricPanelControl.xaml.cs" />
     <Compile Remove="Controls\MetricDeck.xaml.cs" />

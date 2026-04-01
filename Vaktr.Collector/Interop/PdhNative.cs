@@ -49,7 +49,7 @@ internal static class PdhNative
         out uint counterType,
         out PdhFmtCounterValueDouble value);
 
-    [DllImport("pdh.dll")]
+    [DllImport("pdh.dll", CharSet = CharSet.Unicode, EntryPoint = "PdhGetFormattedCounterArrayW")]
     internal static extern uint PdhGetFormattedCounterArray(
         nint counter,
         uint format,
