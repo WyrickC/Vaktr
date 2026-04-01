@@ -57,7 +57,7 @@ public sealed class UsageGauge : UserControl
             {
                 new Border
                 {
-                    CornerRadius = new CornerRadius(999),
+                    CornerRadius = new CornerRadius(26),
                     BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                     BorderThickness = new Thickness(1),
                     Background = ResolveBrush("SurfaceBrush", "#102131"),

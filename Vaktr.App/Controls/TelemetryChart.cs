@@ -2,6 +2,7 @@ using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Dispatching;
+using System.Text;
 
 namespace Vaktr.App.Controls;
 
@@ -51,6 +52,9 @@ public sealed class TelemetryChart : UserControl
     private readonly Canvas _canvas;
     private readonly Canvas _interactionCanvas;
     private readonly Rectangle _selectionRectangle;
+    private readonly Line _hoverLine;
+    private readonly Border _hoverTooltip;
+    private readonly TextBlock _hoverTooltipText;
     private readonly TextBlock _emptyStateText;
     private bool _isSelecting;
     private bool _redrawQueued;
@@ -73,7 +77,35 @@ public sealed class TelemetryChart : UserControl
             RadiusY = 8,
             IsHitTestVisible = false,
         };
+        _hoverLine = new Line
+        {
+            Visibility = Visibility.Collapsed,
+            Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
+            StrokeThickness = 1,
+            Opacity = 0.32,
+            IsHitTestVisible = false,
+        };
+        _hoverTooltipText = new TextBlock
+        {
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+            MaxWidth = 220,
+        };
+        _hoverTooltip = new Border
+        {
+            Visibility = Visibility.Collapsed,
+            Background = ResolveBrush("SurfaceStrongBrush", "#183148"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(10, 8, 10, 8),
+            Child = _hoverTooltipText,
+            IsHitTestVisible = false,
+        };
         _interactionCanvas.Children.Add(_selectionRectangle);
+        _interactionCanvas.Children.Add(_hoverLine);
+        _interactionCanvas.Children.Add(_hoverTooltip);
         _emptyStateText = new TextBlock
         {
             Margin = new Thickness(10, 8, 0, 0),
@@ -99,6 +131,7 @@ public sealed class TelemetryChart : UserControl
         PointerMoved += OnPointerMoved;
         PointerReleased += OnPointerReleased;
         PointerCaptureLost += OnPointerCaptureLost;
+        PointerExited += (_, _) => HideHover();
         DoubleTapped += (_, _) => ZoomResetRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -171,6 +204,7 @@ public sealed class TelemetryChart : UserControl
             _canvas.Children.Clear();
             DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(0d));
             _emptyStateText.Visibility = Visibility.Visible;
+            HideHover();
             return;
         }
 
@@ -250,17 +284,42 @@ public sealed class TelemetryChart : UserControl
         {
             Width = plotWidth,
             Height = plotHeight,
-            RadiusX = 16,
-            RadiusY = 16,
+            RadiusX = 14,
+            RadiusY = 14,
             Stroke = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             StrokeThickness = 1,
-            Fill = BrushFactory.CreateBrush("#081E2B"),
-            Opacity = 0.88,
+            Fill = ResolveBrush("PanelOverlayBrush", "#11283C"),
+            Opacity = 0.98,
+        };
+
+        var tint = new Rectangle
+        {
+            Width = plotWidth,
+            Height = plotHeight,
+            RadiusX = 14,
+            RadiusY = 14,
+            Fill = ResolveBrush("AccentSoftBrush", "#10394D"),
+            Opacity = 0.08,
+        };
+
+        var topEdge = new Line
+        {
+            X1 = LeftPadding + 1,
+            X2 = LeftPadding + plotWidth - 1,
+            Y1 = TopPadding + 1,
+            Y2 = TopPadding + 1,
+            Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
+            StrokeThickness = 1,
+            Opacity = 0.08,
         };
 
         Canvas.SetLeft(frame, LeftPadding);
         Canvas.SetTop(frame, TopPadding);
         _canvas.Children.Add(frame);
+        Canvas.SetLeft(tint, LeftPadding);
+        Canvas.SetTop(tint, TopPadding);
+        _canvas.Children.Add(tint);
+        _canvas.Children.Add(topEdge);
     }
 
     private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue)
@@ -271,6 +330,21 @@ public sealed class TelemetryChart : UserControl
         var bottomY = TopPadding + plotHeight;
         var divisions = width >= 760 ? 6 : width >= 540 ? 5 : 4;
 
+        for (var index = 0; index < divisions; index++)
+        {
+            var y = TopPadding + ((plotHeight / divisions) * index);
+            _canvas.Children.Add(new Rectangle
+            {
+                Width = plotWidth,
+                Height = plotHeight / divisions,
+                Fill = ResolveBrush("SurfaceGridBrush", index % 2 == 0 ? "#22405C" : "#183149"),
+                Opacity = index % 2 == 0 ? 0.085 : 0.045,
+            });
+
+            Canvas.SetLeft(_canvas.Children[^1], LeftPadding);
+            Canvas.SetTop(_canvas.Children[^1], y);
+        }
+
         for (var index = 0; index <= divisions; index++)
         {
             var y = TopPadding + ((plotHeight / divisions) * index);
@@ -278,8 +352,7 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.22 : 0.12,
-                StrokeDashArray = new DoubleCollection { 2, 6 },
+                Opacity = index is 0 || index == divisions ? 0.38 : 0.24,
                 X1 = LeftPadding,
                 X2 = LeftPadding + plotWidth,
                 Y1 = y,
@@ -294,8 +367,7 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.14 : 0.08,
-                StrokeDashArray = new DoubleCollection { 2, 8 },
+                Opacity = index is 0 || index == divisions ? 0.24 : 0.14,
                 X1 = x,
                 X2 = x,
                 Y1 = TopPadding,
@@ -306,7 +378,7 @@ public sealed class TelemetryChart : UserControl
             var label = new TextBlock
             {
                 FontSize = 10,
-                Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+                Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
                 Text = FormatTimeLabel(tick, end - start),
             };
             _canvas.Children.Add(label);
@@ -317,7 +389,7 @@ public sealed class TelemetryChart : UserControl
         var ceiling = new TextBlock
         {
             FontSize = 10,
-            Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+            Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(maxValue, Unit),
         };
         _canvas.Children.Add(ceiling);
@@ -327,7 +399,7 @@ public sealed class TelemetryChart : UserControl
         var floor = new TextBlock
         {
             FontSize = 10,
-            Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+            Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(0d, Unit),
         };
         _canvas.Children.Add(floor);
@@ -550,6 +622,7 @@ public sealed class TelemetryChart : UserControl
             return;
         }
 
+        HideHover();
         _isSelecting = true;
         _selectionStartX = point.Position.X;
         _selectionCurrentX = _selectionStartX;
@@ -562,6 +635,7 @@ public sealed class TelemetryChart : UserControl
     {
         if (!_isSelecting)
         {
+            UpdateHover(e.GetCurrentPoint(this).Position);
             return;
         }
 
@@ -637,6 +711,157 @@ public sealed class TelemetryChart : UserControl
         _selectionRectangle.Height = Math.Max(0d, ActualHeight - BottomPadding);
         Canvas.SetLeft(_selectionRectangle, left);
         Canvas.SetTop(_selectionRectangle, 0);
+    }
+
+    private void UpdateHover(Windows.Foundation.Point position)
+    {
+        if (_isSelecting || Series is null || Series.Count == 0)
+        {
+            HideHover();
+            return;
+        }
+
+        var plotWidth = Math.Max(16d, ActualWidth - LeftPadding - RightPadding);
+        var plotHeight = Math.Max(16d, ActualHeight - TopPadding - BottomPadding);
+        if (position.X < LeftPadding || position.X > LeftPadding + plotWidth || position.Y < TopPadding || position.Y > TopPadding + plotHeight)
+        {
+            HideHover();
+            return;
+        }
+
+        if (!TryBuildHoverSnapshot(position.X, plotWidth, plotHeight, out var hoverX, out var tooltip))
+        {
+            HideHover();
+            return;
+        }
+
+        _hoverLine.Visibility = Visibility.Visible;
+        _hoverLine.X1 = hoverX;
+        _hoverLine.X2 = hoverX;
+        _hoverLine.Y1 = TopPadding;
+        _hoverLine.Y2 = TopPadding + plotHeight;
+
+        _hoverTooltipText.Text = tooltip;
+        _hoverTooltip.Measure(new Windows.Foundation.Size(240, double.PositiveInfinity));
+        var desired = _hoverTooltip.DesiredSize;
+        var tooltipLeft = hoverX > (ActualWidth - desired.Width - 20)
+            ? hoverX - desired.Width - 12
+            : hoverX + 12;
+        var tooltipTop = Math.Max(8, TopPadding + 10);
+        _hoverTooltip.Visibility = Visibility.Visible;
+        Canvas.SetLeft(_hoverTooltip, Math.Clamp(tooltipLeft, 8, Math.Max(8, ActualWidth - desired.Width - 8)));
+        Canvas.SetTop(_hoverTooltip, tooltipTop);
+    }
+
+    private bool TryBuildHoverSnapshot(double pointerX, double plotWidth, double plotHeight, out double hoverX, out string tooltip)
+    {
+        hoverX = 0d;
+        tooltip = string.Empty;
+
+        if (!TryGetPointBounds(Series, out _, out _, out var peak))
+        {
+            return false;
+        }
+
+        var start = WindowStartUtc;
+        var end = WindowEndUtc;
+        if (end <= start)
+        {
+            return false;
+        }
+
+        var maxValue = ResolveMaxValue(peak);
+        var normalized = Math.Clamp((pointerX - LeftPadding) / plotWidth, 0d, 1d);
+        var target = start + TimeSpan.FromTicks((long)((end - start).Ticks * normalized));
+        var lines = new List<string>();
+        DateTimeOffset? anchorTime = null;
+        var bestDistance = TimeSpan.MaxValue;
+
+        foreach (var series in Series.Where(item => item.Points.Count > 0))
+        {
+            var nearestPoint = FindNearestPoint(series.Points, target);
+            if (nearestPoint is null)
+            {
+                continue;
+            }
+
+            var distance = (nearestPoint.Timestamp - target).Duration();
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                anchorTime = nearestPoint.Timestamp;
+            }
+
+            lines.Add($"{series.Name}: {FormatAxisValue(nearestPoint.Value, Unit)}");
+        }
+
+        if (anchorTime is null || lines.Count == 0)
+        {
+            return false;
+        }
+
+        hoverX = Project(
+            new MetricPoint(anchorTime.Value, 0d),
+            LeftPadding,
+            TopPadding,
+            plotWidth,
+            plotHeight,
+            start,
+            end,
+            Math.Max(maxValue, 1d)).X;
+
+        var builder = new StringBuilder();
+        builder.AppendLine(FormatHoverTime(anchorTime.Value, end - start));
+        foreach (var line in lines.Take(6))
+        {
+            builder.AppendLine(line);
+        }
+
+        if (lines.Count > 6)
+        {
+            builder.Append($"+{lines.Count - 6} more");
+        }
+
+        tooltip = builder.ToString().TrimEnd();
+        return true;
+    }
+
+    private static MetricPoint? FindNearestPoint(IReadOnlyList<MetricPoint> points, DateTimeOffset target)
+    {
+        if (points.Count == 0)
+        {
+            return null;
+        }
+
+        MetricPoint best = points[0];
+        var bestDistance = (best.Timestamp - target).Duration();
+        for (var index = 1; index < points.Count; index++)
+        {
+            var current = points[index];
+            var distance = (current.Timestamp - target).Duration();
+            if (distance >= bestDistance)
+            {
+                continue;
+            }
+
+            best = current;
+            bestDistance = distance;
+        }
+
+        return best;
+    }
+
+    private void HideHover()
+    {
+        _hoverLine.Visibility = Visibility.Collapsed;
+        _hoverTooltip.Visibility = Visibility.Collapsed;
+    }
+
+    private static string FormatHoverTime(DateTimeOffset timestamp, TimeSpan window)
+    {
+        return window <= TimeSpan.FromMinutes(5)
+            ? timestamp.LocalDateTime.ToString("h:mm:ss tt")
+            : timestamp.LocalDateTime.ToString("h:mm:ss tt");
     }
 }
 

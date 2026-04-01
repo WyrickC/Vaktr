@@ -34,9 +34,9 @@ public sealed class InlineTextEntry : UserControl
             Background = ResolveBrush("SurfaceBrush", "#102131"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(14, 11, 14, 11),
-            MinHeight = 44,
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(14, 12, 14, 12),
+            MinHeight = 46,
             Child = _label,
         };
 

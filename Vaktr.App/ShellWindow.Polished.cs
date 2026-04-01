@@ -98,6 +98,22 @@ public sealed partial class ShellWindow : Window
     public void ApplyTheme(ThemeMode mode)
     {
         _rootLayout.RequestedTheme = mode == ThemeMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
+        if (_controlDeckEditableActive)
+        {
+            RenderEditableControlDeck();
+        }
+        else
+        {
+            RenderControlDeckSummary();
+        }
+
+        _summaryCardsBound = false;
+        if (_viewModel.SummaryCards.Count > 0)
+        {
+            BuildSummaryCards();
+        }
+
+        RefreshDashboardPanels();
     }
 
     private void BuildSummaryCards()
@@ -146,7 +162,7 @@ public sealed partial class ShellWindow : Window
                 Height = 56,
                 CornerRadius = new CornerRadius(28),
                 BorderThickness = new Thickness(1.4),
-                Background = ResolveBrush("SurfaceBrush", "#102131"),
+                Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             };
             badgeRing.SetBinding(Border.BorderBrushProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.AccentBrush)) });
 
@@ -185,7 +201,7 @@ public sealed partial class ShellWindow : Window
 
             var contentGrid = new Grid
             {
-                ColumnSpacing = 16,
+                ColumnSpacing = 18,
             };
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -196,12 +212,12 @@ public sealed partial class ShellWindow : Window
             var summaryCard = new Border
             {
                 DataContext = card,
-                Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+                Background = ResolveBrush("SurfaceBrush", "#102131"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                CornerRadius = new CornerRadius(20),
                 Padding = new Thickness(18, 16, 18, 16),
-                MinHeight = 110,
+                MinHeight = 114,
                 Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);

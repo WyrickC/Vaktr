@@ -1,5 +1,7 @@
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 using Vaktr.App.ViewModels;
 
 namespace Vaktr.App.Controls;
@@ -18,17 +20,17 @@ public sealed class ActionChip : UserControl
     {
         _surface = new Border
         {
-            CornerRadius = new CornerRadius(999),
+            CornerRadius = new CornerRadius(12),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(14, 8, 14, 8),
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            Padding = new Thickness(13, 8, 13, 8),
+            Background = ResolveBrush("SurfaceElevatedBrush", "#101D2A"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#233D56"),
         };
 
         _label = new TextBlock
         {
             FontFamily = new FontFamily("Bahnschrift"),
-            FontSize = 12,
+            FontSize = 11.5,
             FontWeight = FontWeights.SemiBold,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -123,18 +125,13 @@ public sealed class ActionChip : UserControl
     private void UpdateVisualState()
     {
         var useAccent = _isActive || _isFilled;
-        var backgroundKey = useAccent ? "AccentSoftBrush" : "SurfaceElevatedBrush";
-        var backgroundHex = useAccent ? "#113A4E" : "#15283B";
-        var hoverKey = useAccent ? "AccentHaloBrush" : "SurfaceStrongBrush";
-        var hoverHex = useAccent ? "#184F68" : "#183148";
+        _surface.Background = useAccent
+            ? ResolveBrush("AccentSoftBrush", "#10394D")
+            : ResolveBrush(_isHovered ? "SurfaceStrongBrush" : "SurfaceElevatedBrush", _isHovered ? "#183148" : "#15283B");
 
-        _surface.Background = _isHovered
-            ? ResolveBrush(hoverKey, hoverHex)
-            : ResolveBrush(backgroundKey, backgroundHex);
-
-        _surface.BorderBrush = _isActive
-            ? ResolveBrush("AccentStrongBrush", "#B7F7FF")
-            : ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _surface.BorderBrush = useAccent
+            ? ResolveBrush("AccentStrongBrush", "#94F0FF")
+            : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#31516F" : "#233D56");
 
         Opacity = _isPressed ? 0.9 : 1.0;
         _label.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
