@@ -865,7 +865,7 @@ public sealed partial class ShellWindow
         {
             Child = new StackPanel
             {
-                Spacing = 3,
+                Spacing = 4,
                 Children =
                 {
                     CreateAccentText(eyebrow, 12, 95),
@@ -980,11 +980,11 @@ public sealed partial class ShellWindow
     private static Border CreateTopStatusPill(UIElement content) =>
         new()
         {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#152840"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            Background = CreateSurfaceGradient("#132438", "#18314B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#2A4662"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(15, 9, 15, 9),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(16, 10, 16, 10),
             Child = new Grid
             {
                 Children =

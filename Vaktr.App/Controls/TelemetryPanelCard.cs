@@ -121,11 +121,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _chartFrame = new Border
         {
-            Background = CreateSurfaceGradient("#0D1A2B", "#12243A"),
+            Background = CreateSurfaceGradient("#0E1A2B", "#13263B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(10, 10, 10, 9),
+            CornerRadius = new CornerRadius(19),
+            Padding = new Thickness(11, 11, 11, 10),
             Child = _chart,
         };
 
@@ -220,11 +220,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _processSection = new Border
         {
-            Background = CreateSurfaceGradient("#0F1B2C", "#132336"),
+            Background = CreateSurfaceGradient("#0F1C2D", "#14263A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(12, 11, 12, 11),
+            CornerRadius = new CornerRadius(17),
+            Padding = new Thickness(13, 12, 13, 12),
             Visibility = Visibility.Collapsed,
             Child = new StackPanel
             {
@@ -253,11 +253,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         var rangeShell = new Border
         {
-            Background = CreateSurfaceGradient("#0F2032", "#14283F"),
+            Background = CreateSurfaceGradient("#102031", "#15283E"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(6, 4, 6, 4),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(6, 5, 6, 5),
             Child = rangeHost,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
@@ -282,8 +282,8 @@ public sealed class TelemetryPanelCard : UserControl
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9),
-            Padding = new Thickness(8, 3, 8, 3),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(9, 4, 9, 4),
             Child = _scaleText,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
@@ -309,11 +309,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _cardBorder = new Border
         {
-            Background = CreateSurfaceGradient("#0E1A2B", "#122339"),
+            Background = CreateSurfaceGradient("#0E1B2C", "#13253A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(20),
-            Padding = new Thickness(15, 14, 15, 14),
+            CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(16, 15, 16, 15),
             Child = new Grid
             {
                 Children =
@@ -586,8 +586,8 @@ public sealed class TelemetryPanelCard : UserControl
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _cardBorder.Opacity = 1.0;
         _cardBorder.Background = isHovered
-            ? CreateSurfaceGradient("#102133", "#152A40")
-            : CreateSurfaceGradient("#0E1A2B", "#122339");
+            ? CreateSurfaceGradient("#102133", "#162A40")
+            : CreateSurfaceGradient("#0E1B2C", "#13253A");
     }
 
     private static ActionChip CreateRangeButton(string text, TimeRangePreset preset)
@@ -692,11 +692,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         return (new Border
         {
-            Background = CreateSurfaceGradient("#0F1B2C", "#132336"),
+            Background = CreateSurfaceGradient("#101C2D", "#132438"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(11),
-            Padding = new Thickness(11, 8, 11, 8),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(12, 9, 12, 9),
             Child = row,
         }, valueText);
     }
@@ -792,11 +792,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         return (new Border
         {
-            Background = CreateSurfaceGradient("#0F1B2C", "#132336"),
+            Background = CreateSurfaceGradient("#101C2D", "#132438"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(12, 9, 12, 9),
+            CornerRadius = new CornerRadius(13),
+            Padding = new Thickness(12, 10, 12, 10),
             Child = rowGrid,
         }, nameText, valueText, captionText, meterFill);
     }
