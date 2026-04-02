@@ -2,16 +2,17 @@ using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Dispatching;
+using System.Linq;
 using System.Text;
 
 namespace Vaktr.App.Controls;
 
 public sealed class TelemetryChart : UserControl
 {
-    private const double LeftPadding = 12d;
-    private const double RightPadding = 12d;
-    private const double TopPadding = 16d;
-    private const double BottomPadding = 30d;
+    private const double LeftPadding = 14d;
+    private const double RightPadding = 14d;
+    private const double TopPadding = 14d;
+    private const double BottomPadding = 28d;
     private const double MinimumSelectionWidth = 18d;
 
     public static readonly DependencyProperty SeriesProperty =
@@ -72,7 +73,7 @@ public sealed class TelemetryChart : UserControl
             Visibility = Visibility.Collapsed,
             Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
             StrokeThickness = 1,
-            Fill = BrushFactory.CreateBrush("#203BB7FF"),
+            Fill = BrushFactory.CreateBrush("#163BB7FF"),
             RadiusX = 8,
             RadiusY = 8,
             IsHitTestVisible = false,
@@ -87,10 +88,10 @@ public sealed class TelemetryChart : UserControl
         };
         _hoverTooltipText = new TextBlock
         {
-            FontSize = 11,
+            FontSize = 10.5,
             TextWrapping = TextWrapping.Wrap,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
-            MaxWidth = 220,
+            MaxWidth = 210,
         };
         _hoverTooltip = new Border
         {
@@ -98,8 +99,8 @@ public sealed class TelemetryChart : UserControl
             Background = CreateSurfaceGradient("#15283B", "#203851"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(11, 9, 11, 9),
+            CornerRadius = new CornerRadius(13),
+            Padding = new Thickness(10, 8, 10, 8),
             Child = _hoverTooltipText,
             IsHitTestVisible = false,
         };
@@ -287,8 +288,8 @@ public sealed class TelemetryChart : UserControl
             RadiusX = 16,
             RadiusY = 16,
             Stroke = ResolveBrush("SurfaceGridBrush", "#27425E"),
-            StrokeThickness = 0.8,
-            Fill = CreateSurfaceGradient("#0C1828", "#112338"),
+            StrokeThickness = 1,
+            Fill = CreateSurfaceGradient("#0B1726", "#12243A"),
             Opacity = 0.98,
         };
 
@@ -299,7 +300,7 @@ public sealed class TelemetryChart : UserControl
             RadiusX = 16,
             RadiusY = 16,
             Fill = ResolveBrush("AccentSoftBrush", "#10394D"),
-            Opacity = 0.08,
+            Opacity = 0.06,
         };
 
         Canvas.SetLeft(frame, LeftPadding);
@@ -316,7 +317,7 @@ public sealed class TelemetryChart : UserControl
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
         var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
         var bottomY = TopPadding + plotHeight;
-        var divisions = width >= 760 ? 6 : width >= 540 ? 5 : 4;
+        var divisions = width >= 760 ? 5 : width >= 540 ? 4 : 3;
 
         for (var index = 0; index < divisions; index++)
         {
@@ -326,7 +327,7 @@ public sealed class TelemetryChart : UserControl
                 Width = plotWidth,
                 Height = plotHeight / divisions,
                 Fill = ResolveBrush("SurfaceGridBrush", index % 2 == 0 ? "#274768" : "#1B3650"),
-                Opacity = index % 2 == 0 ? 0.2 : 0.12,
+                Opacity = index % 2 == 0 ? 0.15 : 0.07,
             });
 
             Canvas.SetLeft(_canvas.Children[^1], LeftPadding);
@@ -340,7 +341,7 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.66 : 0.46,
+                Opacity = index is 0 || index == divisions ? 0.58 : 0.34,
                 X1 = LeftPadding,
                 X2 = LeftPadding + plotWidth,
                 Y1 = y,
@@ -357,7 +358,7 @@ public sealed class TelemetryChart : UserControl
                 {
                     Stroke = gridBrush,
                     StrokeThickness = 1,
-                    Opacity = 0.24,
+                    Opacity = 0.18,
                     X1 = x,
                     X2 = x,
                     Y1 = TopPadding,
@@ -368,18 +369,18 @@ public sealed class TelemetryChart : UserControl
             var tick = start + TimeSpan.FromTicks((end - start).Ticks / divisions * index);
             var label = new TextBlock
             {
-                FontSize = 10,
+                FontSize = 9,
                 Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
                 Text = FormatTimeLabel(tick, end - start),
             };
             _canvas.Children.Add(label);
-            Canvas.SetLeft(label, Math.Clamp(x - 20, LeftPadding, width - 56));
+            Canvas.SetLeft(label, Math.Clamp(x - 18, LeftPadding, width - 54));
             Canvas.SetTop(label, bottomY + 4);
         }
 
         var ceiling = new TextBlock
         {
-            FontSize = 10,
+            FontSize = 9,
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(maxValue, Unit),
         };
@@ -389,7 +390,7 @@ public sealed class TelemetryChart : UserControl
 
         var floor = new TextBlock
         {
-            FontSize = 10,
+            FontSize = 9,
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(0d, Unit),
         };
@@ -809,7 +810,7 @@ public sealed class TelemetryChart : UserControl
         var maxValue = ResolveMaxValue(peak);
         var normalized = Math.Clamp((pointerX - LeftPadding) / plotWidth, 0d, 1d);
         var target = start + TimeSpan.FromTicks((long)((end - start).Ticks * normalized));
-        var lines = new List<string>();
+        var lines = new List<(string Name, double Value)>();
         DateTimeOffset? anchorTime = null;
         var bestDistance = TimeSpan.MaxValue;
 
@@ -828,7 +829,7 @@ public sealed class TelemetryChart : UserControl
                 anchorTime = nearestPoint.Timestamp;
             }
 
-            lines.Add($"{series.Name}: {FormatAxisValue(nearestPoint.Value, Unit)}");
+            lines.Add((series.Name, nearestPoint.Value));
         }
 
         if (anchorTime is null || lines.Count == 0)
@@ -848,14 +849,14 @@ public sealed class TelemetryChart : UserControl
 
         var builder = new StringBuilder();
         builder.AppendLine(FormatHoverTime(anchorTime.Value, end - start));
-        foreach (var line in lines.Take(6))
+        foreach (var line in lines.OrderByDescending(item => item.Value).Take(5))
         {
-            builder.AppendLine(line);
+            builder.AppendLine($"• {line.Name}  {FormatAxisValue(line.Value, Unit)}");
         }
 
-        if (lines.Count > 6)
+        if (lines.Count > 5)
         {
-            builder.Append($"+{lines.Count - 6} more");
+            builder.Append($"+{lines.Count - 5} more");
         }
 
         tooltip = builder.ToString().TrimEnd();

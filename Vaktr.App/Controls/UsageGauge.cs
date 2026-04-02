@@ -36,7 +36,7 @@ public sealed class UsageGauge : UserControl
         _valueText = new TextBlock
         {
             FontFamily = new FontFamily("Bahnschrift"),
-            FontSize = 28,
+            FontSize = 26,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center,
@@ -45,7 +45,7 @@ public sealed class UsageGauge : UserControl
         _captionText = new TextBlock
         {
             Margin = new Thickness(0, 6, 0, 0),
-            FontSize = 12,
+            FontSize = 11,
             HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center,
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
@@ -57,11 +57,19 @@ public sealed class UsageGauge : UserControl
             {
                 new Border
                 {
-                    CornerRadius = new CornerRadius(26),
+                    CornerRadius = new CornerRadius(24),
                     BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                     BorderThickness = new Thickness(1),
                     Background = ResolveBrush("SurfaceBrush", "#102131"),
-                    Opacity = 0.75,
+                    Opacity = 0.82,
+                },
+                new Border
+                {
+                    Margin = new Thickness(6),
+                    CornerRadius = new CornerRadius(20),
+                    BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A"),
+                    BorderThickness = new Thickness(1),
+                    Opacity = 0.18,
                 },
                 _canvas,
                 new StackPanel

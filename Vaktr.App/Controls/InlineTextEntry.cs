@@ -25,7 +25,7 @@ public sealed class InlineTextEntry : UserControl
         _label = new TextBlock
         {
             FontFamily = new FontFamily("Segoe UI Variable Text"),
-            FontSize = 14,
+            FontSize = 13,
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
@@ -36,9 +36,9 @@ public sealed class InlineTextEntry : UserControl
             Background = CreateSurfaceGradient("#101C2E", "#14253A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(15, 12, 15, 12),
-            MinHeight = 48,
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(14, 10, 14, 10),
+            MinHeight = 44,
         };
 
         _shine = new Border
@@ -57,7 +57,7 @@ public sealed class InlineTextEntry : UserControl
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(9),
             Opacity = 0,
             IsHitTestVisible = false,
         };
@@ -202,17 +202,17 @@ public sealed class InlineTextEntry : UserControl
     private void UpdateVisualState()
     {
         _surface.Background = CreateSurfaceGradient(
-            _isFocused ? "#183652" : _isHovered ? "#15273D" : "#101C2E",
-            _isFocused ? "#132C44" : _isHovered ? "#193047" : "#14253A");
+            _isFocused ? "#18344F" : _isHovered ? "#142539" : "#101C2E",
+            _isFocused ? "#132A40" : _isHovered ? "#182E44" : "#14253A");
         _surface.BorderBrush = ResolveBrush(_isFocused ? "AccentStrongBrush" : "SurfaceStrokeBrush",
             _isFocused ? "#B7F7FF" : "#27425E");
-        Opacity = _isPressed ? 0.94 : 1.0;
+        Opacity = _isPressed ? 0.96 : 1.0;
         _glow.Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF");
-        _glow.Opacity = _isFocused ? 0.12 : _isHovered ? 0.05 : 0;
+        _glow.Opacity = _isFocused ? 0.08 : _isHovered ? 0.03 : 0;
         _shine.Background = _isFocused
             ? ResolveBrush("AccentStrongBrush", "#D7FBFF")
             : ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-        _shine.Opacity = _isFocused ? 0.3 : _isHovered ? 0.16 : 0.08;
+        _shine.Opacity = _isFocused ? 0.2 : _isHovered ? 0.1 : 0.05;
 
         var displayText = _text;
         if (string.IsNullOrWhiteSpace(displayText))

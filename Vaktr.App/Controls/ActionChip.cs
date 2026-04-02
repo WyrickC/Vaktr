@@ -22,9 +22,9 @@ public sealed class ActionChip : UserControl
     {
         _surface = new Border
         {
-            CornerRadius = new CornerRadius(11),
+            CornerRadius = new CornerRadius(10),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(15, 9, 15, 9),
+            Padding = new Thickness(13, 8, 13, 8),
             Background = ResolveBrush("SurfaceElevatedBrush", "#101D2A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#233D56"),
         };
@@ -45,7 +45,7 @@ public sealed class ActionChip : UserControl
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4),
-            CornerRadius = new CornerRadius(9),
+            CornerRadius = new CornerRadius(8),
             Opacity = 0,
             IsHitTestVisible = false,
         };
@@ -53,7 +53,7 @@ public sealed class ActionChip : UserControl
         _label = new TextBlock
         {
             FontFamily = new FontFamily("Segoe UI Variable Text"),
-            FontSize = 12,
+            FontSize = 11,
             FontWeight = FontWeights.Medium,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -157,21 +157,21 @@ public sealed class ActionChip : UserControl
     {
         var useAccent = _isActive || _isFilled;
         _surface.Background = useAccent
-            ? CreateSurfaceGradient("#1C3C5D", "#11253B")
-            : CreateSurfaceGradient(_isHovered ? "#17263A" : "#101C2C", _isHovered ? "#1A2C43" : "#132133");
+            ? CreateSurfaceGradient("#18344F", "#12253A")
+            : CreateSurfaceGradient(_isHovered ? "#142437" : "#101B29", _isHovered ? "#172A41" : "#122032");
 
         _surface.BorderBrush = useAccent
             ? ResolveBrush("AccentStrongBrush", "#94F0FF")
-            : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#355170" : "#233D56");
+            : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#2E4A68" : "#233D56");
 
-        Opacity = _isPressed ? 0.9 : 1.0;
+        Opacity = _isPressed ? 0.94 : 1.0;
         _label.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _glow.Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF");
-        _glow.Opacity = useAccent ? 0.12 : _isHovered ? 0.05 : 0;
+        _glow.Opacity = useAccent ? 0.08 : _isHovered ? 0.03 : 0;
         _shine.Background = useAccent
             ? ResolveBrush("AccentStrongBrush", "#D7FBFF")
             : ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-        _shine.Opacity = useAccent ? 0.3 : _isHovered ? 0.16 : 0.09;
+        _shine.Opacity = useAccent ? 0.2 : _isHovered ? 0.1 : 0.05;
     }
 
     private static Brush ResolveBrush(string key, string fallbackHex)

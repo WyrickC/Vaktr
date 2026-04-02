@@ -43,27 +43,27 @@ public sealed class TelemetryPanelCard : UserControl
 
     public TelemetryPanelCard()
     {
-        MinHeight = 388;
+        MinHeight = 372;
         HorizontalAlignment = HorizontalAlignment.Stretch;
 
         _badgeIconHost = new Grid
         {
-            Width = 17,
-            Height = 17,
+            Width = 16,
+            Height = 16,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        _footerText = CreateTextBlock(fontSize: 10);
-        _scaleText = CreateTextBlock("Segoe UI Variable Text", 10, FontWeights.Medium);
-        _titleText = CreateTextBlock("Segoe UI Variable Display", 19, FontWeights.SemiBold);
-        _currentValueText = CreateTextBlock("Segoe UI Variable Display", 24, FontWeights.SemiBold);
+        _footerText = CreateTextBlock(fontSize: 11);
+        _scaleText = CreateTextBlock("Segoe UI Variable Text", 11, FontWeights.Medium);
+        _titleText = CreateTextBlock("Segoe UI Variable Display", 18, FontWeights.SemiBold);
+        _currentValueText = CreateTextBlock("Segoe UI Variable Display", 22, FontWeights.SemiBold);
         _secondaryValueText = CreateTextBlock(fontSize: 12);
 
         _badgeBorder = new Border
         {
-            Width = 40,
-            Height = 40,
-            CornerRadius = new CornerRadius(14),
+            Width = 38,
+            Height = 38,
+            CornerRadius = new CornerRadius(13),
             BorderThickness = new Thickness(1),
             Background = CreateSurfaceGradient("#102131", "#17304A"),
             Child = _badgeIconHost,
@@ -71,13 +71,13 @@ public sealed class TelemetryPanelCard : UserControl
 
         _edgeGlow = new Border
         {
-            Width = 3,
-            Height = 220,
+            Width = 2,
+            Height = 184,
             CornerRadius = new CornerRadius(2),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(-2, 6, 0, 6),
-            Opacity = 0.85,
+            Opacity = 0.55,
             IsHitTestVisible = false,
         };
 
@@ -88,7 +88,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         _visualGrid = new Grid
         {
-            ColumnSpacing = 18,
+            ColumnSpacing = 16,
         };
         _visualGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _visualGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -103,8 +103,8 @@ public sealed class TelemetryPanelCard : UserControl
 
         _chart = new TelemetryChart
         {
-            Height = 186,
-            MinHeight = 186,
+            Height = 180,
+            MinHeight = 180,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         _chart.ZoomSelectionRequested += OnChartZoomSelectionRequested;
@@ -115,8 +115,8 @@ public sealed class TelemetryPanelCard : UserControl
             Background = CreateSurfaceGradient("#0D1A2B", "#12243A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(12, 12, 12, 10),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(10, 10, 10, 9),
             Child = _chart,
         };
 
@@ -126,11 +126,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _legendHost = new StackPanel
         {
-            Spacing = 8,
+            Spacing = 6,
         };
         _legendScroller = new ScrollViewer
         {
-            MaxHeight = 214,
+            MaxHeight = 192,
             VerticalScrollMode = ScrollMode.Enabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollMode = ScrollMode.Disabled,
@@ -142,7 +142,7 @@ public sealed class TelemetryPanelCard : UserControl
         var rangeHost = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 6,
+            Spacing = 5,
             Children =
             {
                 _oneMinuteButton,
@@ -157,8 +157,8 @@ public sealed class TelemetryPanelCard : UserControl
             Background = CreateSurfaceGradient("#0F2032", "#14283F"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(7, 5, 7, 5),
+            CornerRadius = new CornerRadius(13),
+            Padding = new Thickness(6, 4, 6, 4),
             Child = rangeHost,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
@@ -170,7 +170,8 @@ public sealed class TelemetryPanelCard : UserControl
         metaGrid.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
                 _badgeBorder,
@@ -182,8 +183,8 @@ public sealed class TelemetryPanelCard : UserControl
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(9, 3, 9, 3),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(8, 3, 8, 3),
             Child = _scaleText,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
@@ -195,7 +196,7 @@ public sealed class TelemetryPanelCard : UserControl
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         headerGrid.Children.Add(new StackPanel
         {
-            Spacing = 5,
+            Spacing = 4,
             Children =
             {
                 metaGrid,
@@ -212,8 +213,8 @@ public sealed class TelemetryPanelCard : UserControl
             Background = CreateSurfaceGradient("#0E1A2B", "#122339"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(16, 15, 16, 15),
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(15, 14, 15, 14),
             Child = new Grid
             {
                 Children =
@@ -221,7 +222,7 @@ public sealed class TelemetryPanelCard : UserControl
                     _edgeGlow,
                     new StackPanel
                     {
-                        Spacing = 11,
+                        Spacing = 10,
                         Children =
                         {
                             headerGrid,
@@ -417,7 +418,7 @@ public sealed class TelemetryPanelCard : UserControl
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _cardBorder.Opacity = 1.0;
         _cardBorder.Background = isHovered
-            ? CreateSurfaceGradient("#112134", "#17304A")
+            ? CreateSurfaceGradient("#102133", "#152A40")
             : CreateSurfaceGradient("#0E1A2B", "#122339");
     }
 
@@ -426,8 +427,8 @@ public sealed class TelemetryPanelCard : UserControl
         var button = new ActionChip
         {
             Tag = preset,
-            MinHeight = 32,
-            MinWidth = 42,
+            MinHeight = 30,
+            MinWidth = 40,
             Text = text,
         };
 
@@ -467,15 +468,15 @@ public sealed class TelemetryPanelCard : UserControl
 
         row.Children.Add(new Ellipse
         {
-            Width = 8,
-            Height = 8,
-            Margin = new Thickness(0, 4, 10, 0),
+            Width = 7,
+            Height = 7,
+            Margin = new Thickness(0, 3, 9, 0),
             Fill = strokeBrush,
         });
 
         var nameText = new TextBlock
         {
-            FontSize = 12,
+            FontSize = 11,
             Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1"),
             Text = name,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -486,7 +487,7 @@ public sealed class TelemetryPanelCard : UserControl
         var valueText = new TextBlock
         {
             FontFamily = new FontFamily("Bahnschrift"),
-            FontSize = 12,
+            FontSize = 11,
             FontWeight = FontWeights.SemiBold,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
             Text = "--",
@@ -496,11 +497,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         return (new Border
         {
-            Background = CreateSurfaceGradient("#101D2F", "#14253A"),
+            Background = CreateSurfaceGradient("#0F1B2C", "#132336"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(12, 10, 12, 10),
+            CornerRadius = new CornerRadius(11),
+            Padding = new Thickness(11, 8, 11, 8),
             Child = row,
         }, valueText);
     }
@@ -520,7 +521,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         var accentBrush = panel?.AccentBrush ?? ResolveBrush("AccentBrush", "#66E7FF");
         _badgeIconHost.Children.Clear();
-        _badgeIconHost.Children.Add(IconFactory.CreateIcon(iconKey, accentBrush, 18));
+        _badgeIconHost.Children.Add(IconFactory.CreateIcon(iconKey, accentBrush, 16));
     }
 
     private static T? FindParent<T>(DependencyObject? start)
@@ -544,7 +545,7 @@ public sealed class TelemetryPanelCard : UserControl
     {
         control.IsActive = isActive;
         control.IsFilled = isActive;
-        control.Opacity = isActive ? 1 : 0.68;
+        control.Opacity = isActive ? 1 : 0.76;
     }
 
     private static TextBlock CreateTextBlock(string? fontFamily = null, double fontSize = 12, Windows.UI.Text.FontWeight? fontWeight = null) =>
@@ -559,7 +560,7 @@ public sealed class TelemetryPanelCard : UserControl
     private static TextBlock CreateEmptyText(string text) =>
         new()
         {
-            FontSize = 12,
+            FontSize = 11,
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
             Text = text,
         };

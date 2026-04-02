@@ -70,13 +70,13 @@ public sealed partial class ShellWindow : Window
         _brandHost = CreateBrandPlaceholder();
         _summaryHost = new Grid
         {
-            ColumnSpacing = 16,
-            RowSpacing = 16,
+            ColumnSpacing = 14,
+            RowSpacing = 14,
         };
         _dashboardGrid = new Grid
         {
-            ColumnSpacing = 20,
-            RowSpacing = 20,
+            ColumnSpacing = 18,
+            RowSpacing = 18,
         };
 
         _rootLayout = BuildRootLayout();
@@ -146,21 +146,24 @@ public sealed partial class ShellWindow : Window
 
         foreach (var card in _viewModel.SummaryCards)
         {
-            var badgeHost = IconFactory.CreateTile(card.Title, card.AccentBrush, 52, 18);
+            var badgeHost = IconFactory.CreateTile(card.Title, card.AccentBrush, 48, 16);
+            badgeHost.VerticalAlignment = VerticalAlignment.Center;
 
-            var titleText = CreateMutedText(string.Empty, 11);
+            var titleText = CreateMutedText(string.Empty, 10);
+            titleText.CharacterSpacing = 80;
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
-            var valueText = CreatePrimaryText(string.Empty, 29, true);
+            var valueText = CreatePrimaryText(string.Empty, 27, true);
             valueText.FontFamily = new FontFamily("Segoe UI Variable Display");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
-            var captionText = CreateSecondaryText(string.Empty, 11);
+            var captionText = CreateSecondaryText(string.Empty, 12);
             captionText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Caption)) });
 
             var details = new StackPanel
             {
-                Spacing = 2,
+                Spacing = 1,
+                VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
                     titleText,
@@ -171,7 +174,7 @@ public sealed partial class ShellWindow : Window
 
             var contentGrid = new Grid
             {
-                ColumnSpacing = 12,
+                ColumnSpacing = 11,
             };
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -182,12 +185,12 @@ public sealed partial class ShellWindow : Window
             var summaryCard = new Border
             {
                 DataContext = card,
-                Background = CreateSurfaceGradient("#0E1A2B", "#13243A"),
+                Background = CreateSurfaceGradient("#0F1C2D", "#15283F"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(20),
-                Padding = new Thickness(17, 14, 17, 14),
-                MinHeight = 104,
+                CornerRadius = new CornerRadius(22),
+                Padding = new Thickness(16, 13, 16, 13),
+                MinHeight = 98,
                 Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);

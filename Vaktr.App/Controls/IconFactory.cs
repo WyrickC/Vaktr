@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Vaktr.App.ViewModels;
 
@@ -17,8 +18,8 @@ internal static class IconFactory
         {
             Width = size,
             Height = size,
-            Background = CreateSurfaceGradient("#0F2032", "#162B42"),
-            BorderBrush = CreateOpacityBrush(accentBrush, 0.46),
+            Background = CreateSurfaceGradient("#102031", "#15273D"),
+            BorderBrush = CreateOpacityBrush(accentBrush, 0.34),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(corner),
             Child = new Grid
@@ -30,7 +31,7 @@ internal static class IconFactory
                         Margin = new Thickness(2),
                         CornerRadius = new CornerRadius(Math.Max(10, corner - 2)),
                         Background = CreateInnerGlowBrush(accentBrush),
-                        Opacity = 0.22,
+                        Opacity = 0.16,
                         IsHitTestVisible = false,
                     },
                     new Border
@@ -38,8 +39,17 @@ internal static class IconFactory
                         Height = 1,
                         Margin = new Thickness(1, 1, 1, 0),
                         CornerRadius = new CornerRadius(1),
-                        Background = CreateOpacityBrush(accentBrush, 0.3),
+                        Background = CreateOpacityBrush(accentBrush, 0.18),
                         VerticalAlignment = VerticalAlignment.Top,
+                        IsHitTestVisible = false,
+                    },
+                    new Border
+                    {
+                        Margin = new Thickness(5),
+                        CornerRadius = new CornerRadius(Math.Max(8, corner - 5)),
+                        BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+                        BorderThickness = new Thickness(1),
+                        Opacity = 0.35,
                         IsHitTestVisible = false,
                     },
                     CreateIcon(key, accentBrush, iconSize),
@@ -62,13 +72,12 @@ internal static class IconFactory
             IsHitTestVisible = false,
             Children =
             {
-                new FontIcon
+                new Ellipse
                 {
-                    Glyph = glyph,
-                    FontFamily = FluentIconFont,
-                    FontSize = size + 1.5,
-                    Foreground = glowBrush,
-                    Margin = new Thickness(0, 1, 0, 0),
+                    Width = size + 2,
+                    Height = size + 2,
+                    Fill = glowBrush,
+                    Opacity = 0.28,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                     IsHitTestVisible = false,
@@ -144,7 +153,7 @@ internal static class IconFactory
             };
 
             glowBrush.GradientStops.Add(new GradientStop { Color = solidBrush.Color, Offset = 0d });
-            glowBrush.GradientStops.Add(new GradientStop { Color = solidBrush.Color, Offset = 0.42d });
+            glowBrush.GradientStops.Add(new GradientStop { Color = solidBrush.Color, Offset = 0.32d });
             glowBrush.GradientStops.Add(new GradientStop { Color = BrushFactory.ParseColor("#001018"), Offset = 1d });
             return glowBrush;
         }
@@ -167,6 +176,16 @@ internal static class IconFactory
         }
 
         return BrushFactory.ParseColor(fallbackHex);
+    }
+
+    private static Brush ResolveBrush(string key, string fallbackHex)
+    {
+        if (Microsoft.UI.Xaml.Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush)
+        {
+            return brush;
+        }
+
+        return BrushFactory.CreateBrush(fallbackHex);
     }
 
     private static Brush CreateOpacityBrush(Brush brush, double opacity)

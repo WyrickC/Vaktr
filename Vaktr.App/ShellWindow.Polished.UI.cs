@@ -79,11 +79,11 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildShellStack // polished-v19");
         return new StackPanel
         {
-            Spacing = 18,
+            Spacing = 16,
             Children =
             {
                 BuildHeader(),
-                CreateSectionBand("AT A GLANCE", "Fast launch, low overhead, and local-only telemetry with sensible defaults."),
+                CreateSectionBand("AT A GLANCE", "Current node snapshot."),
                 BuildSummarySurface(),
                 BuildBoardSectionBand(),
                 _dashboardGrid,
@@ -118,16 +118,16 @@ public sealed partial class ShellWindow
 
         return new StackPanel
         {
-            Spacing = 10,
+            Spacing = 8,
             Children =
             {
                 heroGrid,
                 new Border
                 {
                     Height = 1,
-                    Margin = new Thickness(2, 8, 2, 2),
+                    Margin = new Thickness(2, 6, 2, 2),
                     Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                    Opacity = 0.22,
+                    Opacity = 0.18,
                 },
             },
         };
@@ -138,10 +138,10 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildControlsSurface // polished-v19");
         var root = new StackPanel
         {
-            Spacing = 14,
+            Spacing = 12,
             Children =
             {
-                CreateSectionHeader("CONTROL DECK", "Tune scrape timing, retention, and storage without leaving the board."),
+                CreateSectionHeader("CONTROL DECK", "Adjust cadence, retention, and storage."),
                 _controlsBodyHost,
             },
         };
@@ -152,7 +152,7 @@ public sealed partial class ShellWindow
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(28),
-            Padding = new Thickness(22, 18, 22, 20),
+            Padding = new Thickness(20, 18, 20, 18),
             Child = root,
         };
     }
@@ -175,11 +175,10 @@ public sealed partial class ShellWindow
 
         _controlsBodyHost.Child = new StackPanel
         {
-            Spacing = 12,
+            Spacing = 10,
             Children =
             {
                 settingsGrid,
-                CreateMutedText("Vaktr keeps history local and automatically compacts older samples after the first 6 hours.", 12),
             },
         };
     }
@@ -226,8 +225,8 @@ public sealed partial class ShellWindow
 
         var fieldGrid = new Grid
         {
-            ColumnSpacing = 16,
-            RowSpacing = 14,
+            ColumnSpacing = 14,
+            RowSpacing = 12,
         };
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -314,7 +313,7 @@ public sealed partial class ShellWindow
 
         var actionRow = new Grid
         {
-            ColumnSpacing = 12,
+            ColumnSpacing = 14,
             VerticalAlignment = VerticalAlignment.Center,
         };
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -325,7 +324,8 @@ public sealed partial class ShellWindow
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                CreateSecondaryText($"Default: {VaktrConfig.DefaultStorageDirectory} // drag charts to zoom, double-click to reset.", 12),
+                CreateSecondaryText($"Default path: {VaktrConfig.DefaultStorageDirectory}", 12),
+                CreateMutedText("Drag a chart to zoom. Double-click to reset.", 11),
             },
         });
 
@@ -340,7 +340,7 @@ public sealed partial class ShellWindow
         StartupTrace.Write("RenderEditableControlDeck // assign host");
         _controlsBodyHost.Child = new StackPanel
         {
-            Spacing = 16,
+            Spacing = 14,
             Children =
             {
                 fieldGrid,
@@ -428,8 +428,8 @@ public sealed partial class ShellWindow
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(20),
-            Padding = new Thickness(16, 15, 16, 15),
-            MinHeight = 88,
+            Padding = new Thickness(15, 13, 15, 13),
+            MinHeight = 82,
             Child = new Grid
             {
                 Children =
@@ -437,20 +437,20 @@ public sealed partial class ShellWindow
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
-                        Spacing = 14,
+                        Spacing = 12,
                         VerticalAlignment = VerticalAlignment.Center,
                         Children =
                         {
-                            IconFactory.CreateTile(label, accentBrush, 46, 18),
+                            IconFactory.CreateTile(label, accentBrush, 42, 16),
                             new StackPanel
                             {
-                                Spacing = 4,
+                                Spacing = 2,
                                 VerticalAlignment = VerticalAlignment.Center,
                                 Children =
                                 {
-                                    CreateMutedText(label, 11),
-                                    CreatePrimaryText(value, 19, true),
-                                    CreateSecondaryText(caption, 12),
+                                    CreateMutedText(label, 10),
+                                    CreatePrimaryText(value, 18, true),
+                                    CreateSecondaryText(caption, 11),
                                 },
                             },
                         },
@@ -770,7 +770,7 @@ public sealed partial class ShellWindow
         var stack = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = 10,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
 
@@ -788,8 +788,8 @@ public sealed partial class ShellWindow
         {
             Text = text,
             IsFilled = filled,
-            MinHeight = 38,
-            MinWidth = filled ? 118 : 0,
+            MinHeight = 36,
+            MinWidth = filled ? 112 : 0,
         };
         chip.Click += onClick;
         return chip;
@@ -857,11 +857,11 @@ public sealed partial class ShellWindow
         {
             Child = new StackPanel
             {
-                Spacing = 4,
+                Spacing = 3,
                 Children =
                 {
-                    CreateAccentText(eyebrow, 13, 110),
-                    CreateSecondaryText(text, 15),
+                    CreateAccentText(eyebrow, 12, 95),
+                    CreateSecondaryText(text, 14),
                 },
             },
         };
@@ -877,11 +877,11 @@ public sealed partial class ShellWindow
 
         grid.Children.Add(new StackPanel
         {
-            Spacing = 6,
+            Spacing = 4,
             Children =
             {
-                CreateAccentText("LIVE BOARD", 12, 95),
-                CreateSecondaryText("Time-series panels for CPU, memory, disk I/O, network activity, and drive-usage gauges.", 15),
+                CreateAccentText("LIVE BOARD", 11, 85),
+                CreateSecondaryText("Zoomable CPU, memory, disk, network, and drive telemetry.", 13),
             },
         });
 
@@ -897,16 +897,16 @@ public sealed partial class ShellWindow
     {
         return new Grid
         {
-            Margin = new Thickness(4, 4, 4, 2),
+            Margin = new Thickness(4, 2, 4, 0),
             Children =
             {
                 new StackPanel
                 {
-                    Spacing = 5,
+                    Spacing = 3,
                     Children =
                     {
-                        CreateAccentText(eyebrow, 12, 105),
-                        CreateSecondaryText(text, 14),
+                        CreateAccentText(eyebrow, 11, 85),
+                        CreateSecondaryText(text, 13),
                     },
                 },
             },
@@ -920,7 +920,7 @@ public sealed partial class ShellWindow
 
         var headerGrid = new Grid
         {
-            ColumnSpacing = 12,
+            ColumnSpacing = 11,
         };
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -928,12 +928,12 @@ public sealed partial class ShellWindow
 
         var labelStack = new StackPanel
         {
-            Spacing = 6,
+            Spacing = 4,
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
                 CreateAccentText(eyebrow, 10, 90),
-                CreatePrimaryText(headline, 18, true),
+                CreatePrimaryText(headline, 17, true),
             },
         };
         headerGrid.Children.Add(labelStack);
@@ -945,15 +945,15 @@ public sealed partial class ShellWindow
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(18, 16, 18, 16),
-            MinHeight = 228,
+            Padding = new Thickness(17, 15, 17, 15),
+            MinHeight = 214,
             Child = new StackPanel
             {
-                Spacing = 14,
+                Spacing = 12,
                 Children =
                 {
                     headerGrid,
-                    CreateSecondaryText(caption, 12),
+                    CreateSecondaryText(caption, 11),
                     body,
                 },
             },
@@ -1098,7 +1098,9 @@ public sealed partial class ShellWindow
 
     private static TextBlock CreateFieldLabel(string text)
     {
-        return CreateMutedText(text, 12);
+        var label = CreateMutedText(text, 11);
+        label.CharacterSpacing = 20;
+        return label;
     }
 
     private static Brush ResolveBrush(string key, string fallbackHex)
