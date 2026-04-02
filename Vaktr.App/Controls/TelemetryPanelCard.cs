@@ -79,13 +79,14 @@ public sealed class TelemetryPanelCard : UserControl
 
         _edgeGlow = new Border
         {
-            Width = 2,
+            Width = 0,
             Height = 184,
             CornerRadius = new CornerRadius(2),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(-2, 6, 0, 6),
-            Opacity = 0.55,
+            Opacity = 0,
+            Visibility = Visibility.Collapsed,
             IsHitTestVisible = false,
         };
 

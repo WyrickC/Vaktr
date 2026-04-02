@@ -670,9 +670,22 @@ public sealed class TelemetryChart : UserControl
 
     private static string FormatTimeLabel(DateTimeOffset timestamp, TimeSpan window)
     {
-        return window <= TimeSpan.FromMinutes(5)
-            ? timestamp.LocalDateTime.ToString("HH:mm:ss")
-            : timestamp.LocalDateTime.ToString("HH:mm");
+        if (window <= TimeSpan.FromMinutes(5))
+        {
+            return timestamp.LocalDateTime.ToString("HH:mm:ss");
+        }
+
+        if (window <= TimeSpan.FromHours(12))
+        {
+            return timestamp.LocalDateTime.ToString("HH:mm");
+        }
+
+        if (window <= TimeSpan.FromDays(2))
+        {
+            return timestamp.LocalDateTime.ToString("MM-dd HH:mm");
+        }
+
+        return timestamp.LocalDateTime.ToString("MM-dd");
     }
 
     private static string FormatAxisValue(double value, MetricUnit unit) => unit switch

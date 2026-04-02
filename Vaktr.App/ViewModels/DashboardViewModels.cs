@@ -34,10 +34,13 @@ public sealed class MainViewModel : ObservableObject
 
         WindowOptions =
         [
-            new SelectionOption(1, "1 minute"),
             new SelectionOption(5, "5 minutes"),
-            new SelectionOption(15, "15 minutes"),
+            new SelectionOption(30, "30 minutes"),
             new SelectionOption(60, "1 hour"),
+            new SelectionOption(720, "12 hours"),
+            new SelectionOption(1440, "24 hours"),
+            new SelectionOption(10080, "7 days"),
+            new SelectionOption(43200, "30 days"),
         ];
 
         RetentionOptions =
@@ -463,7 +466,12 @@ public sealed class MainViewModel : ObservableObject
         <= 1 => TimeRangePreset.OneMinute,
         <= 5 => TimeRangePreset.FiveMinutes,
         <= 15 => TimeRangePreset.FifteenMinutes,
-        _ => TimeRangePreset.OneHour,
+        <= 30 => TimeRangePreset.ThirtyMinutes,
+        <= 60 => TimeRangePreset.OneHour,
+        <= 720 => TimeRangePreset.TwelveHours,
+        <= 1440 => TimeRangePreset.TwentyFourHours,
+        <= 10080 => TimeRangePreset.SevenDays,
+        _ => TimeRangePreset.ThirtyDays,
     };
 
     private static int ParseOptionalInt(string? text, int fallback, int minValue, int maxValue)
@@ -1323,8 +1331,38 @@ public sealed class MetricPanelViewModel : ObservableObject
         }
 
         return PrefersGaugeVisual
-            ? $"capacity // {(int)SelectedRange}m replay"
-            : $"{(int)SelectedRange}m replay";
+            ? $"capacity // {FormatRangeLabel((int)SelectedRange)} replay"
+            : $"{FormatRangeLabel((int)SelectedRange)} replay";
+    }
+
+    private static string FormatRangeLabel(int minutes)
+    {
+        if (minutes >= 43200)
+        {
+            return "30d";
+        }
+
+        if (minutes >= 10080)
+        {
+            return "7d";
+        }
+
+        if (minutes >= 1440)
+        {
+            return "24h";
+        }
+
+        if (minutes >= 720)
+        {
+            return "12h";
+        }
+
+        if (minutes >= 60)
+        {
+            return $"{minutes / 60}h";
+        }
+
+        return $"{minutes}m";
     }
 
     private sealed class SeriesBuffer

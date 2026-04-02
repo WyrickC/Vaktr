@@ -38,10 +38,15 @@ public sealed partial class ShellWindow : Window
     private readonly Grid _summaryHost;
     private readonly Grid _dashboardGrid;
     private readonly TextBlock _statusText;
-    private readonly ActionChip _globalOneMinuteButton;
+    private readonly ActionChip _globalRangeButton;
+    private readonly Border _globalRangeEditorHost;
     private readonly ActionChip _globalFiveMinuteButton;
-    private readonly ActionChip _globalFifteenMinuteButton;
+    private readonly ActionChip _globalThirtyMinuteButton;
     private readonly ActionChip _globalOneHourButton;
+    private readonly ActionChip _globalTwelveHourButton;
+    private readonly ActionChip _globalTwentyFourHourButton;
+    private readonly ActionChip _globalSevenDayButton;
+    private readonly ActionChip _globalThirtyDayButton;
     private readonly ActionChip _globalResetZoomButton;
 
     private CollectorService? _collectorService;
@@ -54,7 +59,10 @@ public sealed partial class ShellWindow : Window
     private int _lastSummaryColumnCount;
     private bool _windowIconApplied;
     private bool _summaryCardsBound;
+    private bool _globalRangeEditorVisible;
     private string _lastRenderedStatusText = string.Empty;
+    private DateTimeOffset? _globalAbsoluteStartUtc;
+    private DateTimeOffset? _globalAbsoluteEndUtc;
 
     public ShellWindow(
         MainViewModel viewModel,
@@ -83,10 +91,18 @@ public sealed partial class ShellWindow : Window
             ColumnSpacing = 18,
             RowSpacing = 18,
         };
-        _globalOneMinuteButton = CreateGlobalRangeChip("1m", 1);
+        _globalRangeButton = CreateActionChip("15m", OnToggleGlobalRangeEditor, true);
+        _globalRangeEditorHost = new Border
+        {
+            Visibility = Visibility.Collapsed,
+        };
         _globalFiveMinuteButton = CreateGlobalRangeChip("5m", 5);
-        _globalFifteenMinuteButton = CreateGlobalRangeChip("15m", 15);
+        _globalThirtyMinuteButton = CreateGlobalRangeChip("30m", 30);
         _globalOneHourButton = CreateGlobalRangeChip("1h", 60);
+        _globalTwelveHourButton = CreateGlobalRangeChip("12h", 720);
+        _globalTwentyFourHourButton = CreateGlobalRangeChip("24h", 1440);
+        _globalSevenDayButton = CreateGlobalRangeChip("7d", 10080);
+        _globalThirtyDayButton = CreateGlobalRangeChip("30d", 43200);
         _globalResetZoomButton = CreateActionChip("Reset zoom", OnResetAllZoomClick);
 
         _rootLayout = BuildRootLayout();
@@ -102,7 +118,7 @@ public sealed partial class ShellWindow : Window
         RenderEditableControlDeck();
         BuildSummaryCards();
         RefreshDashboardPanels();
-        RefreshGlobalRangeButtons();
+        RefreshGlobalRangeControls();
         UpdateStatusText();
         ApplyInitialTheme(_viewModel.SelectedTheme);
         StartupTrace.Write("ShellWindow ctor complete // polished-v19");
@@ -420,23 +436,36 @@ public sealed partial class ShellWindow : Window
         App.CurrentApp.ApplyTheme(_viewModel.SelectedTheme);
     }
 
+    private void OnToggleGlobalRangeEditor(object? sender, EventArgs e)
+    {
+        if (_globalRangeEditorVisible)
+        {
+            HideGlobalRangeEditor();
+            return;
+        }
+
+        RenderGlobalRangeEditor();
+    }
+
     private void OnGlobalWindowRangeClick(object? sender, EventArgs e)
     {
         if (sender is ActionChip { Tag: int minutes })
         {
-            _viewModel.SelectedWindowMinutes = minutes;
-            RefreshGlobalRangeButtons();
+            ApplyGlobalWindowRange(minutes);
         }
     }
 
     private void OnResetAllZoomClick(object? sender, EventArgs e)
     {
+        _globalAbsoluteStartUtc = null;
+        _globalAbsoluteEndUtc = null;
         foreach (var panel in _viewModel.DashboardPanels)
         {
             panel.ResetZoom();
         }
 
-        RefreshGlobalRangeButtons();
+        HideGlobalRangeEditor();
+        RefreshGlobalRangeControls();
     }
 
     private void OnSnapshotCollected(object? sender, MetricSnapshot snapshot)
@@ -450,6 +479,14 @@ public sealed partial class ShellWindow : Window
             }
 
             _viewModel.ApplySnapshot(snapshot);
+            if (_globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue)
+            {
+                foreach (var panel in _viewModel.DashboardPanels.Where(panel => !panel.IsZoomed))
+                {
+                    panel.ZoomToWindow(_globalAbsoluteStartUtc.Value, _globalAbsoluteEndUtc.Value);
+                }
+            }
+
             UpdateStatusText();
         });
     }
@@ -530,7 +567,7 @@ public sealed partial class ShellWindow : Window
 
         if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedWindowMinutes), StringComparison.Ordinal))
         {
-            RefreshGlobalRangeButtons();
+            RefreshGlobalRangeControls();
             return;
         }
 
@@ -927,12 +964,189 @@ public sealed partial class ShellWindow : Window
         }
     }
 
-    private void RefreshGlobalRangeButtons()
+    private void ApplyGlobalWindowRange(int minutes)
     {
-        ApplyGlobalRangeState(_globalOneMinuteButton, _viewModel.SelectedWindowMinutes <= 1);
-        ApplyGlobalRangeState(_globalFiveMinuteButton, _viewModel.SelectedWindowMinutes > 1 && _viewModel.SelectedWindowMinutes <= 5);
-        ApplyGlobalRangeState(_globalFifteenMinuteButton, _viewModel.SelectedWindowMinutes > 5 && _viewModel.SelectedWindowMinutes <= 15);
-        ApplyGlobalRangeState(_globalOneHourButton, _viewModel.SelectedWindowMinutes > 15);
+        _globalAbsoluteStartUtc = null;
+        _globalAbsoluteEndUtc = null;
+        _viewModel.SelectedWindowMinutes = minutes;
+        HideGlobalRangeEditor();
+        RefreshGlobalRangeControls();
+    }
+
+    private void RefreshGlobalRangeControls()
+    {
+        ApplyGlobalRangeState(_globalFiveMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 5);
+        ApplyGlobalRangeState(_globalThirtyMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 30);
+        ApplyGlobalRangeState(_globalOneHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 60);
+        ApplyGlobalRangeState(_globalTwelveHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 720);
+        ApplyGlobalRangeState(_globalTwentyFourHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 1440);
+        ApplyGlobalRangeState(_globalSevenDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 10080);
+        ApplyGlobalRangeState(_globalThirtyDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 43200);
+
+        _globalRangeButton.Text = GetGlobalRangeButtonText();
+        _globalRangeButton.IsActive = _globalRangeEditorVisible;
+        _globalRangeButton.IsFilled = true;
+        _globalResetZoomButton.Opacity = _viewModel.DashboardPanels.Any(panel => panel.IsZoomed) ? 1d : 0.82d;
+    }
+
+    private void RenderGlobalRangeEditor()
+    {
+        _globalRangeEditorVisible = true;
+        var startText = (_globalAbsoluteStartUtc ?? DateTimeOffset.Now.AddMinutes(-_viewModel.SelectedWindowMinutes)).LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var endText = (_globalAbsoluteEndUtc ?? DateTimeOffset.Now).LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
+        var fromEntry = CreateDeckInlineEntry(startText, "2026-04-02 09:00");
+        var toEntry = CreateDeckInlineEntry(endText, "2026-04-02 09:30");
+
+        var shell = new Border
+        {
+            Margin = new Thickness(0, 10, 0, 0),
+            Background = ResolveBrush("SurfaceBrush", "#0C1726"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(16, 14, 16, 14),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    CreateSectionHeader("TIME RANGE", "Quick ranges plus absolute start and end, similar to Grafana."),
+                    CreateChipWrapRow(
+                        _globalFiveMinuteButton,
+                        _globalThirtyMinuteButton,
+                        _globalOneHourButton,
+                        _globalTwelveHourButton,
+                        _globalTwentyFourHourButton,
+                        _globalSevenDayButton,
+                        _globalThirtyDayButton),
+                    new Grid
+                    {
+                        ColumnSpacing = 12,
+                        ColumnDefinitions =
+                        {
+                            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                        },
+                        Children =
+                        {
+                            new StackPanel
+                            {
+                                Spacing = 8,
+                                Children =
+                                {
+                                    CreateFieldLabel("From"),
+                                    fromEntry,
+                                },
+                            },
+                            new StackPanel
+                            {
+                                Spacing = 8,
+                                Children =
+                                {
+                                    CreateFieldLabel("To"),
+                                    toEntry,
+                                },
+                            },
+                        },
+                    },
+                    CreateSecondaryText("Use local time like 2026-04-02 21:30. Quick ranges follow the latest data; custom dates lock the board to that absolute slice.", 12),
+                    CreateChipRow(
+                        CreateActionChip("Close", (_, _) => HideGlobalRangeEditor()),
+                        CreateActionChip("Apply range", (_, _) => ApplyAbsoluteGlobalRange(fromEntry.Text, toEntry.Text), true)),
+                },
+            },
+        };
+
+        if (shell.Child is StackPanel stack &&
+            stack.Children[2] is Grid rangeGrid &&
+            rangeGrid.Children.Count >= 2 &&
+            rangeGrid.Children[1] is FrameworkElement secondColumn)
+        {
+            Grid.SetColumn(secondColumn, 1);
+        }
+
+        _globalRangeEditorHost.Child = shell;
+        _globalRangeEditorHost.Visibility = Visibility.Visible;
+        RefreshGlobalRangeControls();
+    }
+
+    private void HideGlobalRangeEditor()
+    {
+        _globalRangeEditorVisible = false;
+        _globalRangeEditorHost.Child = null;
+        _globalRangeEditorHost.Visibility = Visibility.Collapsed;
+        RefreshGlobalRangeControls();
+    }
+
+    private void ApplyAbsoluteGlobalRange(string fromText, string toText)
+    {
+        if (!TryParseGlobalDateTime(fromText, out var start) || !TryParseGlobalDateTime(toText, out var end) || end <= start)
+        {
+            _viewModel.StatusText = "Time range must use local date/time like 2026-04-02 21:30, and End must be after From.";
+            UpdateStatusText();
+            return;
+        }
+
+        _globalAbsoluteStartUtc = start;
+        _globalAbsoluteEndUtc = end;
+        foreach (var panel in _viewModel.DashboardPanels)
+        {
+            panel.ZoomToWindow(start, end);
+        }
+
+        HideGlobalRangeEditor();
+        _viewModel.StatusText = $"Viewing {start.LocalDateTime:g} to {end.LocalDateTime:g}";
+        UpdateStatusText();
+    }
+
+    private string GetGlobalRangeButtonText()
+    {
+        if (_globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue)
+        {
+            return $"{_globalAbsoluteStartUtc.Value.LocalDateTime:MM-dd HH:mm} -> {_globalAbsoluteEndUtc.Value.LocalDateTime:MM-dd HH:mm} ▾";
+        }
+
+        return $"{FormatGlobalRangeLabel(_viewModel.SelectedWindowMinutes)} ▾";
+    }
+
+    private static string FormatGlobalRangeLabel(int minutes) => minutes switch
+    {
+        <= 5 => "5m",
+        <= 30 => "30m",
+        <= 60 => "1h",
+        <= 720 => "12h",
+        <= 1440 => "24h",
+        <= 10080 => "7d",
+        _ => "30d",
+    };
+
+    private static bool TryParseGlobalDateTime(string text, out DateTimeOffset value)
+    {
+        value = default;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (DateTime.TryParseExact(
+                text.Trim(),
+                ["yyyy-MM-dd HH:mm", "yyyy-MM-dd H:mm", "yyyy-MM-ddTHH:mm", "yyyy-MM-ddTH:mm"],
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeLocal | DateTimeStyles.AllowWhiteSpaces,
+                out var exact))
+        {
+            value = new DateTimeOffset(exact);
+            return true;
+        }
+
+        if (DateTime.TryParse(text.Trim(), CultureInfo.CurrentCulture, DateTimeStyles.AssumeLocal | DateTimeStyles.AllowWhiteSpaces, out var parsed))
+        {
+            value = new DateTimeOffset(parsed);
+            return true;
+        }
+
+        return false;
     }
 
     private static void ApplyGlobalRangeState(ActionChip chip, bool isActive)

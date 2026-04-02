@@ -7,6 +7,7 @@ public sealed class VaktrConfig
     private const int DefaultScrapeIntervalSecondsValue = 2;
     private const int DefaultGraphWindowMinutesValue = 15;
     private const int DefaultMaxRetentionHoursValue = 24;
+    private const int MaxGraphWindowMinutesValue = 60 * 24 * 30;
 
     public int ScrapeIntervalSeconds { get; set; } = DefaultScrapeIntervalSecondsValue;
 
@@ -31,6 +32,9 @@ public sealed class VaktrConfig
 
     [JsonIgnore]
     public static int DefaultGraphWindowMinutes => DefaultGraphWindowMinutesValue;
+
+    [JsonIgnore]
+    public static int MaxGraphWindowMinutes => MaxGraphWindowMinutesValue;
 
     [JsonIgnore]
     public static int DefaultMaxRetentionHours => DefaultMaxRetentionHoursValue;
@@ -69,7 +73,7 @@ public sealed class VaktrConfig
             ScrapeIntervalSeconds = DefaultScrapeIntervalSecondsValue;
         }
 
-        if (GraphWindowMinutes is < 1 or > 60)
+        if (GraphWindowMinutes is < 1 or > MaxGraphWindowMinutesValue)
         {
             GraphWindowMinutes = DefaultGraphWindowMinutesValue;
         }

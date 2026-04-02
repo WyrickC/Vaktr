@@ -874,7 +874,7 @@ public sealed partial class ShellWindow
             },
         };
 
-    private Grid BuildBoardSectionBand()
+    private StackPanel BuildBoardSectionBand()
     {
         var grid = new Grid
         {
@@ -893,26 +893,21 @@ public sealed partial class ShellWindow
             },
         });
 
-        var rangeShell = new Border
-        {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(6),
-            Child = CreateChipRow(
-                _globalOneMinuteButton,
-                _globalFiveMinuteButton,
-                _globalFifteenMinuteButton,
-                _globalOneHourButton),
-        };
-
         var actions = CreateChipRow(
-            rangeShell,
+            _globalRangeButton,
             _globalResetZoomButton);
         grid.Children.Add(actions);
         Grid.SetColumn(actions, 1);
-        return grid;
+
+        return new StackPanel
+        {
+            Spacing = 0,
+            Children =
+            {
+                grid,
+                _globalRangeEditorHost,
+            },
+        };
     }
 
     private static Grid CreateSectionBand(string eyebrow, string text)

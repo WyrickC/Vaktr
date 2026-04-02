@@ -16,7 +16,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private const double BitsPerMegabit = 1_000_000d;
     private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(5);
 
     private readonly nint _query;
     private readonly nint _cpuTotalCounter;
