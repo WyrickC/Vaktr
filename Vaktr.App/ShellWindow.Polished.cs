@@ -92,6 +92,7 @@ public sealed partial class ShellWindow : Window
             RowSpacing = 18,
         };
         _globalRangeButton = CreateActionChip("15m", OnToggleGlobalRangeEditor, true);
+        _globalRangeButton.MinWidth = 124;
         _globalRangeEditorHost = new Border
         {
             Visibility = Visibility.Collapsed,
@@ -983,7 +984,9 @@ public sealed partial class ShellWindow : Window
         ApplyGlobalRangeState(_globalSevenDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 10080);
         ApplyGlobalRangeState(_globalThirtyDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 43200);
 
-        _globalRangeButton.Text = GetGlobalRangeButtonText();
+        _globalRangeButton.Text = _globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue
+            ? "Custom range v"
+            : $"{FormatGlobalRangeLabel(_viewModel.SelectedWindowMinutes)} v";
         _globalRangeButton.IsActive = _globalRangeEditorVisible;
         _globalRangeButton.IsFilled = true;
         _globalResetZoomButton.Opacity = _viewModel.DashboardPanels.Any(panel => panel.IsZoomed) ? 1d : 0.82d;
@@ -994,9 +997,107 @@ public sealed partial class ShellWindow : Window
         _globalRangeEditorVisible = true;
         var startText = (_globalAbsoluteStartUtc ?? DateTimeOffset.Now.AddMinutes(-_viewModel.SelectedWindowMinutes)).LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         var endText = (_globalAbsoluteEndUtc ?? DateTimeOffset.Now).LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var currentLabel = _globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue
+            ? "Custom absolute range"
+            : $"Last {FormatGlobalRangeLabel(_viewModel.SelectedWindowMinutes)}";
 
         var fromEntry = CreateDeckInlineEntry(startText, "2026-04-02 09:00");
         var toEntry = CreateDeckInlineEntry(endText, "2026-04-02 09:30");
+        var quickRangeRowPrimary = CreateChipWrapRow(
+            _globalFiveMinuteButton,
+            _globalThirtyMinuteButton,
+            _globalOneHourButton,
+            _globalTwelveHourButton);
+        var quickRangeRowSecondary = CreateChipWrapRow(
+            _globalTwentyFourHourButton,
+            _globalSevenDayButton,
+            _globalThirtyDayButton);
+
+        var quickRangeCard = new Border
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#132235"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(14, 12, 14, 12),
+            Child = new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    CreateSectionHeader("LIVE WINDOW", "Keep the board synced to the latest samples with one shared replay range."),
+                    quickRangeRowPrimary,
+                    quickRangeRowSecondary,
+                },
+            },
+        };
+
+        var fromColumn = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                CreateFieldLabel("From"),
+                fromEntry,
+            },
+        };
+        var toColumn = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                CreateFieldLabel("To"),
+                toEntry,
+            },
+        };
+        var absoluteGrid = new Grid
+        {
+            ColumnSpacing = 12,
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+            },
+        };
+        absoluteGrid.Children.Add(fromColumn);
+        absoluteGrid.Children.Add(toColumn);
+        Grid.SetColumn(toColumn, 1);
+
+        var absoluteRangeCard = new Border
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#132235"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(14, 12, 14, 12),
+            Child = new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    CreateSectionHeader("ABSOLUTE RANGE", "Pin every panel to an exact local date and time window."),
+                    absoluteGrid,
+                    CreateSecondaryText("Use local time like 2026-04-02 21:30. This locks the board to a precise slice instead of following the latest sample.", 12),
+                },
+            },
+        };
+
+        var actionButtons = CreateChipRow(
+            CreateActionChip("Close", (_, _) => HideGlobalRangeEditor()),
+            CreateActionChip("Apply range", (_, _) => ApplyAbsoluteGlobalRange(fromEntry.Text, toEntry.Text), true));
+        var actionGrid = new Grid
+        {
+            ColumnSpacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto },
+            },
+        };
+        actionGrid.Children.Add(CreateMutedText("Board-level range control with quick presets plus absolute From/To.", 12));
+        actionGrid.Children.Add(actionButtons);
+        Grid.SetColumn(actionButtons, 1);
 
         var shell = new Border
         {
@@ -1011,60 +1112,23 @@ public sealed partial class ShellWindow : Window
                 Spacing = 14,
                 Children =
                 {
-                    CreateSectionHeader("TIME RANGE", "Quick ranges plus absolute start and end, similar to Grafana."),
-                    CreateChipWrapRow(
-                        _globalFiveMinuteButton,
-                        _globalThirtyMinuteButton,
-                        _globalOneHourButton,
-                        _globalTwelveHourButton,
-                        _globalTwentyFourHourButton,
-                        _globalSevenDayButton,
-                        _globalThirtyDayButton),
-                    new Grid
+                    CreateSectionHeader("TIME RANGE", "Use one board-wide window, or pin every panel to a specific absolute slice."),
+                    CreateTopStatusPill(new StackPanel
                     {
-                        ColumnSpacing = 12,
-                        ColumnDefinitions =
-                        {
-                            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                        },
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
                         Children =
                         {
-                            new StackPanel
-                            {
-                                Spacing = 8,
-                                Children =
-                                {
-                                    CreateFieldLabel("From"),
-                                    fromEntry,
-                                },
-                            },
-                            new StackPanel
-                            {
-                                Spacing = 8,
-                                Children =
-                                {
-                                    CreateFieldLabel("To"),
-                                    toEntry,
-                                },
-                            },
+                            CreateMutedText("CURRENT", 10),
+                            CreatePrimaryText(currentLabel, 13, true),
                         },
-                    },
-                    CreateSecondaryText("Use local time like 2026-04-02 21:30. Quick ranges follow the latest data; custom dates lock the board to that absolute slice.", 12),
-                    CreateChipRow(
-                        CreateActionChip("Close", (_, _) => HideGlobalRangeEditor()),
-                        CreateActionChip("Apply range", (_, _) => ApplyAbsoluteGlobalRange(fromEntry.Text, toEntry.Text), true)),
+                    }),
+                    quickRangeCard,
+                    absoluteRangeCard,
+                    actionGrid,
                 },
             },
         };
-
-        if (shell.Child is StackPanel stack &&
-            stack.Children[2] is Grid rangeGrid &&
-            rangeGrid.Children.Count >= 2 &&
-            rangeGrid.Children[1] is FrameworkElement secondColumn)
-        {
-            Grid.SetColumn(secondColumn, 1);
-        }
 
         _globalRangeEditorHost.Child = shell;
         _globalRangeEditorHost.Visibility = Visibility.Visible;

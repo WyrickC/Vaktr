@@ -241,31 +241,36 @@ public sealed class TelemetryChart : UserControl
                     Downsample(item.Points, pointBudget)
                         .Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue)))
                 .ToArray();
+            var strokeProjected = ResolveStrokePoints(projected);
 
-            if (projected.Length == 0)
+            if (strokeProjected.Count == 0)
             {
                 continue;
             }
 
-            if (projected.Length == 1)
+            if (strokeProjected.Count == 1)
             {
-                DrawPoint(projected[0], item.StrokeBrush, 5);
+                DrawPoint(strokeProjected[0], item.StrokeBrush, 5);
                 continue;
             }
 
             if (drawFilledArea)
             {
-                _canvas.Children.Add(new Path
+                var fillProjected = ResolveFillPoints(strokeProjected);
+                if (fillProjected.Count >= 2)
                 {
-                    Data = BuildAreaGeometry(projected, TopPadding + plotHeight),
-                    Fill = item.FillBrush,
-                    Opacity = seriesCount == 1 ? 0.7 : 0.5,
-                });
+                    _canvas.Children.Add(new Path
+                    {
+                        Data = BuildAreaGeometry(fillProjected, TopPadding + plotHeight),
+                        Fill = item.FillBrush,
+                        Opacity = seriesCount == 1 ? 0.7 : 0.5,
+                    });
+                }
             }
 
             _canvas.Children.Add(new Path
             {
-                Data = BuildLineGeometry(projected),
+                Data = BuildLineGeometry(strokeProjected),
                 Stroke = item.StrokeBrush,
                 StrokeLineJoin = PenLineJoin.Round,
                 StrokeStartLineCap = PenLineCap.Round,
@@ -275,7 +280,7 @@ public sealed class TelemetryChart : UserControl
 
             if (drawPointMarkers)
             {
-                DrawPoint(projected[^1], item.StrokeBrush, 5);
+                DrawPoint(strokeProjected[^1], item.StrokeBrush, 5);
             }
         }
     }
@@ -469,7 +474,7 @@ public sealed class TelemetryChart : UserControl
     private static IReadOnlyList<Windows.Foundation.Point> NormalizeProjectedPoints(IEnumerable<Windows.Foundation.Point> points)
     {
         var source = points as Windows.Foundation.Point[] ?? points.ToArray();
-        if (source.Length <= 2)
+        if (source.Length == 0)
         {
             return source;
         }
@@ -498,6 +503,50 @@ public sealed class TelemetryChart : UserControl
         }
 
         return normalized;
+    }
+
+    private static IReadOnlyList<Windows.Foundation.Point> ResolveStrokePoints(IReadOnlyList<Windows.Foundation.Point> points)
+    {
+        if (points.Count <= 1)
+        {
+            return points;
+        }
+
+        var startIndex = 0;
+        while (startIndex < points.Count - 1)
+        {
+            var current = points[startIndex];
+            var next = points[startIndex + 1];
+            if (current.X > LeftPadding + 4d && Math.Abs(next.X - current.X) >= 2.5d)
+            {
+                break;
+            }
+
+            startIndex++;
+        }
+
+        return startIndex == 0 ? points : points.Skip(startIndex).ToArray();
+    }
+
+    private static IReadOnlyList<Windows.Foundation.Point> ResolveFillPoints(IReadOnlyList<Windows.Foundation.Point> points)
+    {
+        if (points.Count <= 2)
+        {
+            return points;
+        }
+
+        var startIndex = 0;
+        while (startIndex < points.Count - 1 && points[startIndex].X <= LeftPadding + 8d)
+        {
+            startIndex++;
+        }
+
+        if (startIndex >= points.Count - 1)
+        {
+            return points;
+        }
+
+        return startIndex == 0 ? points : points.Skip(startIndex).ToArray();
     }
 
     private static bool TryGetPointBounds(
