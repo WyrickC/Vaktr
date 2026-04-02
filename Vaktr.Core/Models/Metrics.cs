@@ -2,6 +2,17 @@ namespace Vaktr.Core.Models;
 
 public sealed record MetricPoint(DateTimeOffset Timestamp, double Value);
 
+public sealed record ProcessActivitySample(
+    int ProcessId,
+    string Name,
+    double CpuPercent,
+    double MemoryGigabytes,
+    int ThreadCount,
+    int HandleCount);
+
+public sealed record LiveBoardDetails(
+    IReadOnlyList<ProcessActivitySample> Processes);
+
 public sealed record MetricSample(
     string PanelKey,
     string PanelTitle,
@@ -14,7 +25,8 @@ public sealed record MetricSample(
 
 public sealed record MetricSnapshot(
     DateTimeOffset Timestamp,
-    IReadOnlyList<MetricSample> Samples);
+    IReadOnlyList<MetricSample> Samples,
+    LiveBoardDetails? LiveDetails = null);
 
 public sealed record MetricSeriesHistoryItem(
     string SeriesKey,

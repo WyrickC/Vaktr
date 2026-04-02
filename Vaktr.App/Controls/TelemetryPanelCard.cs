@@ -33,11 +33,19 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly Border _chartFrame;
     private readonly StackPanel _legendHost;
     private readonly ScrollViewer _legendScroller;
+    private readonly Border _processSection;
+    private readonly TextBlock _processSectionTitleText;
+    private readonly StackPanel _processRowsHost;
+    private readonly ScrollViewer _processScroller;
     private readonly ActionChip _oneMinuteButton;
     private readonly ActionChip _fiveMinuteButton;
     private readonly ActionChip _fifteenMinuteButton;
     private readonly ActionChip _oneHourButton;
+    private readonly ActionChip _sortHighestButton;
+    private readonly ActionChip _sortLowestButton;
+    private readonly ActionChip _sortNameButton;
     private readonly Dictionary<string, (Border Row, TextBlock ValueText)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private MetricPanelViewModel? _observedPanel;
     private bool _refreshQueued;
 
@@ -139,6 +147,96 @@ public sealed class TelemetryPanelCard : UserControl
             Content = _legendHost,
         };
 
+        _sortHighestButton = CreateProcessSortButton("Highest", ProcessSortMode.Highest);
+        _sortLowestButton = CreateProcessSortButton("Lowest", ProcessSortMode.Lowest);
+        _sortNameButton = CreateProcessSortButton("Name", ProcessSortMode.Name);
+
+        _processSectionTitleText = CreateTextBlock("Segoe UI Variable Text", 11, FontWeights.Medium);
+        _processRowsHost = new StackPanel
+        {
+            Spacing = 6,
+        };
+        _processScroller = new ScrollViewer
+        {
+            MaxHeight = 222,
+            VerticalScrollMode = ScrollMode.Enabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            ZoomMode = ZoomMode.Disabled,
+            Content = _processRowsHost,
+        };
+
+        var processHeader = new Grid
+        {
+            ColumnSpacing = 10,
+        };
+        processHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        processHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        processHeader.Children.Add(_processSectionTitleText);
+
+        var sortHost = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Children =
+            {
+                _sortHighestButton,
+                _sortLowestButton,
+                _sortNameButton,
+            },
+        };
+        processHeader.Children.Add(sortHost);
+        Grid.SetColumn(sortHost, 1);
+
+        var processColumns = new Grid
+        {
+            ColumnSpacing = 10,
+        };
+        processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) });
+        processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var processLabel = CreateTextBlock(fontSize: 10);
+        processLabel.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        processLabel.CharacterSpacing = 60;
+        processLabel.Text = "PROCESS";
+        processColumns.Children.Add(processLabel);
+
+        var sparkLabel = CreateTextBlock(fontSize: 10);
+        sparkLabel.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        sparkLabel.CharacterSpacing = 60;
+        sparkLabel.Text = "ACTIVITY";
+        processColumns.Children.Add(sparkLabel);
+        Grid.SetColumn(sparkLabel, 1);
+
+        var valueLabel = CreateTextBlock(fontSize: 10);
+        valueLabel.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        valueLabel.CharacterSpacing = 60;
+        valueLabel.Text = "VALUE";
+        processColumns.Children.Add(valueLabel);
+        Grid.SetColumn(valueLabel, 2);
+
+        _processSection = new Border
+        {
+            Background = CreateSurfaceGradient("#0F1B2C", "#132336"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(12, 11, 12, 11),
+            Visibility = Visibility.Collapsed,
+            Child = new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    processHeader,
+                    processColumns,
+                    _processScroller,
+                },
+            },
+        };
+
         var rangeHost = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -228,6 +326,7 @@ public sealed class TelemetryPanelCard : UserControl
                             headerGrid,
                             _visualGrid,
                             _legendScroller,
+                            _processSection,
                         },
                     },
                 },
@@ -309,7 +408,11 @@ public sealed class TelemetryPanelCard : UserControl
             _legendHost.Children.Clear();
             _legendRows.Clear();
             _legendHost.Children.Add(CreateEmptyText("Waiting for samples"));
+            _processRowsHost.Children.Clear();
+            _processRowParts.Clear();
+            _processSection.Visibility = Visibility.Collapsed;
             RefreshRangeButtons(null);
+            RefreshProcessSortButtons(null);
             RefreshVisualMode(null);
             return;
         }
@@ -332,7 +435,9 @@ public sealed class TelemetryPanelCard : UserControl
         _gauge.Caption = panel.PrefersGaugeVisual ? "Capacity" : "Live";
 
         RefreshLegend(panel);
+        RefreshProcessRows(panel);
         RefreshRangeButtons(panel);
+        RefreshProcessSortButtons(panel);
         RefreshVisualMode(panel);
         ApplyPalette(panel);
     }
@@ -382,12 +487,66 @@ public sealed class TelemetryPanelCard : UserControl
         }
     }
 
+    private void RefreshProcessRows(MetricPanelViewModel panel)
+    {
+        if (!panel.SupportsProcessTable)
+        {
+            _processRowsHost.Children.Clear();
+            _processRowParts.Clear();
+            return;
+        }
+
+        _processSectionTitleText.Text = panel.ProcessTableTitle;
+        if (panel.ProcessRows.Count == 0)
+        {
+            _processRowParts.Clear();
+            _processRowsHost.Children.Clear();
+            _processRowsHost.Children.Add(CreateEmptyText("Process table warming up"));
+            return;
+        }
+
+        if (_processRowParts.Count == 0 && _processRowsHost.Children.Count > 0)
+        {
+            _processRowsHost.Children.Clear();
+        }
+
+        var activeKeys = new HashSet<string>(panel.ProcessRows.Select(row => row.Key), StringComparer.OrdinalIgnoreCase);
+        foreach (var staleKey in _processRowParts.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
+        {
+            _processRowsHost.Children.Remove(_processRowParts[staleKey].Row);
+            _processRowParts.Remove(staleKey);
+        }
+
+        for (var index = 0; index < panel.ProcessRows.Count; index++)
+        {
+            var item = panel.ProcessRows[index];
+            if (!_processRowParts.TryGetValue(item.Key, out var rowParts))
+            {
+                rowParts = CreateProcessRow(item, panel.AccentBrush);
+                _processRowParts.Add(item.Key, rowParts);
+                _processRowsHost.Children.Add(rowParts.Row);
+            }
+
+            rowParts.NameText.Text = item.Name;
+            rowParts.ValueText.Text = item.Value;
+            rowParts.CaptionText.Text = item.Caption;
+            rowParts.MeterFill.Width = 72 * Math.Clamp(item.Intensity, 0d, 1d);
+            if (_processRowsHost.Children.IndexOf(rowParts.Row) != index)
+            {
+                _processRowsHost.Children.Remove(rowParts.Row);
+                _processRowsHost.Children.Insert(index, rowParts.Row);
+            }
+        }
+    }
+
     private void RefreshVisualMode(MetricPanelViewModel? panel)
     {
         var showGauge = panel?.PrefersGaugeVisual == true;
         _gauge.Visibility = showGauge ? Visibility.Visible : Visibility.Collapsed;
         Grid.SetColumn(_chartFrame, showGauge ? 1 : 0);
         Grid.SetColumnSpan(_chartFrame, showGauge ? 1 : 2);
+        _legendScroller.Visibility = panel?.SupportsProcessTable == true ? Visibility.Collapsed : Visibility.Visible;
+        _processSection.Visibility = panel?.SupportsProcessTable == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RefreshRangeButtons(MetricPanelViewModel? panel)
@@ -397,6 +556,13 @@ public sealed class TelemetryPanelCard : UserControl
         ApplyRangeState(_fiveMinuteButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.FiveMinutes);
         ApplyRangeState(_fifteenMinuteButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.FifteenMinutes);
         ApplyRangeState(_oneHourButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.OneHour);
+    }
+
+    private void RefreshProcessSortButtons(MetricPanelViewModel? panel)
+    {
+        ApplyRangeState(_sortHighestButton, panel?.ProcessSortMode == ProcessSortMode.Highest);
+        ApplyRangeState(_sortLowestButton, panel?.ProcessSortMode == ProcessSortMode.Lowest);
+        ApplyRangeState(_sortNameButton, panel?.ProcessSortMode == ProcessSortMode.Name);
     }
 
     private void ApplyPalette(MetricPanelViewModel panel)
@@ -409,6 +575,7 @@ public sealed class TelemetryPanelCard : UserControl
         _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _secondaryValueText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+        _processSectionTitleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
     }
 
     private void SetHoverState(bool isHovered)
@@ -436,6 +603,20 @@ public sealed class TelemetryPanelCard : UserControl
         return button;
     }
 
+    private static ActionChip CreateProcessSortButton(string text, ProcessSortMode sortMode)
+    {
+        var button = new ActionChip
+        {
+            Tag = sortMode,
+            MinHeight = 28,
+            MinWidth = 58,
+            Text = text,
+        };
+
+        button.Click += OnProcessSortClick;
+        return button;
+    }
+
     private static void OnRangeClick(object? sender, EventArgs e)
     {
         if (sender is ActionChip { Tag: TimeRangePreset preset } button &&
@@ -445,6 +626,19 @@ public sealed class TelemetryPanelCard : UserControl
             if (card?.Panel is not null)
             {
                 card.Panel.ApplyRangePreset(preset);
+            }
+        }
+    }
+
+    private static void OnProcessSortClick(object? sender, EventArgs e)
+    {
+        if (sender is ActionChip { Tag: ProcessSortMode sortMode } button &&
+            button.Parent is FrameworkElement parent)
+        {
+            var card = FindParent<TelemetryPanelCard>(parent);
+            if (card?.Panel is not null)
+            {
+                card.Panel.ProcessSortMode = sortMode;
             }
         }
     }
@@ -506,6 +700,106 @@ public sealed class TelemetryPanelCard : UserControl
         }, valueText);
     }
 
+    private static (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
+    {
+        var nameText = new TextBlock
+        {
+            FontSize = 11.5,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+            Text = item.Name,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+
+        var captionText = new TextBlock
+        {
+            FontSize = 10.5,
+            Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+            Text = item.Caption,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+
+        var valueText = new TextBlock
+        {
+            FontFamily = new FontFamily("Bahnschrift"),
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+            Text = item.Value,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var rowGrid = new Grid
+        {
+            ColumnSpacing = 10,
+        };
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) });
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        rowGrid.Children.Add(new StackPanel
+        {
+            Spacing = 2,
+            Children =
+            {
+                nameText,
+                captionText,
+            },
+        });
+
+        var meterFill = new Border
+        {
+            Width = 72 * Math.Clamp(item.Intensity, 0d, 1d),
+            Height = 6,
+            Background = accentBrush,
+            CornerRadius = new CornerRadius(999),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var meterTrack = new Border
+        {
+            Width = 72,
+            Height = 6,
+            Background = ResolveBrush("SurfaceStrongBrush", "#162A41"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(999),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = meterFill,
+        };
+        rowGrid.Children.Add(meterTrack);
+        Grid.SetColumn(meterTrack, 1);
+
+        var valueHost = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new Ellipse
+                {
+                    Width = 7,
+                    Height = 7,
+                    Fill = accentBrush,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                valueText,
+            },
+        };
+        rowGrid.Children.Add(valueHost);
+        Grid.SetColumn(valueHost, 2);
+
+        return (new Border
+        {
+            Background = CreateSurfaceGradient("#0F1B2C", "#132336"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(12, 9, 12, 9),
+            Child = rowGrid,
+        }, nameText, valueText, captionText, meterFill);
+    }
+
     private void UpdateBadgeIcon(MetricPanelViewModel? panel)
     {
         var iconKey = panel switch
@@ -516,6 +810,7 @@ public sealed class TelemetryPanelCard : UserControl
             { Category: MetricCategory.Disk, PrefersGaugeVisual: true } => "drive",
             { Category: MetricCategory.Disk } => "disk",
             { Category: MetricCategory.Network } => "network",
+            { Category: MetricCategory.System } => "system",
             _ => "collection",
         };
 
@@ -627,6 +922,9 @@ public sealed class TelemetryPanelCard : UserControl
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
         MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
         MetricUnit.Megahertz => $"{value / 1000d:0.00} GHz",
+        MetricUnit.Count when value >= 1_000_000d => $"{value / 1_000_000d:0.#}M",
+        MetricUnit.Count when value >= 1_000d => $"{value / 1_000d:0.#}k",
+        MetricUnit.Count => $"{value:0}",
         _ => $"{value:0.##}",
     };
 }

@@ -6,6 +6,7 @@ public enum MetricCategory
     Memory = 1,
     Disk = 2,
     Network = 3,
+    System = 4,
 }
 
 public enum MetricUnit
@@ -15,6 +16,7 @@ public enum MetricUnit
     MegabytesPerSecond = 2,
     MegabitsPerSecond = 3,
     Megahertz = 4,
+    Count = 5,
 }
 
 public enum ThemeMode

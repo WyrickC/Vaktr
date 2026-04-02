@@ -765,7 +765,7 @@ public sealed partial class ShellWindow
         e.AcceptedOperation = DataPackageOperation.Copy;
     }
 
-    private static StackPanel CreateChipRow(params ActionChip[] chips)
+    private static StackPanel CreateChipRow(params FrameworkElement[] chips)
     {
         var stack = new StackPanel
         {
@@ -792,6 +792,14 @@ public sealed partial class ShellWindow
             MinWidth = filled ? 112 : 0,
         };
         chip.Click += onClick;
+        return chip;
+    }
+
+    private ActionChip CreateGlobalRangeChip(string text, int minutes)
+    {
+        var chip = CreateActionChip(text, OnGlobalWindowRangeClick);
+        chip.Tag = minutes;
+        chip.MinWidth = 48;
         return chip;
     }
 
@@ -885,9 +893,23 @@ public sealed partial class ShellWindow
             },
         });
 
+        var rangeShell = new Border
+        {
+            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(6),
+            Child = CreateChipRow(
+                _globalOneMinuteButton,
+                _globalFiveMinuteButton,
+                _globalFifteenMinuteButton,
+                _globalOneHourButton),
+        };
+
         var actions = CreateChipRow(
-            CreateActionChip(GetGlobalWindowLabel(), OnCycleWindowRangeClick, true),
-            CreateActionChip("Reset zoom", OnResetAllZoomClick));
+            rangeShell,
+            _globalResetZoomButton);
         grid.Children.Add(actions);
         Grid.SetColumn(actions, 1);
         return grid;
@@ -1242,11 +1264,4 @@ public sealed partial class ShellWindow
         return $"{startup} // {tray}";
     }
 
-    private string GetGlobalWindowLabel() => _viewModel.SelectedWindowMinutes switch
-    {
-        <= 1 => "1 min",
-        <= 5 => "5 min",
-        <= 15 => "15 min",
-        _ => "1 hour",
-    };
 }

@@ -38,6 +38,11 @@ public sealed partial class ShellWindow : Window
     private readonly Grid _summaryHost;
     private readonly Grid _dashboardGrid;
     private readonly TextBlock _statusText;
+    private readonly ActionChip _globalOneMinuteButton;
+    private readonly ActionChip _globalFiveMinuteButton;
+    private readonly ActionChip _globalFifteenMinuteButton;
+    private readonly ActionChip _globalOneHourButton;
+    private readonly ActionChip _globalResetZoomButton;
 
     private CollectorService? _collectorService;
     private nint _windowIconHandle;
@@ -78,6 +83,11 @@ public sealed partial class ShellWindow : Window
             ColumnSpacing = 18,
             RowSpacing = 18,
         };
+        _globalOneMinuteButton = CreateGlobalRangeChip("1m", 1);
+        _globalFiveMinuteButton = CreateGlobalRangeChip("5m", 5);
+        _globalFifteenMinuteButton = CreateGlobalRangeChip("15m", 15);
+        _globalOneHourButton = CreateGlobalRangeChip("1h", 60);
+        _globalResetZoomButton = CreateActionChip("Reset zoom", OnResetAllZoomClick);
 
         _rootLayout = BuildRootLayout();
         Content = _rootLayout;
@@ -92,6 +102,7 @@ public sealed partial class ShellWindow : Window
         RenderEditableControlDeck();
         BuildSummaryCards();
         RefreshDashboardPanels();
+        RefreshGlobalRangeButtons();
         UpdateStatusText();
         ApplyInitialTheme(_viewModel.SelectedTheme);
         StartupTrace.Write("ShellWindow ctor complete // polished-v19");
@@ -409,15 +420,13 @@ public sealed partial class ShellWindow : Window
         App.CurrentApp.ApplyTheme(_viewModel.SelectedTheme);
     }
 
-    private void OnCycleWindowRangeClick(object? sender, EventArgs e)
+    private void OnGlobalWindowRangeClick(object? sender, EventArgs e)
     {
-        _viewModel.SelectedWindowMinutes = _viewModel.SelectedWindowMinutes switch
+        if (sender is ActionChip { Tag: int minutes })
         {
-            <= 1 => 5,
-            <= 5 => 15,
-            <= 15 => 60,
-            _ => 1,
-        };
+            _viewModel.SelectedWindowMinutes = minutes;
+            RefreshGlobalRangeButtons();
+        }
     }
 
     private void OnResetAllZoomClick(object? sender, EventArgs e)
@@ -426,6 +435,8 @@ public sealed partial class ShellWindow : Window
         {
             panel.ResetZoom();
         }
+
+        RefreshGlobalRangeButtons();
     }
 
     private void OnSnapshotCollected(object? sender, MetricSnapshot snapshot)
@@ -514,6 +525,12 @@ public sealed partial class ShellWindow : Window
         if (string.Equals(e.PropertyName, nameof(MainViewModel.StatusText), StringComparison.Ordinal))
         {
             UpdateStatusText();
+            return;
+        }
+
+        if (string.Equals(e.PropertyName, nameof(MainViewModel.SelectedWindowMinutes), StringComparison.Ordinal))
+        {
+            RefreshGlobalRangeButtons();
             return;
         }
 
@@ -908,6 +925,21 @@ public sealed partial class ShellWindow : Window
             _lastRenderedStatusText = text;
             StartupTrace.Write($"StatusText -> {text}");
         }
+    }
+
+    private void RefreshGlobalRangeButtons()
+    {
+        ApplyGlobalRangeState(_globalOneMinuteButton, _viewModel.SelectedWindowMinutes <= 1);
+        ApplyGlobalRangeState(_globalFiveMinuteButton, _viewModel.SelectedWindowMinutes > 1 && _viewModel.SelectedWindowMinutes <= 5);
+        ApplyGlobalRangeState(_globalFifteenMinuteButton, _viewModel.SelectedWindowMinutes > 5 && _viewModel.SelectedWindowMinutes <= 15);
+        ApplyGlobalRangeState(_globalOneHourButton, _viewModel.SelectedWindowMinutes > 15);
+    }
+
+    private static void ApplyGlobalRangeState(ActionChip chip, bool isActive)
+    {
+        chip.IsActive = isActive;
+        chip.IsFilled = isActive;
+        chip.Opacity = isActive ? 1d : 0.82d;
     }
 }
 

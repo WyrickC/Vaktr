@@ -234,8 +234,14 @@ public sealed class MainViewModel : ObservableObject
             panel.IsNewlyCreated = false;
         }
 
+        var detailContext = PanelDetailContext.FromSnapshot(snapshot);
+        foreach (var panel in _panelLookup.Values)
+        {
+            panel.ApplyDetailContext(detailContext);
+        }
+
         StatusText = $"Last sample {snapshot.Timestamp.LocalDateTime:t}";
-        UpdateSummaryCards(snapshot);
+        UpdateSummaryCards(snapshot, detailContext);
 
         if (panelCreated)
         {
@@ -357,7 +363,7 @@ public sealed class MainViewModel : ObservableObject
         var panel = new MetricPanelViewModel(panelKey, title, category, unit)
         {
             SelectedRange = MapToRangePreset(SelectedWindowMinutes),
-            IsVisible = !string.Equals(panelKey, "cpu-frequency", StringComparison.OrdinalIgnoreCase),
+            IsVisible = true,
             IsNewlyCreated = true,
         };
 
@@ -369,7 +375,9 @@ public sealed class MainViewModel : ObservableObject
     {
         var orderedPanels = _panelLookup.Values
             .Where(panel => panel.IsDashboardPanel && panel.IsVisible)
-            .OrderBy(panel => panel.SortOrder)
+            .OrderBy(panel => panel.SortBucket)
+            .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(panel => panel.SortVariant)
             .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -390,7 +398,9 @@ public sealed class MainViewModel : ObservableObject
         var visibilityLookup = PanelToggles.ToDictionary(toggle => toggle.PanelKey, toggle => toggle.IsVisible, StringComparer.OrdinalIgnoreCase);
         var panels = _panelLookup.Values
             .Where(panel => panel.IsDashboardPanel)
-            .OrderBy(panel => panel.SortOrder)
+            .OrderBy(panel => panel.SortBucket)
+            .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(panel => panel.SortVariant)
             .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -412,7 +422,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private void UpdateSummaryCards(MetricSnapshot snapshot)
+    private void UpdateSummaryCards(MetricSnapshot snapshot, PanelDetailContext detailContext)
     {
         var lookup = snapshot.Samples
             .GroupBy(sample => $"{sample.PanelKey}:{sample.SeriesKey}", StringComparer.OrdinalIgnoreCase)
@@ -422,7 +432,10 @@ public sealed class MainViewModel : ObservableObject
         var cpuFrequency = lookup.GetValueOrDefault("cpu-frequency:clock")?.Value ?? 0d;
         SummaryCards[0].Update(
             $"{cpuUsage:0.#}%",
-            cpuFrequency > 0 ? $"{cpuFrequency / 1000d:0.00} GHz live" : "Processor load");
+            BuildSummaryCaption(
+                cpuFrequency > 0 ? $"{cpuFrequency / 1000d:0.00} GHz" : "Processor load",
+                detailContext.ProcessCount > 0 ? $"{FormatCompactCount(detailContext.ProcessCount)} proc" : null,
+                detailContext.ThreadCount > 0 ? $"{FormatCompactCount(detailContext.ThreadCount)} thr" : null));
 
         var usedMemory = lookup.GetValueOrDefault("memory:used-gb")?.Value ?? 0d;
         var availableMemory = lookup.GetValueOrDefault("memory:available-gb")?.Value ?? 0d;
@@ -473,6 +486,25 @@ public sealed class MainViewModel : ObservableObject
         }
 
         return $"{gigabytes:0.0} GiB";
+    }
+
+    private static string BuildSummaryCaption(params string?[] parts) =>
+        string.Join(" // ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+    private static string FormatCompactCount(double value)
+    {
+        value = Math.Max(0d, value);
+        if (value >= 1_000_000d)
+        {
+            return $"{value / 1_000_000d:0.#}M";
+        }
+
+        if (value >= 1_000d)
+        {
+            return $"{value / 1_000d:0.#}k";
+        }
+
+        return $"{value:0}";
     }
 }
 
@@ -561,6 +593,120 @@ public sealed class PanelToggleViewModel : ObservableObject
     }
 }
 
+internal sealed class PanelDetailContext
+{
+    public static PanelDetailContext Empty { get; } = new(0d, 0, 0, 0, Array.Empty<ProcessActivitySample>(), new Dictionary<string, DriveDetailContext>(StringComparer.OrdinalIgnoreCase));
+
+    private readonly IReadOnlyList<ProcessActivitySample> _processes;
+    private readonly IReadOnlyDictionary<string, DriveDetailContext> _driveDetails;
+
+    public PanelDetailContext(
+        double cpuFrequencyMhz,
+        int processCount,
+        int threadCount,
+        int handleCount,
+        IReadOnlyList<ProcessActivitySample> processes,
+        IReadOnlyDictionary<string, DriveDetailContext> driveDetails)
+    {
+        CpuFrequencyMhz = cpuFrequencyMhz;
+        ProcessCount = processCount;
+        ThreadCount = threadCount;
+        HandleCount = handleCount;
+        _processes = processes;
+        _driveDetails = driveDetails;
+    }
+
+    public double CpuFrequencyMhz { get; }
+
+    public int ProcessCount { get; }
+
+    public int ThreadCount { get; }
+
+    public int HandleCount { get; }
+
+    public IReadOnlyList<ProcessActivitySample> Processes => _processes;
+
+    public bool TryGetDriveDetail(string panelKey, out DriveDetailContext detail)
+    {
+        detail = default;
+        var suffix = ExtractDriveSuffix(panelKey);
+        return !string.IsNullOrWhiteSpace(suffix) && _driveDetails.TryGetValue(suffix, out detail);
+    }
+
+    public static PanelDetailContext FromSnapshot(MetricSnapshot snapshot)
+    {
+        var lookup = snapshot.Samples
+            .GroupBy(sample => $"{sample.PanelKey}:{sample.SeriesKey}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.OrdinalIgnoreCase);
+
+        var driveDetails = snapshot.Samples
+            .Where(sample => sample.PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(sample => ExtractDriveSuffix(sample.PanelKey), StringComparer.OrdinalIgnoreCase)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .ToDictionary(
+                group => group.Key!,
+                group => new DriveDetailContext(
+                    group.LastOrDefault(sample => string.Equals(sample.SeriesKey, "used-percent", StringComparison.OrdinalIgnoreCase))?.Value ?? 0d,
+                    group.LastOrDefault(sample => string.Equals(sample.SeriesKey, "used-gb", StringComparison.OrdinalIgnoreCase))?.Value ?? 0d,
+                    group.LastOrDefault(sample => string.Equals(sample.SeriesKey, "total-gb", StringComparison.OrdinalIgnoreCase))?.Value ?? 0d),
+                StringComparer.OrdinalIgnoreCase);
+
+        return new PanelDetailContext(
+            lookup.GetValueOrDefault("cpu-frequency:clock"),
+            (int)Math.Round(lookup.GetValueOrDefault("host-activity:processes"), MidpointRounding.AwayFromZero),
+            (int)Math.Round(lookup.GetValueOrDefault("host-activity:threads"), MidpointRounding.AwayFromZero),
+            (int)Math.Round(lookup.GetValueOrDefault("host-activity:handles"), MidpointRounding.AwayFromZero),
+            snapshot.LiveDetails?.Processes ?? Array.Empty<ProcessActivitySample>(),
+            driveDetails);
+    }
+
+    private static string ExtractDriveSuffix(string panelKey)
+    {
+        if (panelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase))
+        {
+            return panelKey["disk-".Length..];
+        }
+
+        if (panelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase))
+        {
+            return panelKey["volume-".Length..];
+        }
+
+        return string.Empty;
+    }
+}
+
+internal readonly record struct DriveDetailContext(double UsedPercent, double UsedGigabytes, double TotalGigabytes);
+
+public enum ProcessSortMode
+{
+    Highest = 0,
+    Lowest = 1,
+    Name = 2,
+}
+
+public sealed class ProcessListItemViewModel
+{
+    public ProcessListItemViewModel(string key, string name, string value, string caption, double intensity)
+    {
+        Key = key;
+        Name = name;
+        Value = value;
+        Caption = caption;
+        Intensity = intensity;
+    }
+
+    public string Key { get; }
+
+    public string Name { get; }
+
+    public string Value { get; }
+
+    public string Caption { get; }
+
+    public double Intensity { get; }
+}
+
 public sealed class MetricPanelViewModel : ObservableObject
 {
     private static readonly TimeSpan LiveBufferWindow = TimeSpan.FromMinutes(75);
@@ -580,6 +726,9 @@ public sealed class MetricPanelViewModel : ObservableObject
     private DateTimeOffset _windowEndUtc = DateTimeOffset.UtcNow;
     private DateTimeOffset? _zoomWindowStartUtc;
     private DateTimeOffset? _zoomWindowEndUtc;
+    private PanelDetailContext _detailContext = PanelDetailContext.Empty;
+    private IReadOnlyList<ProcessListItemViewModel> _processRows = Array.Empty<ProcessListItemViewModel>();
+    private ProcessSortMode _processSortMode = ProcessSortMode.Highest;
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
     {
@@ -600,17 +749,32 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     public bool IsNewlyCreated { get; set; }
 
-    public bool IsDashboardPanel => !string.Equals(PanelKey, "cpu-frequency", StringComparison.OrdinalIgnoreCase);
+    public bool IsDashboardPanel => true;
 
-    public int SortOrder => PanelKey switch
+    public int SortBucket => PanelKey switch
     {
         "cpu-total" => 0,
         "cpu-cores" => 1,
-        "memory" => 2,
-        _ when PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) => 3,
-        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) => 4,
-        _ when PanelKey.StartsWith("net-", StringComparison.OrdinalIgnoreCase) => 5,
-        _ => 6,
+        "cpu-frequency" => 2,
+        "host-activity" => 3,
+        "memory" => 4,
+        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) || PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) => 5,
+        _ when PanelKey.StartsWith("net-", StringComparison.OrdinalIgnoreCase) => 6,
+        _ => 7,
+    };
+
+    public int SortVariant => PanelKey switch
+    {
+        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) => 0,
+        _ when PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) => 1,
+        _ => 0,
+    };
+
+    public string SortGroupKey => PanelKey switch
+    {
+        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) => PanelKey["disk-".Length..],
+        _ when PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) => PanelKey["volume-".Length..],
+        _ => PanelKey,
     };
 
     public string Badge => Category switch
@@ -620,6 +784,7 @@ public sealed class MetricPanelViewModel : ObservableObject
         MetricCategory.Memory => "MEM",
         MetricCategory.Disk => "DSK",
         MetricCategory.Network => "NET",
+        MetricCategory.System => "SYS",
         _ => "LIVE",
     };
 
@@ -629,6 +794,10 @@ public sealed class MetricPanelViewModel : ObservableObject
         Category == MetricCategory.Disk &&
         Unit == MetricUnit.Percent &&
         PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase);
+
+    public bool SupportsProcessTable =>
+        string.Equals(PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
 
     public bool IsVisible
     {
@@ -693,6 +862,31 @@ public sealed class MetricPanelViewModel : ObservableObject
             ? 0d
             : Math.Clamp(VisibleSeries[0].Points[^1].Value, 0d, 100d);
 
+    public IReadOnlyList<ProcessListItemViewModel> ProcessRows
+    {
+        get => _processRows;
+        private set => SetProperty(ref _processRows, value);
+    }
+
+    public ProcessSortMode ProcessSortMode
+    {
+        get => _processSortMode;
+        set
+        {
+            if (!SetProperty(ref _processSortMode, value))
+            {
+                return;
+            }
+
+            RefreshProcessRows();
+        }
+    }
+
+    public string ProcessTableTitle =>
+        string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase)
+            ? "Process memory"
+            : "Process load";
+
     public event EventHandler? ExpandRequested;
 
     public bool IsZoomed => _zoomWindowStartUtc.HasValue && _zoomWindowEndUtc.HasValue;
@@ -752,6 +946,13 @@ public sealed class MetricPanelViewModel : ObservableObject
         }
 
         RefreshPresentation(sample.Timestamp);
+    }
+
+    internal void ApplyDetailContext(PanelDetailContext detailContext)
+    {
+        _detailContext = detailContext;
+        RefreshProcessRows();
+        UpdateSummaryText();
     }
 
     public PanelHoverInfo? BuildHoverInfo(double normalizedPosition)
@@ -853,6 +1054,7 @@ public sealed class MetricPanelViewModel : ObservableObject
             .ToArray();
 
         VisibleSeries = visibleSeries;
+        RefreshProcessRows();
         UpdateSummaryText();
         FooterText = BuildFooterText(start, end);
     }
@@ -871,7 +1073,7 @@ public sealed class MetricPanelViewModel : ObservableObject
             CurrentValue = "Waiting";
             SecondaryValue = "Collecting hardware samples";
             ScaleLabel = string.Empty;
-            ChartCeilingValue = Unit == MetricUnit.Percent ? 100d : 0d;
+            ChartCeilingValue = Unit == MetricUnit.Percent ? 100d : Unit == MetricUnit.Count ? 100d : 0d;
             return;
         }
 
@@ -884,14 +1086,36 @@ public sealed class MetricPanelViewModel : ObservableObject
         {
             case MetricCategory.Cpu when string.Equals(PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase):
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
-                SecondaryValue = "Total processor load";
-                ScaleLabel = "Ceiling 100%";
+                SecondaryValue = BuildJoinedText(
+                    _detailContext.CpuFrequencyMhz > 0 ? $"{_detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : "Total processor load",
+                    _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} proc" : null,
+                    _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
+                ScaleLabel = _detailContext.HandleCount > 0
+                    ? $"Ceiling 100% // {FormatCompactCount(_detailContext.HandleCount)} handles"
+                    : "Ceiling 100%";
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Cpu:
                 var averageCore = latestBySeries.Count > 0 ? latestBySeries.Values.Average() : 0d;
+                if (string.Equals(PanelKey, "cpu-frequency", StringComparison.OrdinalIgnoreCase))
+                {
+                    var clockMhz = latestBySeries.GetValueOrDefault("Clock");
+                    CurrentValue = $"{clockMhz / 1000d:0.00} GHz";
+                    SecondaryValue = BuildJoinedText(
+                        "Processor frequency",
+                        _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} proc" : null,
+                        _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
+                    ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, Math.Max(1000d, clockMhz));
+                    ScaleLabel = _detailContext.HandleCount > 0
+                        ? $"{FormatCompactCount(_detailContext.HandleCount)} handles open"
+                        : $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                    break;
+                }
+
                 CurrentValue = $"{averageCore:0.#}% avg";
-                SecondaryValue = latestBySeries.Count == 1 ? "1 core lane active" : $"{latestBySeries.Count} core lanes active";
+                SecondaryValue = BuildJoinedText(
+                    latestBySeries.Count == 1 ? "1 core lane active" : $"{latestBySeries.Count} core lanes active",
+                    _detailContext.CpuFrequencyMhz > 0 ? $"{_detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : null);
                 ScaleLabel = $"100% per core // {latestBySeries.Count} cores";
                 ChartCeilingValue = 100d;
                 break;
@@ -901,7 +1125,10 @@ public sealed class MetricPanelViewModel : ObservableObject
                 var total = used + available;
                 var percent = total > 0 ? used / total * 100d : 0d;
                 CurrentValue = $"{FormatCapacity(used)} used";
-                SecondaryValue = $"{percent:0.#}% of {FormatCapacity(total)}";
+                SecondaryValue = BuildJoinedText(
+                    $"{percent:0.#}% of {FormatCapacity(total)}",
+                    _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} proc" : null,
+                    _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
                 ScaleLabel = $"{FormatCapacity(total)} total";
                 ChartCeilingValue = Math.Max(total, 1d);
                 break;
@@ -914,15 +1141,28 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Disk:
+                _detailContext.TryGetDriveDetail(PanelKey, out var driveDetail);
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Read"):0.0} MB/s read";
-                SecondaryValue = $"{latestBySeries.GetValueOrDefault("Write"):0.0} MB/s write";
+                SecondaryValue = BuildJoinedText(
+                    $"{latestBySeries.GetValueOrDefault("Write"):0.0} MB/s write",
+                    driveDetail.TotalGigabytes > 0 ? $"{driveDetail.UsedPercent:0.#}% full" : null);
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
-                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                ScaleLabel = driveDetail.TotalGigabytes > 0
+                    ? $"{FormatCapacity(driveDetail.TotalGigabytes)} total // peak {FormatValue(ChartCeilingValue, Unit)}"
+                    : $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Network:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Down"):0.0} Mbps down";
                 SecondaryValue = $"{latestBySeries.GetValueOrDefault("Up"):0.0} Mbps up";
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
+                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                break;
+            case MetricCategory.System:
+                CurrentValue = $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Processes"))} proc";
+                SecondaryValue = BuildJoinedText(
+                    $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Threads"))} thr",
+                    $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Handles"))} handles");
+                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
                 ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             default:
@@ -944,6 +1184,56 @@ public sealed class MetricPanelViewModel : ObservableObject
         return string.Equals(buffer.Key, "used-percent", StringComparison.OrdinalIgnoreCase);
     }
 
+    private void RefreshProcessRows()
+    {
+        if (!SupportsProcessTable)
+        {
+            ProcessRows = Array.Empty<ProcessListItemViewModel>();
+            return;
+        }
+
+        IEnumerable<ProcessActivitySample> processes = _detailContext.Processes;
+        var peakMemory = Math.Max(0.1d, _detailContext.Processes.Count > 0 ? _detailContext.Processes.Max(process => process.MemoryGigabytes) : 0d);
+        processes = ProcessSortMode switch
+        {
+            ProcessSortMode.Name => processes.OrderBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
+            ProcessSortMode.Lowest when string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) =>
+                processes.OrderBy(process => process.MemoryGigabytes).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
+            ProcessSortMode.Lowest =>
+                processes.OrderBy(process => process.CpuPercent).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
+            _ when string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) =>
+                processes.OrderByDescending(process => process.MemoryGigabytes).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
+            _ =>
+                processes.OrderByDescending(process => process.CpuPercent).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
+        };
+
+        ProcessRows = processes
+            .Where(process => string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) || process.CpuPercent > 0.05d)
+            .Take(24)
+            .Select(process => CreateProcessRow(process, peakMemory))
+            .ToArray();
+    }
+
+    private ProcessListItemViewModel CreateProcessRow(ProcessActivitySample process, double peakMemory)
+    {
+        if (string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ProcessListItemViewModel(
+                $"{process.ProcessId}",
+                process.Name,
+                FormatCapacity(process.MemoryGigabytes),
+                $"{process.CpuPercent:0.#}% cpu // {FormatCompactCount(process.ThreadCount)} thr // {FormatCompactCount(process.HandleCount)} handles",
+                Math.Clamp(process.MemoryGigabytes / peakMemory, 0d, 1d));
+        }
+
+        return new ProcessListItemViewModel(
+            $"{process.ProcessId}",
+            process.Name,
+            $"{process.CpuPercent:0.#}%",
+            $"{FormatCapacity(process.MemoryGigabytes)} ram // {FormatCompactCount(process.ThreadCount)} thr // {FormatCompactCount(process.HandleCount)} handles",
+            Math.Clamp(process.CpuPercent / 100d, 0d, 1d));
+    }
+
     private SolidColorBrush ResolveBrush(int index)
     {
         var color = Category switch
@@ -956,6 +1246,8 @@ public sealed class MetricPanelViewModel : ObservableObject
             MetricCategory.Disk => BrushFactory.ParseColor("#FFD166"),
             MetricCategory.Network when index == 0 => BrushFactory.ParseColor("#9A8CFF"),
             MetricCategory.Network => BrushFactory.ParseColor("#6E9BFF"),
+            MetricCategory.System when index == 0 => BrushFactory.ParseColor("#79C7FF"),
+            MetricCategory.System => BrushFactory.ParseColor("#4FA3FF"),
             _ => BrushFactory.ParseColor("#7AD8FF"),
         };
 
@@ -975,8 +1267,31 @@ public sealed class MetricPanelViewModel : ObservableObject
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
         MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
         MetricUnit.Megahertz => $"{value / 1000d:0.00} GHz",
+        MetricUnit.Count => FormatCompactCount(value),
         _ => $"{value:0.##}",
     };
+
+    private static string BuildJoinedText(params string?[] parts)
+    {
+        var filtered = parts.Where(part => !string.IsNullOrWhiteSpace(part)).ToArray();
+        return filtered.Length == 0 ? "Live metric" : string.Join(" // ", filtered);
+    }
+
+    private static string FormatCompactCount(double value)
+    {
+        value = Math.Max(0d, value);
+        if (value >= 1_000_000d)
+        {
+            return $"{value / 1_000_000d:0.#}M";
+        }
+
+        if (value >= 1_000d)
+        {
+            return $"{value / 1_000d:0.#}k";
+        }
+
+        return $"{value:0}";
+    }
 
     private static string FormatCapacity(double gigabytes)
     {

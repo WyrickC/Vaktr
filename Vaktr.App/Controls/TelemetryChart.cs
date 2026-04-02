@@ -237,8 +237,9 @@ public sealed class TelemetryChart : UserControl
                 continue;
             }
 
-            var projected = Downsample(item.Points, pointBudget)
-                .Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue))
+            var projected = NormalizeProjectedPoints(
+                    Downsample(item.Points, pointBudget)
+                        .Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue)))
                 .ToArray();
 
             if (projected.Length == 0)
@@ -465,6 +466,40 @@ public sealed class TelemetryChart : UserControl
         return Math.Max(36, (int)Math.Round(width * density));
     }
 
+    private static IReadOnlyList<Windows.Foundation.Point> NormalizeProjectedPoints(IEnumerable<Windows.Foundation.Point> points)
+    {
+        var source = points as Windows.Foundation.Point[] ?? points.ToArray();
+        if (source.Length <= 2)
+        {
+            return source;
+        }
+
+        var normalized = new List<Windows.Foundation.Point>(source.Length);
+        var active = source[0];
+        normalized.Add(active);
+
+        for (var index = 1; index < source.Length; index++)
+        {
+            var point = source[index];
+            if (Math.Abs(point.X - active.X) < 1.5d)
+            {
+                active = point;
+                normalized[^1] = point;
+                continue;
+            }
+
+            active = point;
+            normalized.Add(point);
+        }
+
+        if (normalized.Count > 1 && Math.Abs(normalized[1].X - normalized[0].X) < 2.5d)
+        {
+            normalized.RemoveAt(0);
+        }
+
+        return normalized;
+    }
+
     private static bool TryGetPointBounds(
         IReadOnlyList<ChartSeriesViewModel> series,
         out DateTimeOffset minTimestamp,
@@ -648,6 +683,9 @@ public sealed class TelemetryChart : UserControl
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
         MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
         MetricUnit.Megahertz => $"{value / 1000d:0.00} GHz",
+        MetricUnit.Count when value >= 1_000_000d => $"{value / 1_000_000d:0.#}M",
+        MetricUnit.Count when value >= 1_000d => $"{value / 1_000d:0.#}k",
+        MetricUnit.Count => $"{value:0}",
         _ => $"{value:0.##}",
     };
 
@@ -851,7 +889,7 @@ public sealed class TelemetryChart : UserControl
         builder.AppendLine(FormatHoverTime(anchorTime.Value, end - start));
         foreach (var line in lines.OrderByDescending(item => item.Value).Take(5))
         {
-            builder.AppendLine($"• {line.Name}  {FormatAxisValue(line.Value, Unit)}");
+            builder.AppendLine($"- {line.Name}  {FormatAxisValue(line.Value, Unit)}");
         }
 
         if (lines.Count > 5)

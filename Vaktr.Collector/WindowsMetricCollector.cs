@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -13,6 +15,8 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private const double BytesPerMegabyte = 1024d * 1024d;
     private const double BitsPerMegabit = 1_000_000d;
     private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(3);
 
     private readonly nint _query;
     private readonly nint _cpuTotalCounter;
@@ -24,13 +28,18 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly nint _networkSendCounter;
     private readonly bool _hasAnyPdhCounters;
     private readonly Dictionary<string, NetworkBaseline> _networkBaselines = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<int, ProcessCpuBaseline> _processCpuBaselines = [];
     private readonly List<CachedMetricValue> _cachedDriveUsageValues = [];
+    private readonly List<CachedMetricValue> _cachedHostActivityValues = [];
+    private readonly List<ProcessActivitySample> _cachedProcessActivity = [];
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
     private ulong _previousUserTime;
     private bool _cpuFallbackInitialized;
     private DateTimeOffset _lastDriveUsageRefreshUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastHostActivityRefreshUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastProcessActivityRefreshUtc = DateTimeOffset.MinValue;
 
     public WindowsMetricCollector()
     {
@@ -78,6 +87,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
         }
 
         AddMemory(samples, timestamp);
+        var liveDetails = AddHostActivity(samples, timestamp);
         AddDriveUsage(samples, timestamp);
 
         if (pdhAvailable)
@@ -90,7 +100,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
             AddNetworkFallback(samples, timestamp);
         }
 
-        return Task.FromResult(new MetricSnapshot(timestamp, samples));
+        return Task.FromResult(new MetricSnapshot(timestamp, samples, liveDetails));
     }
 
     public ValueTask DisposeAsync()
@@ -277,70 +287,68 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private void AddDriveUsage(List<MetricSample> samples, DateTimeOffset timestamp)
     {
         var shouldRefresh = _cachedDriveUsageValues.Count == 0 || timestamp - _lastDriveUsageRefreshUtc >= DriveUsageRefreshInterval;
-        if (!shouldRefresh)
+        if (shouldRefresh)
         {
-            return;
-        }
-
-        _cachedDriveUsageValues.Clear();
-        foreach (var drive in DriveInfo.GetDrives())
-        {
-            try
+            _cachedDriveUsageValues.Clear();
+            foreach (var drive in DriveInfo.GetDrives())
             {
-                if (!drive.IsReady || drive.DriveType != DriveType.Fixed || string.IsNullOrWhiteSpace(drive.Name))
+                try
                 {
-                    continue;
-                }
+                    if (!drive.IsReady || drive.DriveType != DriveType.Fixed || string.IsNullOrWhiteSpace(drive.Name))
+                    {
+                        continue;
+                    }
 
-                var totalBytes = drive.TotalSize;
-                if (totalBytes <= 0)
+                    var totalBytes = drive.TotalSize;
+                    if (totalBytes <= 0)
+                    {
+                        continue;
+                    }
+
+                    var totalGb = totalBytes / 1024d / 1024d / 1024d;
+                    var usedGb = Math.Max(0d, totalGb - (drive.AvailableFreeSpace / 1024d / 1024d / 1024d));
+                    var usedPercent = Math.Clamp((1d - (drive.AvailableFreeSpace / (double)totalBytes)) * 100d, 0d, 100d);
+                    var driveLabel = drive.Name.TrimEnd('\\');
+                    var panelKey = $"volume-{Sanitize(driveLabel)}";
+                    var panelTitle = $"Drive {driveLabel} Capacity";
+
+                    _cachedDriveUsageValues.Add(new CachedMetricValue(
+                        panelKey,
+                        panelTitle,
+                        "used-percent",
+                        "Used",
+                        MetricCategory.Disk,
+                        MetricUnit.Percent,
+                        usedPercent));
+
+                    _cachedDriveUsageValues.Add(new CachedMetricValue(
+                        panelKey,
+                        panelTitle,
+                        "used-gb",
+                        "Used GiB",
+                        MetricCategory.Disk,
+                        MetricUnit.Gigabytes,
+                        usedGb));
+
+                    _cachedDriveUsageValues.Add(new CachedMetricValue(
+                        panelKey,
+                        panelTitle,
+                        "total-gb",
+                        "Total GiB",
+                        MetricCategory.Disk,
+                        MetricUnit.Gigabytes,
+                        totalGb));
+                }
+                catch (IOException)
                 {
-                    continue;
                 }
-
-                var totalGb = totalBytes / 1024d / 1024d / 1024d;
-                var usedGb = Math.Max(0d, totalGb - (drive.AvailableFreeSpace / 1024d / 1024d / 1024d));
-                var usedPercent = Math.Clamp((1d - (drive.AvailableFreeSpace / (double)totalBytes)) * 100d, 0d, 100d);
-                var driveLabel = drive.Name.TrimEnd('\\');
-                var panelKey = $"volume-{Sanitize(driveLabel)}";
-                var panelTitle = $"Drive {driveLabel} Usage";
-
-                _cachedDriveUsageValues.Add(new CachedMetricValue(
-                    panelKey,
-                    panelTitle,
-                    "used-percent",
-                    "Used",
-                    MetricCategory.Disk,
-                    MetricUnit.Percent,
-                    usedPercent));
-
-                _cachedDriveUsageValues.Add(new CachedMetricValue(
-                    panelKey,
-                    panelTitle,
-                    "used-gb",
-                    "Used GiB",
-                    MetricCategory.Disk,
-                    MetricUnit.Gigabytes,
-                    usedGb));
-
-                _cachedDriveUsageValues.Add(new CachedMetricValue(
-                    panelKey,
-                    panelTitle,
-                    "total-gb",
-                    "Total GiB",
-                    MetricCategory.Disk,
-                    MetricUnit.Gigabytes,
-                    totalGb));
+                catch (UnauthorizedAccessException)
+                {
+                }
             }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
+
+            _lastDriveUsageRefreshUtc = timestamp;
         }
-
-        _lastDriveUsageRefreshUtc = timestamp;
 
         foreach (var cachedValue in _cachedDriveUsageValues)
         {
@@ -354,6 +362,136 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 cachedValue.Value,
                 timestamp));
         }
+    }
+
+    private LiveBoardDetails? AddHostActivity(List<MetricSample> samples, DateTimeOffset timestamp)
+    {
+        var shouldRefresh = _cachedHostActivityValues.Count == 0 || timestamp - _lastHostActivityRefreshUtc >= HostActivityRefreshInterval;
+        var shouldRefreshProcesses = _cachedProcessActivity.Count == 0 || timestamp - _lastProcessActivityRefreshUtc >= ProcessActivityRefreshInterval;
+        if (shouldRefresh || shouldRefreshProcesses)
+        {
+            _cachedHostActivityValues.Clear();
+            if (shouldRefreshProcesses)
+            {
+                _cachedProcessActivity.Clear();
+            }
+
+            var processCount = 0;
+            var threadCount = 0L;
+            var handleCount = 0L;
+            var activePids = new HashSet<int>();
+
+            foreach (var process in Process.GetProcesses())
+            {
+                try
+                {
+                    processCount++;
+
+                    var processThreads = process.Threads.Count;
+                    var processHandles = process.HandleCount;
+                    threadCount += processThreads;
+                    handleCount += processHandles;
+
+                    if (shouldRefreshProcesses)
+                    {
+                        activePids.Add(process.Id);
+                        var totalProcessorTime = process.TotalProcessorTime;
+                        var cpuPercent = 0d;
+                        if (_processCpuBaselines.TryGetValue(process.Id, out var baseline))
+                        {
+                            var elapsedSeconds = Math.Max(0.25d, (timestamp - baseline.Timestamp).TotalSeconds);
+                            var cpuSeconds = Math.Max(0d, (totalProcessorTime - baseline.TotalProcessorTime).TotalSeconds);
+                            cpuPercent = Math.Clamp((cpuSeconds / (elapsedSeconds * Environment.ProcessorCount)) * 100d, 0d, 100d);
+                            _processCpuBaselines[process.Id] = new ProcessCpuBaseline(totalProcessorTime, timestamp);
+                        }
+                        else
+                        {
+                            _processCpuBaselines[process.Id] = new ProcessCpuBaseline(totalProcessorTime, timestamp);
+                        }
+
+                        var workingSetGb = Math.Max(0d, process.WorkingSet64 / 1024d / 1024d / 1024d);
+                        var name = string.IsNullOrWhiteSpace(process.ProcessName) ? $"PID {process.Id}" : process.ProcessName;
+
+                        _cachedProcessActivity.Add(new ProcessActivitySample(
+                            process.Id,
+                            name,
+                            cpuPercent,
+                            workingSetGb,
+                            processThreads,
+                            processHandles));
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                }
+                catch (NotSupportedException)
+                {
+                }
+                catch (Win32Exception)
+                {
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+
+            if (shouldRefreshProcesses)
+            {
+                foreach (var stalePid in _processCpuBaselines.Keys.Where(pid => !activePids.Contains(pid)).ToArray())
+                {
+                    _processCpuBaselines.Remove(stalePid);
+                }
+
+                _lastProcessActivityRefreshUtc = timestamp;
+            }
+
+            _cachedHostActivityValues.Add(new CachedMetricValue(
+                "host-activity",
+                "Host Activity",
+                "processes",
+                "Processes",
+                MetricCategory.System,
+                MetricUnit.Count,
+                processCount));
+
+            _cachedHostActivityValues.Add(new CachedMetricValue(
+                "host-activity",
+                "Host Activity",
+                "threads",
+                "Threads",
+                MetricCategory.System,
+                MetricUnit.Count,
+                threadCount));
+
+            _cachedHostActivityValues.Add(new CachedMetricValue(
+                "host-activity",
+                "Host Activity",
+                "handles",
+                "Handles",
+                MetricCategory.System,
+                MetricUnit.Count,
+                handleCount));
+
+            _lastHostActivityRefreshUtc = timestamp;
+        }
+
+        foreach (var cachedValue in _cachedHostActivityValues)
+        {
+            samples.Add(new MetricSample(
+                cachedValue.PanelKey,
+                cachedValue.PanelTitle,
+                cachedValue.SeriesKey,
+                cachedValue.SeriesName,
+                cachedValue.Category,
+                cachedValue.Unit,
+                cachedValue.Value,
+                timestamp));
+        }
+
+        return _cachedProcessActivity.Count == 0
+            ? null
+            : new LiveBoardDetails(_cachedProcessActivity.ToArray());
     }
 
     private void AddNetwork(List<MetricSample> samples, DateTimeOffset timestamp)
@@ -613,6 +751,8 @@ public sealed class WindowsMetricCollector : IMetricCollector
     }
 
     private readonly record struct NetworkBaseline(long BytesReceived, long BytesSent, DateTimeOffset Timestamp);
+
+    private readonly record struct ProcessCpuBaseline(TimeSpan TotalProcessorTime, DateTimeOffset Timestamp);
 
     private readonly record struct CachedMetricValue(
         string PanelKey,

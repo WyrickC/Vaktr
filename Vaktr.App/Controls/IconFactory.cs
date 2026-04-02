@@ -108,6 +108,7 @@ internal static class IconFactory
             "disk" => "\uEDA2", // HardDrive
             "drive" => "\uE8CE", // MapDrive
             "network" => "\uEDA3", // NetworkAdapter
+            "system" => "\uF182", // ScreenTime
             _ => "\uF182",
         };
     }
@@ -221,6 +222,7 @@ internal static class IconFactory
             "disk" or "dsk" => "disk",
             "drive" or "drv" or "volume" => "drive",
             "network" or "net" or "wan" => "network",
+            "system" or "activity" or "host" => "system",
             _ => key.Trim().ToLowerInvariant(),
         };
     }
