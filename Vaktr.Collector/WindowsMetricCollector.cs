@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -15,8 +13,8 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private const double BytesPerMegabyte = 1024d * 1024d;
     private const double BitsPerMegabit = 1_000_000d;
     private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(20);
 
     private readonly nint _query;
     private readonly nint _cpuTotalCounter;
@@ -381,61 +379,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
             var threadCount = 0L;
             var handleCount = 0L;
             var activePids = new HashSet<int>();
-
-            foreach (var process in Process.GetProcesses())
-            {
-                try
-                {
-                    processCount++;
-
-                    var processThreads = process.Threads.Count;
-                    var processHandles = process.HandleCount;
-                    threadCount += processThreads;
-                    handleCount += processHandles;
-
-                    if (shouldRefreshProcesses)
-                    {
-                        activePids.Add(process.Id);
-                        var totalProcessorTime = process.TotalProcessorTime;
-                        var cpuPercent = 0d;
-                        if (_processCpuBaselines.TryGetValue(process.Id, out var baseline))
-                        {
-                            var elapsedSeconds = Math.Max(0.25d, (timestamp - baseline.Timestamp).TotalSeconds);
-                            var cpuSeconds = Math.Max(0d, (totalProcessorTime - baseline.TotalProcessorTime).TotalSeconds);
-                            cpuPercent = Math.Clamp((cpuSeconds / (elapsedSeconds * Environment.ProcessorCount)) * 100d, 0d, 100d);
-                            _processCpuBaselines[process.Id] = new ProcessCpuBaseline(totalProcessorTime, timestamp);
-                        }
-                        else
-                        {
-                            _processCpuBaselines[process.Id] = new ProcessCpuBaseline(totalProcessorTime, timestamp);
-                        }
-
-                        var workingSetGb = Math.Max(0d, process.WorkingSet64 / 1024d / 1024d / 1024d);
-                        var name = string.IsNullOrWhiteSpace(process.ProcessName) ? $"PID {process.Id}" : process.ProcessName;
-
-                        _cachedProcessActivity.Add(new ProcessActivitySample(
-                            process.Id,
-                            name,
-                            cpuPercent,
-                            workingSetGb,
-                            processThreads,
-                            processHandles));
-                    }
-                }
-                catch (InvalidOperationException)
-                {
-                }
-                catch (NotSupportedException)
-                {
-                }
-                catch (Win32Exception)
-                {
-                }
-                finally
-                {
-                    process.Dispose();
-                }
-            }
+            EnumerateProcesses(timestamp, shouldRefreshProcesses, activePids, ref processCount, ref threadCount, ref handleCount);
 
             if (shouldRefreshProcesses)
             {
@@ -754,7 +698,150 @@ public sealed class WindowsMetricCollector : IMetricCollector
 
     private readonly record struct NetworkBaseline(long BytesReceived, long BytesSent, DateTimeOffset Timestamp);
 
-    private readonly record struct ProcessCpuBaseline(TimeSpan TotalProcessorTime, DateTimeOffset Timestamp);
+    private void EnumerateProcesses(
+        DateTimeOffset timestamp,
+        bool shouldRefreshProcesses,
+        HashSet<int> activePids,
+        ref int processCount,
+        ref long threadCount,
+        ref long handleCount)
+    {
+        var snapshotHandle = ProcessNative.CreateToolhelp32Snapshot(ProcessNative.Th32csSnapProcess, 0);
+        if (!ProcessNative.IsValidHandle(snapshotHandle))
+        {
+            return;
+        }
+
+        try
+        {
+            var entry = new ProcessNative.ProcessEntry32
+            {
+                dwSize = (uint)Marshal.SizeOf<ProcessNative.ProcessEntry32>(),
+                szExeFile = string.Empty,
+            };
+
+            if (!ProcessNative.Process32First(snapshotHandle, ref entry))
+            {
+                return;
+            }
+
+            do
+            {
+                var processId = unchecked((int)entry.th32ProcessID);
+                if (processId <= 0)
+                {
+                    ResetProcessEntry(ref entry);
+                    continue;
+                }
+
+                processCount++;
+                var processThreads = unchecked((int)entry.cntThreads);
+                threadCount += processThreads;
+
+                var processHandles = 0;
+                var cpuPercent = 0d;
+                var workingSetGb = 0d;
+                var processName = NormalizeProcessName(entry.szExeFile, processId);
+
+                var processHandle = ProcessNative.OpenProcess(
+                    ProcessNative.ProcessQueryLimitedInformation | ProcessNative.ProcessVmRead,
+                    false,
+                    processId);
+                if (ProcessNative.IsValidHandle(processHandle))
+                {
+                    try
+                    {
+                        if (ProcessNative.GetProcessHandleCount(processHandle, out var handleValue))
+                        {
+                            processHandles = unchecked((int)handleValue);
+                            handleCount += processHandles;
+                        }
+
+                        if (shouldRefreshProcesses)
+                        {
+                            activePids.Add(processId);
+                            TryGetProcessCpuUsage(processHandle, processId, timestamp, out cpuPercent);
+
+                            if (ProcessNative.GetProcessMemoryInfo(
+                                    processHandle,
+                                    out var memoryCounters,
+                                    (uint)Marshal.SizeOf<ProcessNative.ProcessMemoryCounters>()))
+                            {
+                                workingSetGb = Math.Max(0d, (double)memoryCounters.WorkingSetSize / 1024d / 1024d / 1024d);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ProcessNative.CloseHandle(processHandle);
+                    }
+                }
+                else if (shouldRefreshProcesses)
+                {
+                    activePids.Add(processId);
+                }
+
+                if (shouldRefreshProcesses)
+                {
+                    _cachedProcessActivity.Add(new ProcessActivitySample(
+                        processId,
+                        processName,
+                        cpuPercent,
+                        workingSetGb,
+                        processThreads,
+                        processHandles));
+                }
+
+                ResetProcessEntry(ref entry);
+            }
+            while (ProcessNative.Process32Next(snapshotHandle, ref entry));
+        }
+        finally
+        {
+            ProcessNative.CloseHandle(snapshotHandle);
+        }
+    }
+
+    private bool TryGetProcessCpuUsage(nint processHandle, int processId, DateTimeOffset timestamp, out double cpuPercent)
+    {
+        cpuPercent = 0d;
+        if (!ProcessNative.GetProcessTimes(
+                processHandle,
+                out var creationTime,
+                out _,
+                out var kernelTime,
+                out var userTime))
+        {
+            return false;
+        }
+
+        var totalProcessorTime = TimeSpan.FromTicks((long)(kernelTime.ToUInt64() + userTime.ToUInt64()));
+        var creationStamp = creationTime.ToUInt64();
+        if (_processCpuBaselines.TryGetValue(processId, out var baseline) &&
+            baseline.CreationTime == creationStamp)
+        {
+            var elapsedSeconds = Math.Max(0.25d, (timestamp - baseline.Timestamp).TotalSeconds);
+            var cpuSeconds = Math.Max(0d, (totalProcessorTime - baseline.TotalProcessorTime).TotalSeconds);
+            cpuPercent = Math.Clamp((cpuSeconds / (elapsedSeconds * Environment.ProcessorCount)) * 100d, 0d, 100d);
+        }
+
+        _processCpuBaselines[processId] = new ProcessCpuBaseline(totalProcessorTime, timestamp, creationStamp);
+        return true;
+    }
+
+    private static string NormalizeProcessName(string executableName, int processId)
+    {
+        var trimmed = Path.GetFileNameWithoutExtension(executableName)?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? $"PID {processId}" : trimmed;
+    }
+
+    private static void ResetProcessEntry(ref ProcessNative.ProcessEntry32 entry)
+    {
+        entry.dwSize = (uint)Marshal.SizeOf<ProcessNative.ProcessEntry32>();
+        entry.szExeFile = string.Empty;
+    }
+
+    private readonly record struct ProcessCpuBaseline(TimeSpan TotalProcessorTime, DateTimeOffset Timestamp, ulong CreationTime);
 
     private readonly record struct CachedMetricValue(
         string PanelKey,

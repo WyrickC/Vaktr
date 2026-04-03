@@ -18,6 +18,8 @@ public sealed class VaktrConfig
 
     public RetentionPreset Retention { get; set; } = RetentionPreset.OneDay;
 
+    public string RetentionInputText { get; set; } = string.Empty;
+
     public ThemeMode Theme { get; set; } = ThemeMode.Dark;
 
     public string StorageDirectory { get; set; } = DefaultStorageDirectory;
@@ -94,6 +96,17 @@ public sealed class VaktrConfig
             };
         }
 
+        if (!TryNormalizeRetentionInput(RetentionInputText, out var normalizedRetentionInput))
+        {
+            RetentionInputText = MaxRetentionHours == DefaultMaxRetentionHoursValue
+                ? string.Empty
+                : FormatRetentionInput(MaxRetentionHours);
+        }
+        else
+        {
+            RetentionInputText = normalizedRetentionInput;
+        }
+
         if (!Enum.IsDefined(typeof(ThemeMode), Theme))
         {
             Theme = ThemeMode.Dark;
@@ -133,4 +146,46 @@ public sealed class VaktrConfig
         StorageDirectory = DefaultStorageDirectory,
         MaxRetentionHours = DefaultMaxRetentionHoursValue,
     };
+
+    private static string FormatRetentionInput(int hours)
+    {
+        if (hours > 0 && hours % 24 == 0)
+        {
+            return $"{hours / 24}d";
+        }
+
+        return $"{hours}h";
+    }
+
+    private static bool TryNormalizeRetentionInput(string? text, out string normalizedText)
+    {
+        normalizedText = string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var trimmed = text.Trim();
+        if (trimmed.Length < 2)
+        {
+            return false;
+        }
+
+        var unit = char.ToLowerInvariant(trimmed[^1]);
+        var amountText = trimmed[..^1].Trim();
+        if (!int.TryParse(amountText, out var amount) || amount <= 0)
+        {
+            return false;
+        }
+
+        normalizedText = unit switch
+        {
+            'm' => $"{amount}m",
+            'h' => $"{amount}h",
+            'd' => $"{amount}d",
+            _ => string.Empty,
+        };
+
+        return normalizedText.Length > 0;
+    }
 }

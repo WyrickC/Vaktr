@@ -2,9 +2,9 @@ using System.ComponentModel;
 using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.UI;
 using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
@@ -62,6 +62,10 @@ public sealed class TelemetryPanelCard : UserControl
     private bool _lastRenderedZoomState;
     private bool _lastRenderedSupportsProcessTable;
     private bool _lastRenderedGaugeMode;
+    private bool _isHeaderPointerDown;
+    private bool _isHeaderDragActive;
+    private FrameworkElement? _headerDragHandle;
+    private Windows.Foundation.Point _headerPointerStart;
 
     public event EventHandler<TimeRangePresetRequestedEventArgs>? RangePresetRequested;
 
@@ -312,12 +316,7 @@ public sealed class TelemetryPanelCard : UserControl
         metaGrid.Children.Add(scalePill);
         Grid.SetColumn(scalePill, 1);
 
-        var headerGrid = new Grid();
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        headerGrid.CanDrag = true;
-        headerGrid.DragStarting += OnHeaderDragStarting;
-        headerGrid.Children.Add(new StackPanel
+        var headerContent = new StackPanel
         {
             Spacing = 3,
             Children =
@@ -327,7 +326,17 @@ public sealed class TelemetryPanelCard : UserControl
                 _currentValueText,
                 _secondaryValueText,
             },
-        });
+        };
+        headerContent.PointerPressed += OnHeaderPointerPressed;
+        headerContent.PointerMoved += OnHeaderPointerMoved;
+        headerContent.PointerReleased += OnHeaderPointerReleased;
+        headerContent.PointerCaptureLost += OnHeaderPointerCaptureLost;
+        _headerDragHandle = headerContent;
+
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.Children.Add(headerContent);
         headerGrid.Children.Add(rangeShell);
         Grid.SetColumn(rangeShell, 1);
 
@@ -357,13 +366,8 @@ public sealed class TelemetryPanelCard : UserControl
                 },
             },
         };
-        _cardBorder.AllowDrop = true;
-
         _cardBorder.PointerEntered += (_, _) => SetHoverState(true);
         _cardBorder.PointerExited += (_, _) => SetHoverState(false);
-        _cardBorder.DragOver += OnCardDragOver;
-        _cardBorder.DragLeave += OnCardDragLeave;
-        _cardBorder.Drop += OnCardDrop;
 
         Content = _cardBorder;
         Loaded += (_, _) => RefreshFromPanel();
@@ -664,7 +668,7 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void SetHoverState(bool isHovered)
     {
-        if (_isDropTarget)
+        if (_isDropTarget || _isHeaderDragActive)
         {
             return;
         }
@@ -706,44 +710,79 @@ public sealed class TelemetryPanelCard : UserControl
         return button;
     }
 
-    private void OnHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
+    private void OnHeaderPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (Panel is not { } panel)
+        if (Panel is null)
         {
             return;
         }
 
-        args.Data.SetText(panel.PanelKey);
-        args.Data.RequestedOperation = DataPackageOperation.Move;
-    }
-
-    private void OnCardDragOver(object sender, DragEventArgs e)
-    {
-        e.AcceptedOperation = DataPackageOperation.Move;
-        SetDropTargetState(true);
-    }
-
-    private void OnCardDragLeave(object sender, DragEventArgs e)
-    {
-        SetDropTargetState(false);
-    }
-
-    private async void OnCardDrop(object sender, DragEventArgs e)
-    {
-        SetDropTargetState(false);
-        if (Panel is null || !e.DataView.Contains(StandardDataFormats.Text))
+        if (!e.GetCurrentPoint(_headerDragHandle).Properties.IsLeftButtonPressed)
         {
             return;
         }
 
-        var sourceKey = (await e.DataView.GetTextAsync()).Trim();
-        if (string.IsNullOrWhiteSpace(sourceKey) ||
-            string.Equals(sourceKey, Panel.PanelKey, StringComparison.OrdinalIgnoreCase))
+        _isHeaderPointerDown = true;
+        _isHeaderDragActive = false;
+        _headerPointerStart = e.GetCurrentPoint(this).Position;
+        _headerDragHandle?.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void OnHeaderPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isHeaderPointerDown)
         {
             return;
         }
 
-        PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(sourceKey, Panel.PanelKey));
+        var point = e.GetCurrentPoint(this).Position;
+        if (!_isHeaderDragActive)
+        {
+            var deltaX = point.X - _headerPointerStart.X;
+            var deltaY = point.Y - _headerPointerStart.Y;
+            if ((deltaX * deltaX) + (deltaY * deltaY) < 64d)
+            {
+                return;
+            }
+
+            _isHeaderDragActive = true;
+            _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
+            _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
+            _cardBorder.Opacity = 0.96;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnHeaderPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isHeaderPointerDown)
+        {
+            return;
+        }
+
+        var wasDragging = _isHeaderDragActive;
+        var targetKey = wasDragging ? TryResolveDropTargetPanelKey(e) : null;
+        EndHeaderDragInteraction();
+
+        if (!wasDragging || Panel is null || string.IsNullOrWhiteSpace(targetKey))
+        {
+            return;
+        }
+
+        PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(Panel.PanelKey, targetKey));
+        e.Handled = true;
+    }
+
+    private void OnHeaderPointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isHeaderPointerDown)
+        {
+            return;
+        }
+
+        EndHeaderDragInteraction();
     }
 
     private void OnRangeClick(object? sender, EventArgs e)
@@ -809,6 +848,42 @@ public sealed class TelemetryPanelCard : UserControl
 
         _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
+    }
+
+    private string? TryResolveDropTargetPanelKey(PointerRoutedEventArgs e)
+    {
+        if (XamlRoot?.Content is not UIElement root)
+        {
+            return null;
+        }
+
+        var hostPoint = e.GetCurrentPoint(root).Position;
+        foreach (var element in VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, root))
+        {
+            DependencyObject? current = element;
+            while (current is not null)
+            {
+                if (current is TelemetryPanelCard targetCard &&
+                    !ReferenceEquals(targetCard, this) &&
+                    targetCard.Panel is { } panel)
+                {
+                    return panel.PanelKey;
+                }
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+        }
+
+        return null;
+    }
+
+    private void EndHeaderDragInteraction()
+    {
+        _headerDragHandle?.ReleasePointerCaptures();
+        _isHeaderPointerDown = false;
+        _isHeaderDragActive = false;
+        _cardBorder.Opacity = 1.0;
+        SetDropTargetState(false);
     }
 
     private static (Border Row, TextBlock ValueText) CreateLegendRow(string name, Brush strokeBrush)

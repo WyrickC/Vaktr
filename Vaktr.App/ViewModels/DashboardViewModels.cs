@@ -172,6 +172,7 @@ public sealed class MainViewModel : ObservableObject
             ScrapeIntervalSeconds = EffectiveScrapeIntervalSeconds,
             GraphWindowMinutes = SelectedWindowMinutes,
             MaxRetentionHours = EffectiveRetentionHours,
+            RetentionInputText = NormalizeRetentionInputForPersistence(RetentionHoursInput),
             Theme = SelectedTheme,
             StorageDirectory = EffectiveStorageDirectory,
             LaunchOnStartup = LaunchOnStartup,
@@ -190,9 +191,11 @@ public sealed class MainViewModel : ObservableObject
         ScrapeIntervalInput = normalized.ScrapeIntervalSeconds == VaktrConfig.DefaultScrapeIntervalSeconds
             ? string.Empty
             : normalized.ScrapeIntervalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        RetentionHoursInput = normalized.MaxRetentionHours == VaktrConfig.DefaultMaxRetentionHours
-            ? string.Empty
-            : FormatRetentionInput(normalized.MaxRetentionHours);
+        RetentionHoursInput = !string.IsNullOrWhiteSpace(normalized.RetentionInputText)
+            ? normalized.RetentionInputText
+            : normalized.MaxRetentionHours == VaktrConfig.DefaultMaxRetentionHours
+                ? string.Empty
+                : FormatRetentionInput(normalized.MaxRetentionHours);
         SelectedIntervalSeconds = normalized.ScrapeIntervalSeconds;
         SelectedWindowMinutes = normalized.GraphWindowMinutes;
         SelectedTheme = normalized.Theme;
@@ -403,6 +406,13 @@ public sealed class MainViewModel : ObservableObject
         }
 
         return $"{hours}h";
+    }
+
+    private static string NormalizeRetentionInputForPersistence(string? input)
+    {
+        return TryParseRetentionInput(input, out _, out var normalizedText)
+            ? normalizedText
+            : string.Empty;
     }
 
     private MetricPanelViewModel GetOrCreatePanel(string panelKey, string title, MetricCategory category, MetricUnit unit)

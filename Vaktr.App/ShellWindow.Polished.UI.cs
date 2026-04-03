@@ -31,7 +31,7 @@ public sealed partial class ShellWindow
             BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(38),
-            Opacity = 0.22,
+            Opacity = 0.08,
         };
 
         var shellBorder = new Border
@@ -118,17 +118,10 @@ public sealed partial class ShellWindow
 
         return new StackPanel
         {
-            Spacing = 8,
+            Spacing = 4,
             Children =
             {
                 heroGrid,
-                new Border
-                {
-                    Height = 1,
-                    Margin = new Thickness(2, 6, 2, 2),
-                    Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                    Opacity = 0.18,
-                },
             },
         };
     }
@@ -322,7 +315,7 @@ public sealed partial class ShellWindow
             "storage",
             "STORAGE PATH",
             GetStorageFieldTitle(_draftStorageDirectory),
-            "Machine-local default",
+            "Stored locally by default",
             "#6EE7C8",
             new StackPanel
             {
@@ -618,7 +611,7 @@ public sealed partial class ShellWindow
                 Spacing = 14,
                 Children =
                 {
-                    CreateSectionHeader("STORAGE", "Vaktr keeps telemetry machine-local, so Local App Data is the sensible default instead of Roaming."),
+                    CreateSectionHeader("STORAGE", "Vaktr keeps telemetry local, so Local App Data is the sensible default instead of Roaming."),
                     dropSurface,
                     CreateChipWrapRow(
                         CreateActionChip("Browse folder", OnBrowseStorageClick, filled: true),
@@ -1247,7 +1240,7 @@ public sealed partial class ShellWindow
     private static string GetStorageFieldCaption(string? storageDirectory)
     {
         return string.IsNullOrWhiteSpace(storageDirectory)
-            ? "%LocalAppData%\\Vaktr\\Data // machine-local"
+            ? "%LocalAppData%\\Vaktr\\Data"
             : storageDirectory.Trim();
     }
 

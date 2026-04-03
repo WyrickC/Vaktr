@@ -33,7 +33,6 @@ public sealed class CollectorService : IAsyncDisposable
             await StopInternalAsync().ConfigureAwait(false);
 
             await _store.InitializeAsync(config, cancellationToken).ConfigureAwait(false);
-            await _store.PruneAsync(config, cancellationToken).ConfigureAwait(false);
 
             _loopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             await CollectOnceAsync(_loopCancellation.Token, InitialCollectionTimeout).ConfigureAwait(false);
@@ -113,27 +112,28 @@ public sealed class CollectorService : IAsyncDisposable
 
     private async Task StopInternalAsync()
     {
-        if (_loopCancellation is not null)
-        {
-            await _loopCancellation.CancelAsync().ConfigureAwait(false);
-        }
+        var loopCancellation = _loopCancellation;
+        var timer = _timer;
+        var loopTask = _loopTask;
 
-        if (_loopTask is not null)
+        _loopTask = null;
+        _timer = null;
+        _loopCancellation = null;
+
+        timer?.Dispose();
+        loopCancellation?.Cancel();
+
+        if (loopTask is not null)
         {
             try
             {
-                await _loopTask.ConfigureAwait(false);
+                await loopTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
             }
         }
 
-        _timer?.Dispose();
-        _loopCancellation?.Dispose();
-
-        _loopTask = null;
-        _timer = null;
-        _loopCancellation = null;
+        loopCancellation?.Dispose();
     }
 }

@@ -64,6 +64,7 @@ public sealed partial class ShellWindow : Window
     private bool _windowIconApplied;
     private bool _summaryCardsBound;
     private bool _globalRangeEditorVisible;
+    private bool _themeRefreshQueued;
     private string _lastRenderedStatusText = string.Empty;
     private string _draftScrapeIntervalInput = string.Empty;
     private string _draftRetentionInput = string.Empty;
@@ -152,30 +153,6 @@ public sealed partial class ShellWindow : Window
         ApplyInitialTheme(mode);
         _draftThemeMode = mode;
 
-        if (!themeChanged)
-        {
-            if (_controlDeckEditableActive)
-            {
-                RenderEditableControlDeck();
-            }
-            else
-            {
-                RenderControlDeckSummary();
-            }
-
-            if (_globalRangeEditorVisible)
-            {
-                RenderGlobalRangeEditor();
-            }
-
-            RefreshGlobalRangeControls();
-            return;
-        }
-
-        RebuildSummaryCards();
-        _panelCards.Clear();
-        RefreshDashboardPanels();
-
         if (_controlDeckEditableActive)
         {
             RenderEditableControlDeck();
@@ -188,6 +165,11 @@ public sealed partial class ShellWindow : Window
         if (_globalRangeEditorVisible)
         {
             RenderGlobalRangeEditor();
+        }
+
+        if (themeChanged)
+        {
+            QueueThemeRefresh();
         }
 
         RefreshGlobalRangeControls();
@@ -458,13 +440,16 @@ public sealed partial class ShellWindow : Window
             var storageChanged = !string.Equals(config.StorageDirectory, previousConfig.StorageDirectory, StringComparison.OrdinalIgnoreCase);
             var retentionChanged = config.MaxRetentionHours != previousConfig.MaxRetentionHours;
             var retentionLowered = config.MaxRetentionHours < previousConfig.MaxRetentionHours;
+            var themeChanged = config.Theme != previousConfig.Theme;
             var collectorRestartRequired = scrapeChanged || storageChanged;
 
             _viewModel.StatusText = collectorRestartRequired
                 ? "Applying telemetry settings"
                 : retentionLowered
                     ? "Saving settings and pruning older history"
-                    : "Saving settings";
+                    : themeChanged
+                        ? "Applying theme"
+                        : "Saving settings";
             UpdateStatusText();
             _viewModel.ApplyConfig(config);
             SyncControlDeckDraftsFromViewModel();
@@ -612,6 +597,30 @@ public sealed partial class ShellWindow : Window
 
             StartupTrace.Write("Queued dashboard refresh after resize // polished-v19");
             RefreshDashboardPanels();
+        });
+    }
+
+    private void QueueThemeRefresh()
+    {
+        if (_themeRefreshQueued)
+        {
+            return;
+        }
+
+        _themeRefreshQueued = true;
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            _themeRefreshQueued = false;
+            RebuildSummaryCards();
+            _panelCards.Clear();
+            RefreshDashboardPanels();
+
+            if (_globalRangeEditorVisible)
+            {
+                RenderGlobalRangeEditor();
+            }
+
+            RefreshGlobalRangeControls();
         });
     }
 
@@ -1091,8 +1100,6 @@ public sealed partial class ShellWindow : Window
         try
         {
             StartupTrace.Write("TryLoadHistoryAsync start");
-            await _metricStore.InitializeAsync(config, CancellationToken.None);
-
             var historyWindow = TimeSpan.FromMinutes(Math.Max(config.GraphWindowMinutes, 5));
             var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
             _viewModel.LoadHistory(history);
