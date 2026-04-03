@@ -237,8 +237,14 @@ public sealed class TelemetryChart : UserControl
                 continue;
             }
 
+            var renderablePoints = GetRenderablePoints(item.Points, start, end);
+            if (renderablePoints.Count == 0)
+            {
+                continue;
+            }
+
             var projected = NormalizeProjectedPoints(
-                    Downsample(item.Points, pointBudget)
+                    Downsample(renderablePoints, pointBudget)
                         .Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue)))
                 .ToArray();
             var strokeProjected = ResolveStrokePoints(projected);
@@ -471,6 +477,31 @@ public sealed class TelemetryChart : UserControl
         return Math.Max(36, (int)Math.Round(width * density));
     }
 
+    private static IReadOnlyList<MetricPoint> GetRenderablePoints(
+        IReadOnlyList<MetricPoint> points,
+        DateTimeOffset start,
+        DateTimeOffset end)
+    {
+        if (points.Count == 0)
+        {
+            return Array.Empty<MetricPoint>();
+        }
+
+        var filtered = points
+            .Where(point => point.Timestamp >= start && point.Timestamp <= end)
+            .ToArray();
+
+        if (filtered.Length > 0)
+        {
+            return filtered;
+        }
+
+        var nearest = FindNearestPoint(points, start);
+        return nearest is null
+            ? Array.Empty<MetricPoint>()
+            : new MetricPoint[] { nearest };
+    }
+
     private static IReadOnlyList<Windows.Foundation.Point> NormalizeProjectedPoints(IEnumerable<Windows.Foundation.Point> points)
     {
         var source = points as Windows.Foundation.Point[] ?? points.ToArray();
@@ -486,7 +517,7 @@ public sealed class TelemetryChart : UserControl
         for (var index = 1; index < source.Length; index++)
         {
             var point = source[index];
-            if (Math.Abs(point.X - active.X) < 1.5d)
+            if (Math.Abs(point.X - active.X) < 3.5d)
             {
                 active = point;
                 normalized[^1] = point;
@@ -497,7 +528,9 @@ public sealed class TelemetryChart : UserControl
             normalized.Add(point);
         }
 
-        if (normalized.Count > 1 && Math.Abs(normalized[1].X - normalized[0].X) < 2.5d)
+        while (normalized.Count > 1 &&
+               normalized[0].X <= LeftPadding + 8d &&
+               normalized[1].X <= LeftPadding + 24d)
         {
             normalized.RemoveAt(0);
         }
@@ -512,18 +545,7 @@ public sealed class TelemetryChart : UserControl
             return points;
         }
 
-        var startIndex = 0;
-        while (startIndex < points.Count - 1)
-        {
-            var current = points[startIndex];
-            var next = points[startIndex + 1];
-            if (current.X > LeftPadding + 4d && Math.Abs(next.X - current.X) >= 2.5d)
-            {
-                break;
-            }
-
-            startIndex++;
-        }
+        var startIndex = ResolveLeadingArtifactTrimIndex(points);
 
         return startIndex == 0 ? points : points.Skip(startIndex).ToArray();
     }
@@ -535,11 +557,7 @@ public sealed class TelemetryChart : UserControl
             return points;
         }
 
-        var startIndex = 0;
-        while (startIndex < points.Count - 1 && points[startIndex].X <= LeftPadding + 8d)
-        {
-            startIndex++;
-        }
+        var startIndex = ResolveLeadingArtifactTrimIndex(points);
 
         if (startIndex >= points.Count - 1)
         {
@@ -547,6 +565,32 @@ public sealed class TelemetryChart : UserControl
         }
 
         return startIndex == 0 ? points : points.Skip(startIndex).ToArray();
+    }
+
+    private static int ResolveLeadingArtifactTrimIndex(IReadOnlyList<Windows.Foundation.Point> points)
+    {
+        if (points.Count <= 1)
+        {
+            return 0;
+        }
+
+        var startIndex = 0;
+        while (startIndex < points.Count - 1)
+        {
+            var current = points[startIndex];
+            var next = points[startIndex + 1];
+            var nearLeadingEdge = current.X <= LeftPadding + 28d;
+            var compressedX = Math.Abs(next.X - current.X) < 10d;
+
+            if (!nearLeadingEdge || !compressedX)
+            {
+                break;
+            }
+
+            startIndex++;
+        }
+
+        return startIndex;
     }
 
     private static bool TryGetPointBounds(

@@ -14,9 +14,9 @@ public sealed class WindowsMetricCollector : IMetricCollector
 {
     private const double BytesPerMegabyte = 1024d * 1024d;
     private const double BitsPerMegabit = 1_000_000d;
-    private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(15);
 
     private readonly nint _query;
     private readonly nint _cpuTotalCounter;
@@ -32,6 +32,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly List<CachedMetricValue> _cachedDriveUsageValues = [];
     private readonly List<CachedMetricValue> _cachedHostActivityValues = [];
     private readonly List<ProcessActivitySample> _cachedProcessActivity = [];
+    private LiveBoardDetails? _cachedLiveBoardDetails;
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
@@ -444,6 +445,9 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 }
 
                 _lastProcessActivityRefreshUtc = timestamp;
+                _cachedLiveBoardDetails = _cachedProcessActivity.Count == 0
+                    ? null
+                    : new LiveBoardDetails(_cachedProcessActivity.ToArray());
             }
 
             _cachedHostActivityValues.Add(new CachedMetricValue(
@@ -489,9 +493,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 timestamp));
         }
 
-        return _cachedProcessActivity.Count == 0
-            ? null
-            : new LiveBoardDetails(_cachedProcessActivity.ToArray());
+        return _cachedLiveBoardDetails;
     }
 
     private void AddNetwork(List<MetricSample> samples, DateTimeOffset timestamp)

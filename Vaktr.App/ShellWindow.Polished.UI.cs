@@ -79,7 +79,7 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildShellStack // polished-v19");
         return new StackPanel
         {
-            Spacing = 16,
+            Spacing = 18,
             Children =
             {
                 BuildHeader(),
@@ -152,7 +152,7 @@ public sealed partial class ShellWindow
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(28),
-            Padding = new Thickness(20, 18, 20, 18),
+            Padding = new Thickness(22, 20, 22, 20),
             Child = root,
         };
     }
@@ -160,6 +160,7 @@ public sealed partial class ShellWindow
     private void RenderControlDeckSummary()
     {
         StartupTrace.Write("RenderControlDeckSummary // polished-v19");
+        _controlDeckEditableActive = false;
         var settingsGrid = new Grid
         {
             ColumnSpacing = 18,
@@ -173,12 +174,36 @@ public sealed partial class ShellWindow
         AddStatusField(settingsGrid, 0, 1, "Retention", GetRetentionFieldValue(), "Local rollups stay lean");
         AddStatusField(settingsGrid, 0, 2, "Storage path", GetStorageFieldTitle(), GetStorageFieldCaption());
 
+        var actionRow = new Grid
+        {
+            ColumnSpacing = 14,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionRow.Children.Add(new StackPanel
+        {
+            Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                CreateSecondaryText("Review and stage changes when you want them.", 12),
+                CreateMutedText("Nothing in the control deck applies until you enter edit mode and click Apply.", 11),
+            },
+        });
+
+        var editButton = CreateChipRow(
+            CreateActionChip("Edit", OnEditSettingsClick, filled: true));
+        actionRow.Children.Add(editButton);
+        Grid.SetColumn(editButton, 1);
+
         _controlsBodyHost.Child = new StackPanel
         {
-            Spacing = 10,
+            Spacing = 12,
             Children =
             {
                 settingsGrid,
+                actionRow,
             },
         };
     }
@@ -189,15 +214,15 @@ public sealed partial class ShellWindow
         _controlDeckEditableActive = true;
 
         var scrapeBox = CreateDeckInlineEntry(
-            string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput) ? string.Empty : _viewModel.ScrapeIntervalInput,
+            string.IsNullOrWhiteSpace(_draftScrapeIntervalInput) ? string.Empty : _draftScrapeIntervalInput,
             "2");
         scrapeBox.TextChanged += OnScrapeInputChanged;
 
-        var retentionBox = CreateDeckInlineEntry(_viewModel.RetentionHoursInput, "24h");
+        var retentionBox = CreateDeckInlineEntry(_draftRetentionInput, "24h");
         retentionBox.TextChanged += OnRetentionInputChanged;
 
         var storageBox = CreateDeckInlineEntry(
-            string.IsNullOrWhiteSpace(_viewModel.StorageDirectory) ? string.Empty : _viewModel.StorageDirectory.Trim(),
+            string.IsNullOrWhiteSpace(_draftStorageDirectory) ? string.Empty : _draftStorageDirectory.Trim(),
             VaktrConfig.DefaultStorageDirectory);
         storageBox.TextChanged += OnStorageInputChanged;
 
@@ -235,8 +260,8 @@ public sealed partial class ShellWindow
         AddCardToGrid(fieldGrid, 0, 0, CreateControlEditorCard(
             "collection",
             "COLLECTION",
-            FormatScrapeInterval(_viewModel.EffectiveScrapeIntervalSeconds),
-            string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput) ? "Live default" : "Custom cadence",
+            FormatScrapeInterval(GetDraftScrapeIntervalSeconds()),
+            string.IsNullOrWhiteSpace(_draftScrapeIntervalInput) ? "Live default" : "Custom cadence",
             "#5DE6FF",
             new StackPanel
             {
@@ -254,19 +279,19 @@ public sealed partial class ShellWindow
                         },
                     },
                     CreateChipWrapRow(
-                        CreatePresetChip("1s", _viewModel.EffectiveScrapeIntervalSeconds == 1, (_, _) => SetScrapeInterval(1)),
-                        CreatePresetChip("2s", string.IsNullOrWhiteSpace(_viewModel.ScrapeIntervalInput), (_, _) => ResetScrapeInterval()),
-                        CreatePresetChip("5s", _viewModel.EffectiveScrapeIntervalSeconds == 5, (_, _) => SetScrapeInterval(5)),
-                        CreatePresetChip("10s", _viewModel.EffectiveScrapeIntervalSeconds == 10, (_, _) => SetScrapeInterval(10)),
-                        CreatePresetChip("15s", _viewModel.EffectiveScrapeIntervalSeconds == 15, (_, _) => SetScrapeInterval(15))),
+                        CreatePresetChip("1s", GetDraftScrapeIntervalSeconds() == 1, (_, _) => SetScrapeInterval(1)),
+                        CreatePresetChip("2s", string.IsNullOrWhiteSpace(_draftScrapeIntervalInput), (_, _) => ResetScrapeInterval()),
+                        CreatePresetChip("5s", GetDraftScrapeIntervalSeconds() == 5, (_, _) => SetScrapeInterval(5)),
+                        CreatePresetChip("10s", GetDraftScrapeIntervalSeconds() == 10, (_, _) => SetScrapeInterval(10)),
+                        CreatePresetChip("15s", GetDraftScrapeIntervalSeconds() == 15, (_, _) => SetScrapeInterval(15))),
                 },
             }));
 
         AddCardToGrid(fieldGrid, 0, 1, CreateControlEditorCard(
             "retention",
             "RETENTION",
-            GetRetentionFieldValue(),
-            "Compact local history",
+            GetRetentionFieldValue(_draftRetentionInput),
+            string.IsNullOrWhiteSpace(_draftRetentionInput) ? "Compact local history" : "Custom retention active",
             "#67B7FF",
             new StackPanel
             {
@@ -284,19 +309,19 @@ public sealed partial class ShellWindow
                         },
                     },
                     CreateChipWrapRow(
-                        CreatePresetChip("6h", _viewModel.EffectiveRetentionHours == 6, (_, _) => SetRetentionInput("6h")),
-                        CreatePresetChip("12h", _viewModel.EffectiveRetentionHours == 12, (_, _) => SetRetentionInput("12h")),
-                        CreatePresetChip("24h", _viewModel.EffectiveRetentionHours == 24, (_, _) => ResetRetentionHours()),
-                        CreatePresetChip("7d", _viewModel.EffectiveRetentionHours == 168, (_, _) => SetRetentionInput("7d")),
-                        CreatePresetChip("30d", _viewModel.EffectiveRetentionHours == 720, (_, _) => SetRetentionInput("30d")),
-                        CreatePresetChip("90d", _viewModel.EffectiveRetentionHours == 2160, (_, _) => SetRetentionInput("90d"))),
+                        CreatePresetChip("6h", GetDraftRetentionHours() == 6, (_, _) => SetRetentionInput("6h")),
+                        CreatePresetChip("12h", GetDraftRetentionHours() == 12, (_, _) => SetRetentionInput("12h")),
+                        CreatePresetChip("24h", GetDraftRetentionHours() == 24, (_, _) => ResetRetentionHours()),
+                        CreatePresetChip("7d", GetDraftRetentionHours() == 168, (_, _) => SetRetentionInput("7d")),
+                        CreatePresetChip("30d", GetDraftRetentionHours() == 720, (_, _) => SetRetentionInput("30d")),
+                        CreatePresetChip("90d", GetDraftRetentionHours() == 2160, (_, _) => SetRetentionInput("90d"))),
                 },
             }));
 
         AddCardToGrid(fieldGrid, 0, 2, CreateControlEditorCard(
             "storage",
             "STORAGE PATH",
-            GetStorageFieldTitle(),
+            GetStorageFieldTitle(_draftStorageDirectory),
             "Machine-local default",
             "#6EE7C8",
             new StackPanel
@@ -324,15 +349,16 @@ public sealed partial class ShellWindow
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                CreateSecondaryText($"Default path: {VaktrConfig.DefaultStorageDirectory}", 12),
-                CreateMutedText("Drag a chart to zoom. Double-click to reset.", 11),
+                CreateSecondaryText("Changes stay staged until you click Apply.", 12),
+                CreateMutedText($"Default path: {VaktrConfig.DefaultStorageDirectory}", 11),
             },
         });
 
         var actionChips = CreateChipRow(
             CreateActionChip(
-                _viewModel.SelectedTheme == ThemeMode.Dark ? "Light mode" : "Dark mode",
+                _draftThemeMode == ThemeMode.Dark ? "Light mode" : "Dark mode",
                 OnThemeQuickToggle),
+            CreateActionChip("Cancel", OnCancelSettingsClick),
             CreateActionChip("Apply", OnSaveSettingsClick, filled: true));
         actionRow.Children.Add(actionChips);
         Grid.SetColumn(actionChips, 1);
@@ -889,13 +915,14 @@ public sealed partial class ShellWindow
             Children =
             {
                 CreateAccentText("LIVE BOARD", 11, 85),
-                CreateSecondaryText("Zoomable CPU, memory, disk, network, and drive telemetry.", 13),
+                CreateSecondaryText("One shared timeline across CPU, memory, disk, network, and drive telemetry.", 13),
             },
         });
 
         var actions = CreateChipRow(
             _globalRangeButton,
             _globalResetZoomButton);
+        actions.VerticalAlignment = VerticalAlignment.Center;
         grid.Children.Add(actions);
         Grid.SetColumn(actions, 1);
 
@@ -1202,16 +1229,26 @@ public sealed partial class ShellWindow
 
     private string GetStorageFieldTitle()
     {
-        return string.IsNullOrWhiteSpace(_viewModel.StorageDirectory)
+        return GetStorageFieldTitle(_viewModel.StorageDirectory);
+    }
+
+    private static string GetStorageFieldTitle(string? storageDirectory)
+    {
+        return string.IsNullOrWhiteSpace(storageDirectory)
             ? "Local app data"
             : "Custom folder";
     }
 
     private string GetStorageFieldCaption()
     {
-        return string.IsNullOrWhiteSpace(_viewModel.StorageDirectory)
+        return GetStorageFieldCaption(_viewModel.StorageDirectory);
+    }
+
+    private static string GetStorageFieldCaption(string? storageDirectory)
+    {
+        return string.IsNullOrWhiteSpace(storageDirectory)
             ? "%LocalAppData%\\Vaktr\\Data // machine-local"
-            : _viewModel.StorageDirectory.Trim();
+            : storageDirectory.Trim();
     }
 
     private string GetRetentionFieldCaption()
@@ -1228,14 +1265,19 @@ public sealed partial class ShellWindow
 
     private string GetRetentionFieldValue()
     {
-        if (string.IsNullOrWhiteSpace(_viewModel.RetentionHoursInput))
+        return GetRetentionFieldValue(_viewModel.RetentionHoursInput);
+    }
+
+    private string GetRetentionFieldValue(string? retentionInput)
+    {
+        if (string.IsNullOrWhiteSpace(retentionInput))
         {
-            return MainViewModel.FormatRetentionInput(_viewModel.EffectiveRetentionHours);
+            return MainViewModel.FormatRetentionInput(VaktrConfig.DefaultMaxRetentionHours);
         }
 
-        return MainViewModel.TryParseRetentionInput(_viewModel.RetentionHoursInput, out _, out var normalizedText)
+        return MainViewModel.TryParseRetentionInput(retentionInput, out _, out var normalizedText)
             ? normalizedText
-            : _viewModel.RetentionHoursInput.Trim();
+            : retentionInput.Trim();
     }
 
     private static string FormatScrapeInterval(int seconds) =>

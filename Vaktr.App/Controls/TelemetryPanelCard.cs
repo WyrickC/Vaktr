@@ -1,8 +1,10 @@
 using System.ComponentModel;
+using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.UI;
 using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
@@ -48,10 +50,30 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private MetricPanelViewModel? _observedPanel;
     private bool _refreshQueued;
+    private bool _isDropTarget;
+    private IReadOnlyList<ChartSeriesViewModel>? _lastRenderedSeries;
+    private IReadOnlyList<ProcessListItemViewModel>? _lastRenderedProcessRows;
+    private DateTimeOffset _lastRenderedWindowStartUtc;
+    private DateTimeOffset _lastRenderedWindowEndUtc;
+    private double _lastRenderedCeilingValue = double.NaN;
+    private MetricUnit _lastRenderedUnit;
+    private TimeRangePreset _lastRenderedRange;
+    private ProcessSortMode _lastRenderedSortMode;
+    private bool _lastRenderedZoomState;
+    private bool _lastRenderedSupportsProcessTable;
+    private bool _lastRenderedGaugeMode;
+
+    public event EventHandler<TimeRangePresetRequestedEventArgs>? RangePresetRequested;
+
+    public event EventHandler<ChartZoomSelectionEventArgs>? PanelZoomSelectionRequested;
+
+    public event EventHandler? PanelZoomResetRequested;
+
+    public event EventHandler<PanelReorderRequestedEventArgs>? PanelReorderRequested;
 
     public TelemetryPanelCard()
     {
-        MinHeight = 372;
+        MinHeight = 388;
         HorizontalAlignment = HorizontalAlignment.Stretch;
 
         _badgeIconHost = new Grid
@@ -61,11 +83,11 @@ public sealed class TelemetryPanelCard : UserControl
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        _footerText = CreateTextBlock(fontSize: 11);
-        _scaleText = CreateTextBlock("Segoe UI Variable Text", 11, FontWeights.Medium);
-        _titleText = CreateTextBlock("Segoe UI Variable Display", 18, FontWeights.SemiBold);
-        _currentValueText = CreateTextBlock("Segoe UI Variable Display", 22, FontWeights.SemiBold);
-        _secondaryValueText = CreateTextBlock(fontSize: 12);
+        _footerText = CreateTextBlock(fontSize: 10.5);
+        _scaleText = CreateTextBlock("Segoe UI Variable Text", 10.5, FontWeights.Medium);
+        _titleText = CreateTextBlock("Segoe UI Variable Display", 17.5, FontWeights.SemiBold);
+        _currentValueText = CreateTextBlock("Segoe UI Variable Display", 21.5, FontWeights.SemiBold);
+        _secondaryValueText = CreateTextBlock(fontSize: 11.5);
 
         _badgeBorder = new Border
         {
@@ -97,7 +119,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         _visualGrid = new Grid
         {
-            ColumnSpacing = 16,
+            ColumnSpacing = 18,
         };
         _visualGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _visualGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -112,8 +134,8 @@ public sealed class TelemetryPanelCard : UserControl
 
         _chart = new TelemetryChart
         {
-            Height = 180,
-            MinHeight = 180,
+            Height = 188,
+            MinHeight = 188,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         _chart.ZoomSelectionRequested += OnChartZoomSelectionRequested;
@@ -139,7 +161,7 @@ public sealed class TelemetryPanelCard : UserControl
         };
         _legendScroller = new ScrollViewer
         {
-            MaxHeight = 192,
+            MaxHeight = 184,
             VerticalScrollMode = ScrollMode.Enabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollMode = ScrollMode.Disabled,
@@ -159,7 +181,7 @@ public sealed class TelemetryPanelCard : UserControl
         };
         _processScroller = new ScrollViewer
         {
-            MaxHeight = 222,
+            MaxHeight = 232,
             VerticalScrollMode = ScrollMode.Enabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollMode = ScrollMode.Disabled,
@@ -293,9 +315,11 @@ public sealed class TelemetryPanelCard : UserControl
         var headerGrid = new Grid();
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.CanDrag = true;
+        headerGrid.DragStarting += OnHeaderDragStarting;
         headerGrid.Children.Add(new StackPanel
         {
-            Spacing = 4,
+            Spacing = 3,
             Children =
             {
                 metaGrid,
@@ -313,7 +337,7 @@ public sealed class TelemetryPanelCard : UserControl
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(16, 15, 16, 15),
+            Padding = new Thickness(18, 16, 18, 16),
             Child = new Grid
             {
                 Children =
@@ -333,9 +357,13 @@ public sealed class TelemetryPanelCard : UserControl
                 },
             },
         };
+        _cardBorder.AllowDrop = true;
 
         _cardBorder.PointerEntered += (_, _) => SetHoverState(true);
         _cardBorder.PointerExited += (_, _) => SetHoverState(false);
+        _cardBorder.DragOver += OnCardDragOver;
+        _cardBorder.DragLeave += OnCardDragLeave;
+        _cardBorder.Drop += OnCardDrop;
 
         Content = _cardBorder;
         Loaded += (_, _) => RefreshFromPanel();
@@ -415,6 +443,11 @@ public sealed class TelemetryPanelCard : UserControl
             RefreshRangeButtons(null);
             RefreshProcessSortButtons(null);
             RefreshVisualMode(null);
+            _lastRenderedSeries = null;
+            _lastRenderedProcessRows = null;
+            _lastRenderedWindowStartUtc = default;
+            _lastRenderedWindowEndUtc = default;
+            _lastRenderedCeilingValue = double.NaN;
             return;
         }
 
@@ -425,21 +458,57 @@ public sealed class TelemetryPanelCard : UserControl
         _secondaryValueText.Text = panel.SecondaryValue;
         _scaleText.Text = panel.ScaleLabel;
 
-        _chart.Series = panel.VisibleSeries;
-        _chart.Unit = panel.Unit;
-        _chart.WindowStartUtc = panel.WindowStartUtc;
-        _chart.WindowEndUtc = panel.WindowEndUtc;
-        _chart.CeilingValue = panel.ChartCeilingValue;
+        var chartChanged =
+            !ReferenceEquals(_lastRenderedSeries, panel.VisibleSeries) ||
+            _lastRenderedUnit != panel.Unit ||
+            _lastRenderedWindowStartUtc != panel.WindowStartUtc ||
+            _lastRenderedWindowEndUtc != panel.WindowEndUtc ||
+            !double.Equals(_lastRenderedCeilingValue, panel.ChartCeilingValue);
+        if (chartChanged)
+        {
+            _chart.Series = panel.VisibleSeries;
+            _chart.Unit = panel.Unit;
+            _chart.WindowStartUtc = panel.WindowStartUtc;
+            _chart.WindowEndUtc = panel.WindowEndUtc;
+            _chart.CeilingValue = panel.ChartCeilingValue;
+            _lastRenderedSeries = panel.VisibleSeries;
+            _lastRenderedUnit = panel.Unit;
+            _lastRenderedWindowStartUtc = panel.WindowStartUtc;
+            _lastRenderedWindowEndUtc = panel.WindowEndUtc;
+            _lastRenderedCeilingValue = panel.ChartCeilingValue;
+            RefreshLegend(panel);
+        }
 
         _gauge.Value = panel.GaugeValue;
         _gauge.AccentBrush = panel.AccentBrush;
         _gauge.Caption = panel.PrefersGaugeVisual ? "Capacity" : "Live";
 
-        RefreshLegend(panel);
-        RefreshProcessRows(panel);
-        RefreshRangeButtons(panel);
-        RefreshProcessSortButtons(panel);
-        RefreshVisualMode(panel);
+        if (!ReferenceEquals(_lastRenderedProcessRows, panel.ProcessRows))
+        {
+            RefreshProcessRows(panel);
+            _lastRenderedProcessRows = panel.ProcessRows;
+        }
+
+        if (_lastRenderedRange != panel.SelectedRange || _lastRenderedZoomState != panel.IsZoomed)
+        {
+            RefreshRangeButtons(panel);
+            _lastRenderedRange = panel.SelectedRange;
+            _lastRenderedZoomState = panel.IsZoomed;
+        }
+
+        if (_lastRenderedSortMode != panel.ProcessSortMode)
+        {
+            RefreshProcessSortButtons(panel);
+            _lastRenderedSortMode = panel.ProcessSortMode;
+        }
+
+        if (_lastRenderedSupportsProcessTable != panel.SupportsProcessTable || _lastRenderedGaugeMode != panel.PrefersGaugeVisual)
+        {
+            RefreshVisualMode(panel);
+            _lastRenderedSupportsProcessTable = panel.SupportsProcessTable;
+            _lastRenderedGaugeMode = panel.PrefersGaugeVisual;
+        }
+
         ApplyPalette(panel);
     }
 
@@ -465,6 +534,7 @@ public sealed class TelemetryPanelCard : UserControl
             _legendRows.Remove(staleKey);
         }
 
+        var orderedRows = new List<UIElement>(panel.VisibleSeries.Count);
         for (var index = 0; index < panel.VisibleSeries.Count; index++)
         {
             var series = panel.VisibleSeries[index];
@@ -480,10 +550,16 @@ public sealed class TelemetryPanelCard : UserControl
             }
 
             rowParts.ValueText.Text = value;
-            if (_legendHost.Children.IndexOf(rowParts.Row) != index)
+            orderedRows.Add(rowParts.Row);
+        }
+
+        if (_legendHost.Children.Count != orderedRows.Count ||
+            !_legendHost.Children.Cast<UIElement>().SequenceEqual(orderedRows))
+        {
+            _legendHost.Children.Clear();
+            foreach (var row in orderedRows)
             {
-                _legendHost.Children.Remove(rowParts.Row);
-                _legendHost.Children.Insert(index, rowParts.Row);
+                _legendHost.Children.Add(row);
             }
         }
     }
@@ -518,6 +594,7 @@ public sealed class TelemetryPanelCard : UserControl
             _processRowParts.Remove(staleKey);
         }
 
+        var orderedRows = new List<UIElement>(panel.ProcessRows.Count);
         for (var index = 0; index < panel.ProcessRows.Count; index++)
         {
             var item = panel.ProcessRows[index];
@@ -532,10 +609,16 @@ public sealed class TelemetryPanelCard : UserControl
             rowParts.ValueText.Text = item.Value;
             rowParts.CaptionText.Text = item.Caption;
             rowParts.MeterFill.Width = 72 * Math.Clamp(item.Intensity, 0d, 1d);
-            if (_processRowsHost.Children.IndexOf(rowParts.Row) != index)
+            orderedRows.Add(rowParts.Row);
+        }
+
+        if (_processRowsHost.Children.Count != orderedRows.Count ||
+            !_processRowsHost.Children.Cast<UIElement>().SequenceEqual(orderedRows))
+        {
+            _processRowsHost.Children.Clear();
+            foreach (var row in orderedRows)
             {
-                _processRowsHost.Children.Remove(rowParts.Row);
-                _processRowsHost.Children.Insert(index, rowParts.Row);
+                _processRowsHost.Children.Add(row);
             }
         }
     }
@@ -581,6 +664,11 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void SetHoverState(bool isHovered)
     {
+        if (_isDropTarget)
+        {
+            return;
+        }
+
         _cardBorder.BorderBrush = isHovered
             ? ResolveBrush("AccentStrongBrush", "#9FEFFF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
@@ -590,7 +678,7 @@ public sealed class TelemetryPanelCard : UserControl
             : CreateSurfaceGradient("#0E1B2C", "#13253A");
     }
 
-    private static ActionChip CreateRangeButton(string text, TimeRangePreset preset)
+    private ActionChip CreateRangeButton(string text, TimeRangePreset preset)
     {
         var button = new ActionChip
         {
@@ -604,7 +692,7 @@ public sealed class TelemetryPanelCard : UserControl
         return button;
     }
 
-    private static ActionChip CreateProcessSortButton(string text, ProcessSortMode sortMode)
+    private ActionChip CreateProcessSortButton(string text, ProcessSortMode sortMode)
     {
         var button = new ActionChip
         {
@@ -618,40 +706,109 @@ public sealed class TelemetryPanelCard : UserControl
         return button;
     }
 
-    private static void OnRangeClick(object? sender, EventArgs e)
+    private void OnHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
     {
-        if (sender is ActionChip { Tag: TimeRangePreset preset } button &&
-            button.Parent is FrameworkElement parent)
+        if (Panel is not { } panel)
         {
-            var card = FindParent<TelemetryPanelCard>(parent);
-            if (card?.Panel is not null)
-            {
-                card.Panel.ApplyRangePreset(preset);
-            }
+            return;
         }
+
+        args.Data.SetText(panel.PanelKey);
+        args.Data.RequestedOperation = DataPackageOperation.Move;
     }
 
-    private static void OnProcessSortClick(object? sender, EventArgs e)
+    private void OnCardDragOver(object sender, DragEventArgs e)
     {
-        if (sender is ActionChip { Tag: ProcessSortMode sortMode } button &&
-            button.Parent is FrameworkElement parent)
+        e.AcceptedOperation = DataPackageOperation.Move;
+        SetDropTargetState(true);
+    }
+
+    private void OnCardDragLeave(object sender, DragEventArgs e)
+    {
+        SetDropTargetState(false);
+    }
+
+    private async void OnCardDrop(object sender, DragEventArgs e)
+    {
+        SetDropTargetState(false);
+        if (Panel is null || !e.DataView.Contains(StandardDataFormats.Text))
         {
-            var card = FindParent<TelemetryPanelCard>(parent);
-            if (card?.Panel is not null)
-            {
-                card.Panel.ProcessSortMode = sortMode;
-            }
+            return;
+        }
+
+        var sourceKey = (await e.DataView.GetTextAsync()).Trim();
+        if (string.IsNullOrWhiteSpace(sourceKey) ||
+            string.Equals(sourceKey, Panel.PanelKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(sourceKey, Panel.PanelKey));
+    }
+
+    private void OnRangeClick(object? sender, EventArgs e)
+    {
+        if (sender is not ActionChip { Tag: TimeRangePreset preset })
+        {
+            return;
+        }
+
+        if (RangePresetRequested is not null)
+        {
+            RangePresetRequested.Invoke(this, new TimeRangePresetRequestedEventArgs(preset));
+            return;
+        }
+
+        Panel?.ApplyRangePreset(preset);
+    }
+
+    private void OnProcessSortClick(object? sender, EventArgs e)
+    {
+        if (sender is not ActionChip { Tag: ProcessSortMode sortMode })
+        {
+            return;
+        }
+
+        if (Panel is { } panel)
+        {
+            panel.ProcessSortMode = sortMode;
         }
     }
 
     private void OnChartZoomSelectionRequested(object? sender, ChartZoomSelectionEventArgs e)
     {
+        if (PanelZoomSelectionRequested is not null)
+        {
+            PanelZoomSelectionRequested.Invoke(this, e);
+            return;
+        }
+
         Panel?.ZoomToWindow(e.StartUtc, e.EndUtc);
     }
 
     private void OnChartZoomResetRequested(object? sender, EventArgs e)
     {
+        if (PanelZoomResetRequested is not null)
+        {
+            PanelZoomResetRequested.Invoke(this, e);
+            return;
+        }
+
         Panel?.ResetZoom();
+    }
+
+    private void SetDropTargetState(bool isActive)
+    {
+        _isDropTarget = isActive;
+        if (isActive)
+        {
+            _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
+            _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
+            return;
+        }
+
+        _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
     }
 
     private static (Border Row, TextBlock ValueText) CreateLegendRow(string name, Brush strokeBrush)
@@ -696,7 +853,7 @@ public sealed class TelemetryPanelCard : UserControl
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(12, 9, 12, 9),
+            Padding = new Thickness(12, 8, 12, 8),
             Child = row,
         }, valueText);
     }
@@ -796,7 +953,7 @@ public sealed class TelemetryPanelCard : UserControl
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(12, 10, 12, 10),
+            Padding = new Thickness(12, 9, 12, 9),
             Child = rowGrid,
         }, nameText, valueText, captionText, meterFill);
     }
@@ -818,23 +975,6 @@ public sealed class TelemetryPanelCard : UserControl
         var accentBrush = panel?.AccentBrush ?? ResolveBrush("AccentBrush", "#66E7FF");
         _badgeIconHost.Children.Clear();
         _badgeIconHost.Children.Add(IconFactory.CreateIcon(iconKey, accentBrush, 16));
-    }
-
-    private static T? FindParent<T>(DependencyObject? start)
-        where T : DependencyObject
-    {
-        var current = start;
-        while (current is not null)
-        {
-            if (current is T typed)
-            {
-                return typed;
-            }
-
-            current = VisualTreeHelper.GetParent(current);
-        }
-
-        return null;
     }
 
     private static void ApplyRangeState(ActionChip control, bool isActive)
@@ -928,4 +1068,27 @@ public sealed class TelemetryPanelCard : UserControl
         MetricUnit.Count => $"{value:0}",
         _ => $"{value:0.##}",
     };
+}
+
+public sealed class TimeRangePresetRequestedEventArgs : EventArgs
+{
+    public TimeRangePresetRequestedEventArgs(TimeRangePreset preset)
+    {
+        Preset = preset;
+    }
+
+    public TimeRangePreset Preset { get; }
+}
+
+public sealed class PanelReorderRequestedEventArgs : EventArgs
+{
+    public PanelReorderRequestedEventArgs(string sourcePanelKey, string targetPanelKey)
+    {
+        SourcePanelKey = sourcePanelKey;
+        TargetPanelKey = targetPanelKey;
+    }
+
+    public string SourcePanelKey { get; }
+
+    public string TargetPanelKey { get; }
 }

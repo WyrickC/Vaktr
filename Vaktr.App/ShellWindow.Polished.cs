@@ -24,6 +24,8 @@ public sealed partial class ShellWindow : Window
 {
     private static readonly int[] ScrapeIntervalPresets = [1, 2, 5, 10, 15, 30, 60];
     private static readonly int[] RetentionHourPresets = [1, 6, 12, 24, 48, 72, 168, 336, 720, 2160, 8760];
+    private static BitmapImage? s_brandBitmap;
+    private static string? s_brandBitmapPath;
     private DeckEditorMode _activeDeckEditor = DeckEditorMode.Scrape;
 
     private readonly MainViewModel _viewModel;
@@ -40,7 +42,9 @@ public sealed partial class ShellWindow : Window
     private readonly TextBlock _statusText;
     private readonly ActionChip _globalRangeButton;
     private readonly Border _globalRangeEditorHost;
+    private readonly ActionChip _globalOneMinuteButton;
     private readonly ActionChip _globalFiveMinuteButton;
+    private readonly ActionChip _globalFifteenMinuteButton;
     private readonly ActionChip _globalThirtyMinuteButton;
     private readonly ActionChip _globalOneHourButton;
     private readonly ActionChip _globalTwelveHourButton;
@@ -61,6 +65,10 @@ public sealed partial class ShellWindow : Window
     private bool _summaryCardsBound;
     private bool _globalRangeEditorVisible;
     private string _lastRenderedStatusText = string.Empty;
+    private string _draftScrapeIntervalInput = string.Empty;
+    private string _draftRetentionInput = string.Empty;
+    private string _draftStorageDirectory = string.Empty;
+    private ThemeMode _draftThemeMode;
     private DateTimeOffset? _globalAbsoluteStartUtc;
     private DateTimeOffset? _globalAbsoluteEndUtc;
 
@@ -83,21 +91,23 @@ public sealed partial class ShellWindow : Window
         _brandHost = CreateBrandPlaceholder();
         _summaryHost = new Grid
         {
-            ColumnSpacing = 14,
-            RowSpacing = 14,
+            ColumnSpacing = 16,
+            RowSpacing = 16,
         };
         _dashboardGrid = new Grid
         {
-            ColumnSpacing = 18,
-            RowSpacing = 18,
+            ColumnSpacing = 20,
+            RowSpacing = 20,
         };
         _globalRangeButton = CreateActionChip("15m", OnToggleGlobalRangeEditor, true);
-        _globalRangeButton.MinWidth = 124;
+        _globalRangeButton.MinWidth = 132;
         _globalRangeEditorHost = new Border
         {
             Visibility = Visibility.Collapsed,
         };
+        _globalOneMinuteButton = CreateGlobalRangeChip("1m", 1);
         _globalFiveMinuteButton = CreateGlobalRangeChip("5m", 5);
+        _globalFifteenMinuteButton = CreateGlobalRangeChip("15m", 15);
         _globalThirtyMinuteButton = CreateGlobalRangeChip("30m", 30);
         _globalOneHourButton = CreateGlobalRangeChip("1h", 60);
         _globalTwelveHourButton = CreateGlobalRangeChip("12h", 720);
@@ -115,13 +125,14 @@ public sealed partial class ShellWindow : Window
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
 
+        ApplyInitialTheme(_viewModel.SelectedTheme);
         TryLoadBrandImage();
-        RenderEditableControlDeck();
+        SyncControlDeckDraftsFromViewModel();
+        RenderControlDeckSummary();
         BuildSummaryCards();
         RefreshDashboardPanels();
         RefreshGlobalRangeControls();
         UpdateStatusText();
-        ApplyInitialTheme(_viewModel.SelectedTheme);
         StartupTrace.Write("ShellWindow ctor complete // polished-v19");
     }
 
@@ -136,7 +147,30 @@ public sealed partial class ShellWindow : Window
 
     public void ApplyTheme(ThemeMode mode)
     {
+        var requestedTheme = mode == ThemeMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
+        var themeChanged = _rootLayout.RequestedTheme != requestedTheme;
         ApplyInitialTheme(mode);
+        _draftThemeMode = mode;
+
+        if (!themeChanged)
+        {
+            if (_controlDeckEditableActive)
+            {
+                RenderEditableControlDeck();
+            }
+            else
+            {
+                RenderControlDeckSummary();
+            }
+
+            if (_globalRangeEditorVisible)
+            {
+                RenderGlobalRangeEditor();
+            }
+
+            RefreshGlobalRangeControls();
+            return;
+        }
 
         RebuildSummaryCards();
         _panelCards.Clear();
@@ -151,7 +185,12 @@ public sealed partial class ShellWindow : Window
             RenderControlDeckSummary();
         }
 
-        TryLoadBrandImage();
+        if (_globalRangeEditorVisible)
+        {
+            RenderGlobalRangeEditor();
+        }
+
+        RefreshGlobalRangeControls();
     }
 
     private void BuildSummaryCards()
@@ -177,15 +216,15 @@ public sealed partial class ShellWindow : Window
             var badgeHost = IconFactory.CreateTile(card.Title, card.AccentBrush, 48, 16);
             badgeHost.VerticalAlignment = VerticalAlignment.Center;
 
-            var titleText = CreateMutedText(string.Empty, 10);
-            titleText.CharacterSpacing = 80;
+            var titleText = CreateMutedText(string.Empty, 9.5);
+            titleText.CharacterSpacing = 90;
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
-            var valueText = CreatePrimaryText(string.Empty, 27, true);
+            var valueText = CreatePrimaryText(string.Empty, 25, true);
             valueText.FontFamily = new FontFamily("Segoe UI Variable Display");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
-            var captionText = CreateSecondaryText(string.Empty, 12);
+            var captionText = CreateSecondaryText(string.Empty, 11.5);
             captionText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Caption)) });
 
             var details = new StackPanel
@@ -202,7 +241,7 @@ public sealed partial class ShellWindow : Window
 
             var contentGrid = new Grid
             {
-                ColumnSpacing = 11,
+                ColumnSpacing = 12,
             };
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -217,8 +256,8 @@ public sealed partial class ShellWindow : Window
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(22),
-                Padding = new Thickness(16, 13, 16, 13),
-                MinHeight = 98,
+                Padding = new Thickness(18, 15, 18, 15),
+                MinHeight = 100,
                 Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);
@@ -255,6 +294,14 @@ public sealed partial class ShellWindow : Window
         var activeKeys = new HashSet<string>(panels.Select(panel => panel.PanelKey), StringComparer.OrdinalIgnoreCase);
         foreach (var staleKey in _panelCards.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
         {
+            if (_panelCards.TryGetValue(staleKey, out var staleCard))
+            {
+                staleCard.RangePresetRequested -= OnPanelRangePresetRequested;
+                staleCard.PanelZoomSelectionRequested -= OnPanelZoomSelectionRequested;
+                staleCard.PanelZoomResetRequested -= OnPanelZoomResetRequested;
+                staleCard.PanelReorderRequested -= OnPanelReorderRequested;
+            }
+
             _panelCards.Remove(staleKey);
         }
 
@@ -263,6 +310,10 @@ public sealed partial class ShellWindow : Window
             if (!_panelCards.TryGetValue(panel.PanelKey, out var card))
             {
                 card = new TelemetryPanelCard { Panel = panel };
+                card.RangePresetRequested += OnPanelRangePresetRequested;
+                card.PanelZoomSelectionRequested += OnPanelZoomSelectionRequested;
+                card.PanelZoomResetRequested += OnPanelZoomResetRequested;
+                card.PanelReorderRequested += OnPanelReorderRequested;
                 _panelCards.Add(panel.PanelKey, card);
             }
             else
@@ -324,9 +375,9 @@ public sealed partial class ShellWindow : Window
             var config = _viewModel.BuildConfig();
             StartupTrace.Write("OnRootLoaded resumed after first paint // polished-v19");
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
-            await TryLoadHistoryAsync(config);
             await EnsureCollectorRunningAsync(config);
             App.CurrentApp.MarkStartupSettled();
+            _ = TryLoadHistoryAsync(config);
             _ = DispatcherQueue.TryEnqueue(() =>
             {
                 TryApplyWindowIcon();
@@ -377,18 +428,17 @@ public sealed partial class ShellWindow : Window
     {
         try
         {
-            if (!TryNormalizeScrapeInput(_viewModel.ScrapeIntervalInput, out var normalizedScrapeInput))
+            var previousConfig = _viewModel.BuildConfig();
+            if (!TryNormalizeScrapeInput(_draftScrapeIntervalInput, out var normalizedScrapeInput))
             {
-                _activeDeckEditor = DeckEditorMode.Scrape;
                 _viewModel.StatusText = "Scrape interval must be a whole number of seconds between 1 and 60.";
                 UpdateStatusText();
                 RenderEditableControlDeck();
                 return;
             }
 
-            if (!MainViewModel.TryParseRetentionInput(_viewModel.RetentionHoursInput, out _, out var normalizedRetentionInput))
+            if (!MainViewModel.TryParseRetentionInput(_draftRetentionInput, out _, out var normalizedRetentionInput))
             {
-                _activeDeckEditor = DeckEditorMode.Retention;
                 _viewModel.StatusText = "Retention must use m, h, or d. Try 30m, 24h, or 7d.";
                 UpdateStatusText();
                 RenderEditableControlDeck();
@@ -397,29 +447,32 @@ public sealed partial class ShellWindow : Window
 
             _viewModel.ScrapeIntervalInput = normalizedScrapeInput;
             _viewModel.RetentionHoursInput = normalizedRetentionInput;
-            _viewModel.StorageDirectory = _viewModel.StorageDirectory.Trim();
-
-            _viewModel.StatusText = "Applying settings";
-            UpdateStatusText();
+            _viewModel.StorageDirectory = string.IsNullOrWhiteSpace(_draftStorageDirectory)
+                ? string.Empty
+                : _draftStorageDirectory.Trim();
+            _viewModel.SelectedTheme = _draftThemeMode;
 
             _viewModel.ApplyPanelVisibility();
             var config = _viewModel.BuildConfig();
+            var scrapeChanged = config.ScrapeIntervalSeconds != previousConfig.ScrapeIntervalSeconds;
+            var storageChanged = !string.Equals(config.StorageDirectory, previousConfig.StorageDirectory, StringComparison.OrdinalIgnoreCase);
+            var retentionChanged = config.MaxRetentionHours != previousConfig.MaxRetentionHours;
+            var retentionLowered = config.MaxRetentionHours < previousConfig.MaxRetentionHours;
+            var collectorRestartRequired = scrapeChanged || storageChanged;
+
+            _viewModel.StatusText = collectorRestartRequired
+                ? "Applying telemetry settings"
+                : retentionLowered
+                    ? "Saving settings and pruning older history"
+                    : "Saving settings";
+            UpdateStatusText();
             _viewModel.ApplyConfig(config);
-            RenderEditableControlDeck();
-            App.CurrentApp.ApplyTheme(config.Theme);
+            SyncControlDeckDraftsFromViewModel();
+            _controlDeckEditableActive = false;
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
             await _configStore.SaveAsync(config, CancellationToken.None);
-
-            if (_collectorService is null)
-            {
-                _collectorService = new CollectorService(new WindowsMetricCollector(), _metricStore);
-                _collectorService.SnapshotCollected += OnSnapshotCollected;
-                _collectorService.CollectionFailed += OnCollectionFailed;
-            }
-
-            await _collectorService.StartAsync(config, CancellationToken.None);
-            _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0 ? "Streaming local telemetry" : "Waiting for first sample";
-            UpdateStatusText();
+            RenderControlDeckSummary();
+            _ = ApplyRuntimeSettingsAsync(config, collectorRestartRequired, retentionChanged, retentionLowered);
         }
         catch (Exception ex)
         {
@@ -430,11 +483,10 @@ public sealed partial class ShellWindow : Window
 
     private void OnThemeQuickToggle(object? sender, EventArgs e)
     {
-        _viewModel.SelectedTheme = _viewModel.SelectedTheme == ThemeMode.Dark
+        _draftThemeMode = _draftThemeMode == ThemeMode.Dark
             ? ThemeMode.Light
             : ThemeMode.Dark;
-
-        App.CurrentApp.ApplyTheme(_viewModel.SelectedTheme);
+        App.CurrentApp.ApplyTheme(_draftThemeMode);
     }
 
     private void OnToggleGlobalRangeEditor(object? sender, EventArgs e)
@@ -454,6 +506,31 @@ public sealed partial class ShellWindow : Window
         {
             ApplyGlobalWindowRange(minutes);
         }
+    }
+
+    private void OnPanelRangePresetRequested(object? sender, TimeRangePresetRequestedEventArgs e)
+    {
+        ApplyGlobalWindowRange((int)e.Preset);
+    }
+
+    private void OnPanelZoomSelectionRequested(object? sender, ChartZoomSelectionEventArgs e)
+    {
+        ApplyAbsoluteGlobalRange(e.StartUtc, e.EndUtc);
+    }
+
+    private void OnPanelZoomResetRequested(object? sender, EventArgs e)
+    {
+        OnResetAllZoomClick(sender, e);
+    }
+
+    private void OnPanelReorderRequested(object? sender, PanelReorderRequestedEventArgs e)
+    {
+        if (!_viewModel.MovePanel(e.SourcePanelKey, e.TargetPanelKey))
+        {
+            return;
+        }
+
+        _ = PersistLayoutAsync();
     }
 
     private void OnResetAllZoomClick(object? sender, EventArgs e)
@@ -503,6 +580,18 @@ public sealed partial class ShellWindow : Window
                 UpdateStatusText();
             }
         });
+    }
+
+    private async Task PersistLayoutAsync()
+    {
+        try
+        {
+            await _configStore.SaveAsync(_viewModel.BuildConfig(), CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("PersistLayout", ex);
+        }
     }
 
     private void QueueDashboardRefresh()
@@ -591,27 +680,24 @@ public sealed partial class ShellWindow : Window
 
     private void OnScrapeFieldClick(object? sender, EventArgs e)
     {
-        _activeDeckEditor = DeckEditorMode.Scrape;
-        RenderEditableControlDeck();
+        BeginControlDeckEdit(DeckEditorMode.Scrape);
     }
 
     private void OnRetentionFieldClick(object? sender, EventArgs e)
     {
-        _activeDeckEditor = DeckEditorMode.Retention;
-        RenderEditableControlDeck();
+        BeginControlDeckEdit(DeckEditorMode.Retention);
     }
 
     private void OnStorageFieldClick(object? sender, EventArgs e)
     {
-        _activeDeckEditor = DeckEditorMode.Storage;
-        RenderEditableControlDeck();
+        BeginControlDeckEdit(DeckEditorMode.Storage);
     }
 
     private void OnRetentionInputChanged(object? sender, EventArgs e)
     {
         if (sender is InlineTextEntry entry)
         {
-            _viewModel.RetentionHoursInput = entry.Text;
+            _draftRetentionInput = entry.Text;
         }
     }
 
@@ -619,7 +705,7 @@ public sealed partial class ShellWindow : Window
     {
         if (sender is InlineTextEntry entry)
         {
-            _viewModel.ScrapeIntervalInput = entry.Text;
+            _draftScrapeIntervalInput = entry.Text;
         }
     }
 
@@ -627,14 +713,64 @@ public sealed partial class ShellWindow : Window
     {
         if (sender is InlineTextEntry entry)
         {
-            _viewModel.StorageDirectory = entry.Text;
+            _draftStorageDirectory = entry.Text;
         }
     }
 
+    private void OnEditSettingsClick(object? sender, EventArgs e)
+    {
+        BeginControlDeckEdit();
+    }
+
+    private void OnCancelSettingsClick(object? sender, EventArgs e)
+    {
+        var persistedTheme = _viewModel.SelectedTheme;
+        var restoreThemePreview = _draftThemeMode != persistedTheme;
+        SyncControlDeckDraftsFromViewModel();
+        _controlDeckEditableActive = false;
+        if (restoreThemePreview)
+        {
+            App.CurrentApp.ApplyTheme(persistedTheme);
+        }
+        else
+        {
+            RenderControlDeckSummary();
+        }
+
+        _viewModel.StatusText = "Control deck unchanged";
+        UpdateStatusText();
+    }
+
+    private void BeginControlDeckEdit(DeckEditorMode mode = DeckEditorMode.Scrape)
+    {
+        SyncControlDeckDraftsFromViewModel();
+        _activeDeckEditor = mode;
+        RenderEditableControlDeck();
+    }
+
+    private void SyncControlDeckDraftsFromViewModel()
+    {
+        _draftScrapeIntervalInput = _viewModel.ScrapeIntervalInput;
+        _draftRetentionInput = _viewModel.RetentionHoursInput;
+        _draftStorageDirectory = _viewModel.StorageDirectory;
+        _draftThemeMode = _viewModel.SelectedTheme;
+    }
+
+    private int GetDraftScrapeIntervalSeconds() =>
+        int.TryParse(_draftScrapeIntervalInput?.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) &&
+        seconds is >= 1 and <= 60
+            ? seconds
+            : VaktrConfig.DefaultScrapeIntervalSeconds;
+
+    private int GetDraftRetentionHours() =>
+        MainViewModel.TryParseRetentionInput(_draftRetentionInput, out var hours, out _)
+            ? hours
+            : VaktrConfig.DefaultMaxRetentionHours;
+
     private void StepScrapeInterval(int direction)
     {
-        var next = MoveThroughPresets(_viewModel.EffectiveScrapeIntervalSeconds, ScrapeIntervalPresets, direction);
-        _viewModel.ScrapeIntervalInput = next == VaktrConfig.DefaultScrapeIntervalSeconds
+        var next = MoveThroughPresets(GetDraftScrapeIntervalSeconds(), ScrapeIntervalPresets, direction);
+        _draftScrapeIntervalInput = next == VaktrConfig.DefaultScrapeIntervalSeconds
             ? string.Empty
             : next.ToString(CultureInfo.InvariantCulture);
         RenderEditableControlDeck();
@@ -642,7 +778,7 @@ public sealed partial class ShellWindow : Window
 
     private void SetScrapeInterval(int seconds)
     {
-        _viewModel.ScrapeIntervalInput = seconds == VaktrConfig.DefaultScrapeIntervalSeconds
+        _draftScrapeIntervalInput = seconds == VaktrConfig.DefaultScrapeIntervalSeconds
             ? string.Empty
             : seconds.ToString(CultureInfo.InvariantCulture);
         RenderEditableControlDeck();
@@ -656,48 +792,47 @@ public sealed partial class ShellWindow : Window
 
     private void ResetScrapeInterval()
     {
-        _viewModel.ScrapeIntervalInput = string.Empty;
+        _draftScrapeIntervalInput = string.Empty;
         RenderEditableControlDeck();
     }
 
     private void SetRetentionInput(string value)
     {
-        _viewModel.RetentionHoursInput = value;
+        _draftRetentionInput = value;
         RenderEditableControlDeck();
     }
 
     private void StepRetentionHours(int direction)
     {
-        var next = MoveThroughPresets(_viewModel.EffectiveRetentionHours, RetentionHourPresets, direction);
-        _viewModel.RetentionHoursInput = next == VaktrConfig.DefaultMaxRetentionHours
-            ? string.Empty
-            : next.ToString(CultureInfo.InvariantCulture);
+        var next = MoveThroughPresets(GetDraftRetentionHours(), RetentionHourPresets, direction);
+        _draftRetentionInput = FormatRetentionDraftInput(next);
         RenderEditableControlDeck();
     }
 
     private void SetRetentionHours(int hours)
     {
-        _viewModel.RetentionHoursInput = hours == VaktrConfig.DefaultMaxRetentionHours
-            ? string.Empty
-            : hours.ToString(CultureInfo.InvariantCulture);
+        _draftRetentionInput = FormatRetentionDraftInput(hours);
         RenderEditableControlDeck();
     }
 
     private void NudgeRetentionHours(int delta)
     {
-        var next = Math.Clamp(_viewModel.EffectiveRetentionHours + delta, 1, 24 * 3650);
+        var next = Math.Clamp(GetDraftRetentionHours() + delta, 1, 24 * 3650);
         SetRetentionHours(next);
     }
 
     private void ResetRetentionHours()
     {
-        _viewModel.RetentionHoursInput = string.Empty;
+        _draftRetentionInput = string.Empty;
         RenderEditableControlDeck();
     }
 
+    private static string FormatRetentionDraftInput(int hours) =>
+        hours <= 0 ? string.Empty : MainViewModel.FormatRetentionInput(hours);
+
     private void ResetStorageDirectory()
     {
-        _viewModel.StorageDirectory = string.Empty;
+        _draftStorageDirectory = string.Empty;
         RenderEditableControlDeck();
     }
 
@@ -708,7 +843,7 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        _viewModel.StorageDirectory = value.Trim();
+        _draftStorageDirectory = value.Trim();
         RenderEditableControlDeck();
     }
 
@@ -734,6 +869,46 @@ public sealed partial class ShellWindow : Window
             ? string.Empty
             : seconds.ToString(CultureInfo.InvariantCulture);
         return true;
+    }
+
+    private async Task ApplyRuntimeSettingsAsync(
+        VaktrConfig config,
+        bool collectorRestartRequired,
+        bool retentionChanged,
+        bool retentionLowered)
+    {
+        try
+        {
+            if (collectorRestartRequired)
+            {
+                if (_collectorService is null)
+                {
+                    _collectorService = new CollectorService(new WindowsMetricCollector(), _metricStore);
+                    _collectorService.SnapshotCollected += OnSnapshotCollected;
+                    _collectorService.CollectionFailed += OnCollectionFailed;
+                }
+
+                await _collectorService.StartAsync(config, CancellationToken.None);
+            }
+            else if (retentionChanged)
+            {
+                await _metricStore.InitializeAsync(config, CancellationToken.None);
+                if (retentionLowered)
+                {
+                    await _metricStore.PruneAsync(config, CancellationToken.None);
+                }
+            }
+
+            _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0
+                ? "Streaming local telemetry"
+                : "Waiting for first sample";
+            UpdateStatusText();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = $"Settings issue: {ex.Message}";
+            UpdateStatusText();
+        }
     }
 
     private async void OnBrowseStorageClick(object? sender, EventArgs e)
@@ -844,8 +1019,13 @@ public sealed partial class ShellWindow : Window
             }
 
             StartupTrace.Write("TryLoadBrandImage start // polished-v19");
-            var bitmap = new BitmapImage();
-            bitmap.UriSource = new Uri(imagePath);
+            if (s_brandBitmap is null || !string.Equals(s_brandBitmapPath, imagePath, StringComparison.OrdinalIgnoreCase))
+            {
+                var bitmap = new BitmapImage();
+                bitmap.UriSource = new Uri(imagePath);
+                s_brandBitmap = bitmap;
+                s_brandBitmapPath = imagePath;
+            }
 
             _brandHost.Width = 142;
             _brandHost.Height = 142;
@@ -856,7 +1036,7 @@ public sealed partial class ShellWindow : Window
             _brandHost.Child = new Microsoft.UI.Xaml.Controls.Image
             {
                 Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
-                Source = bitmap,
+                Source = s_brandBitmap,
             };
             StartupTrace.Write("TryLoadBrandImage complete // polished-v19");
         }
@@ -911,23 +1091,21 @@ public sealed partial class ShellWindow : Window
         try
         {
             StartupTrace.Write("TryLoadHistoryAsync start");
-            _viewModel.StatusText = "Loading local history";
-            UpdateStatusText();
-
             await _metricStore.InitializeAsync(config, CancellationToken.None);
 
             var historyWindow = TimeSpan.FromMinutes(Math.Max(config.GraphWindowMinutes, 5));
             var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
             _viewModel.LoadHistory(history);
-            RebuildSummaryCards();
-            RefreshDashboardPanels();
             StartupTrace.Write($"TryLoadHistoryAsync complete // panels={history.Count}");
         }
         catch (Exception ex)
         {
             StartupTrace.WriteException("History load", ex);
-            _viewModel.StatusText = "History unavailable, starting live telemetry";
-            UpdateStatusText();
+            if (!_hasReceivedFirstSnapshot)
+            {
+                _viewModel.StatusText = "History unavailable, starting live telemetry";
+                UpdateStatusText();
+            }
         }
     }
 
@@ -976,7 +1154,9 @@ public sealed partial class ShellWindow : Window
 
     private void RefreshGlobalRangeControls()
     {
+        ApplyGlobalRangeState(_globalOneMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 1);
         ApplyGlobalRangeState(_globalFiveMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 5);
+        ApplyGlobalRangeState(_globalFifteenMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 15);
         ApplyGlobalRangeState(_globalThirtyMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 30);
         ApplyGlobalRangeState(_globalOneHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 60);
         ApplyGlobalRangeState(_globalTwelveHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 720);
@@ -984,9 +1164,7 @@ public sealed partial class ShellWindow : Window
         ApplyGlobalRangeState(_globalSevenDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 10080);
         ApplyGlobalRangeState(_globalThirtyDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 43200);
 
-        _globalRangeButton.Text = _globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue
-            ? "Custom range v"
-            : $"{FormatGlobalRangeLabel(_viewModel.SelectedWindowMinutes)} v";
+        _globalRangeButton.Text = BuildGlobalRangeButtonText();
         _globalRangeButton.IsActive = _globalRangeEditorVisible;
         _globalRangeButton.IsFilled = true;
         _globalResetZoomButton.Opacity = _viewModel.DashboardPanels.Any(panel => panel.IsZoomed) ? 1d : 0.82d;
@@ -998,17 +1176,22 @@ public sealed partial class ShellWindow : Window
         var startText = (_globalAbsoluteStartUtc ?? DateTimeOffset.Now.AddMinutes(-_viewModel.SelectedWindowMinutes)).LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         var endText = (_globalAbsoluteEndUtc ?? DateTimeOffset.Now).LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         var currentLabel = _globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue
-            ? "Custom absolute range"
+            ? "Pinned window"
             : $"Last {FormatGlobalRangeLabel(_viewModel.SelectedWindowMinutes)}";
+        var currentMode = _globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue
+            ? "Absolute"
+            : "Rolling";
 
         var fromEntry = CreateDeckInlineEntry(startText, "2026-04-02 09:00");
         var toEntry = CreateDeckInlineEntry(endText, "2026-04-02 09:30");
         var quickRangeRowPrimary = CreateChipWrapRow(
+            _globalOneMinuteButton,
             _globalFiveMinuteButton,
+            _globalFifteenMinuteButton,
             _globalThirtyMinuteButton,
-            _globalOneHourButton,
-            _globalTwelveHourButton);
+            _globalOneHourButton);
         var quickRangeRowSecondary = CreateChipWrapRow(
+            _globalTwelveHourButton,
             _globalTwentyFourHourButton,
             _globalSevenDayButton,
             _globalThirtyDayButton);
@@ -1020,12 +1203,16 @@ public sealed partial class ShellWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(18),
             Padding = new Thickness(14, 12, 14, 12),
+            Transitions = new TransitionCollection
+            {
+                new EntranceThemeTransition(),
+            },
             Child = new StackPanel
             {
                 Spacing = 10,
                 Children =
                 {
-                    CreateSectionHeader("LIVE WINDOW", "Keep the board synced to the latest samples with one shared replay range."),
+                    CreateSectionHeader("QUICK RANGES", "Jump the whole board to a preset replay window."),
                     quickRangeRowPrimary,
                     quickRangeRowSecondary,
                 },
@@ -1070,20 +1257,40 @@ public sealed partial class ShellWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(18),
             Padding = new Thickness(14, 12, 14, 12),
+            Transitions = new TransitionCollection
+            {
+                new EntranceThemeTransition(),
+            },
             Child = new StackPanel
             {
                 Spacing = 10,
                 Children =
                 {
-                    CreateSectionHeader("ABSOLUTE RANGE", "Pin every panel to an exact local date and time window."),
+                    CreateSectionHeader("ABSOLUTE RANGE", "Pin every panel to one precise local time slice."),
                     absoluteGrid,
-                    CreateSecondaryText("Use local time like 2026-04-02 21:30. This locks the board to a precise slice instead of following the latest sample.", 12),
+                    CreateSecondaryText("Use local time like 2026-04-02 21:30.", 12),
                 },
             },
         };
 
+        var infoRow = new Grid
+        {
+            ColumnSpacing = 12,
+        };
+        infoRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        infoRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(132) });
+        infoRow.Children.Add(CreateInfoPanel("Current", currentLabel));
+        var modePanel = CreateInfoPanel("Mode", currentMode);
+        infoRow.Children.Add(modePanel);
+        Grid.SetColumn(modePanel, 1);
+
         var actionButtons = CreateChipRow(
             CreateActionChip("Close", (_, _) => HideGlobalRangeEditor()),
+            CreateActionChip("Now", (_, _) =>
+            {
+                var next = DateTimeOffset.Now.LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                toEntry.Text = next;
+            }),
             CreateActionChip("Apply range", (_, _) => ApplyAbsoluteGlobalRange(fromEntry.Text, toEntry.Text), true));
         var actionGrid = new Grid
         {
@@ -1095,7 +1302,7 @@ public sealed partial class ShellWindow : Window
                 new ColumnDefinition { Width = GridLength.Auto },
             },
         };
-        actionGrid.Children.Add(CreateMutedText("Board-level range control with quick presets plus absolute From/To.", 12));
+        actionGrid.Children.Add(CreateMutedText("Applies to every panel.", 12));
         actionGrid.Children.Add(actionButtons);
         Grid.SetColumn(actionButtons, 1);
 
@@ -1107,22 +1314,17 @@ public sealed partial class ShellWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(22),
             Padding = new Thickness(16, 14, 16, 14),
+            Transitions = new TransitionCollection
+            {
+                new EntranceThemeTransition(),
+            },
             Child = new StackPanel
             {
                 Spacing = 14,
                 Children =
                 {
-                    CreateSectionHeader("TIME RANGE", "Use one board-wide window, or pin every panel to a specific absolute slice."),
-                    CreateTopStatusPill(new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 8,
-                        Children =
-                        {
-                            CreateMutedText("CURRENT", 10),
-                            CreatePrimaryText(currentLabel, 13, true),
-                        },
-                    }),
+                    CreateSectionHeader("TIME RANGE", "Keep every panel in sync with one shared timeline."),
+                    infoRow,
                     quickRangeCard,
                     absoluteRangeCard,
                     actionGrid,
@@ -1152,6 +1354,11 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
+        ApplyAbsoluteGlobalRange(start, end);
+    }
+
+    private void ApplyAbsoluteGlobalRange(DateTimeOffset start, DateTimeOffset end)
+    {
         _globalAbsoluteStartUtc = start;
         _globalAbsoluteEndUtc = end;
         foreach (var panel in _viewModel.DashboardPanels)
@@ -1160,8 +1367,18 @@ public sealed partial class ShellWindow : Window
         }
 
         HideGlobalRangeEditor();
-        _viewModel.StatusText = $"Viewing {start.LocalDateTime:g} to {end.LocalDateTime:g}";
+        _viewModel.StatusText = $"Pinned {start.LocalDateTime:g} to {end.LocalDateTime:g}";
         UpdateStatusText();
+    }
+
+    private string BuildGlobalRangeButtonText()
+    {
+        if (_globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue)
+        {
+            return $"{_globalAbsoluteStartUtc.Value.LocalDateTime:MM-dd HH:mm} -> {_globalAbsoluteEndUtc.Value.LocalDateTime:MM-dd HH:mm}";
+        }
+
+        return FormatGlobalRangeLabel(_viewModel.SelectedWindowMinutes);
     }
 
     private string GetGlobalRangeButtonText()
@@ -1176,7 +1393,9 @@ public sealed partial class ShellWindow : Window
 
     private static string FormatGlobalRangeLabel(int minutes) => minutes switch
     {
+        <= 1 => "1m",
         <= 5 => "5m",
+        <= 15 => "15m",
         <= 30 => "30m",
         <= 60 => "1h",
         <= 720 => "12h",

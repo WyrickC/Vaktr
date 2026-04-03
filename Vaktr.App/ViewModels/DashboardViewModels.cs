@@ -8,6 +8,9 @@ namespace Vaktr.App.ViewModels;
 public sealed class MainViewModel : ObservableObject
 {
     private readonly Dictionary<string, MetricPanelViewModel> _panelLookup = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _panelOrder = new(StringComparer.OrdinalIgnoreCase);
+    private bool _dashboardPanelsDirty = true;
+    private bool _panelTogglesDirty = true;
 
     private string _storageDirectory = string.Empty;
     private string _scrapeIntervalInput = string.Empty;
@@ -174,6 +177,7 @@ public sealed class MainViewModel : ObservableObject
             LaunchOnStartup = LaunchOnStartup,
             MinimizeToTray = MinimizeToTray,
             PanelVisibility = visibility,
+            PanelOrder = BuildPersistedPanelOrder().ToList(),
         }.Normalize();
     }
 
@@ -194,6 +198,7 @@ public sealed class MainViewModel : ObservableObject
         SelectedTheme = normalized.Theme;
         LaunchOnStartup = normalized.LaunchOnStartup;
         MinimizeToTray = normalized.MinimizeToTray;
+        ApplyPanelOrder(normalized.PanelOrder);
 
         foreach (var toggle in PanelToggles)
         {
@@ -206,6 +211,8 @@ public sealed class MainViewModel : ObservableObject
             panel.SelectedRange = MapToRangePreset(normalized.GraphWindowMinutes);
         }
 
+        _dashboardPanelsDirty = true;
+        _panelTogglesDirty = true;
         SyncDashboardPanels();
     }
 
@@ -221,6 +228,8 @@ public sealed class MainViewModel : ObservableObject
 
         if (panelCreated)
         {
+            _dashboardPanelsDirty = true;
+            _panelTogglesDirty = true;
             SyncDashboardPanels();
             SyncPanelToggles();
         }
@@ -248,10 +257,11 @@ public sealed class MainViewModel : ObservableObject
 
         if (panelCreated)
         {
+            _dashboardPanelsDirty = true;
+            _panelTogglesDirty = true;
             SyncPanelToggles();
+            SyncDashboardPanels();
         }
-
-        SyncDashboardPanels();
     }
 
     public void ApplyPanelVisibility()
@@ -262,7 +272,46 @@ public sealed class MainViewModel : ObservableObject
             panel.IsVisible = visibilityMap.GetValueOrDefault(panel.PanelKey, panel.IsDashboardPanel);
         }
 
+        _dashboardPanelsDirty = true;
         SyncDashboardPanels();
+    }
+
+    public bool MovePanel(string movingKey, string targetKey)
+    {
+        if (string.IsNullOrWhiteSpace(movingKey) ||
+            string.IsNullOrWhiteSpace(targetKey) ||
+            string.Equals(movingKey, targetKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!_panelLookup.ContainsKey(movingKey) || !_panelLookup.ContainsKey(targetKey))
+        {
+            return false;
+        }
+
+        var orderedKeys = BuildPersistedPanelOrder().ToList();
+        var movingIndex = orderedKeys.FindIndex(key => string.Equals(key, movingKey, StringComparison.OrdinalIgnoreCase));
+        var targetIndex = orderedKeys.FindIndex(key => string.Equals(key, targetKey, StringComparison.OrdinalIgnoreCase));
+        if (movingIndex < 0 || targetIndex < 0)
+        {
+            return false;
+        }
+
+        orderedKeys.RemoveAt(movingIndex);
+        if (movingIndex < targetIndex)
+        {
+            targetIndex--;
+        }
+
+        orderedKeys.Insert(targetIndex, movingKey);
+        ApplyPanelOrder(orderedKeys);
+
+        _dashboardPanelsDirty = true;
+        _panelTogglesDirty = true;
+        SyncDashboardPanels();
+        SyncPanelToggles();
+        return true;
     }
 
     public int EffectiveScrapeIntervalSeconds =>
@@ -363,6 +412,11 @@ public sealed class MainViewModel : ObservableObject
             return existing;
         }
 
+        if (panelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase))
+        {
+            unit = MetricUnit.Percent;
+        }
+
         var panel = new MetricPanelViewModel(panelKey, title, category, unit)
         {
             SelectedRange = MapToRangePreset(SelectedWindowMinutes),
@@ -371,14 +425,22 @@ public sealed class MainViewModel : ObservableObject
         };
 
         _panelLookup.Add(panelKey, panel);
+        _dashboardPanelsDirty = true;
+        _panelTogglesDirty = true;
         return panel;
     }
 
     private void SyncDashboardPanels()
     {
+        if (!_dashboardPanelsDirty)
+        {
+            return;
+        }
+
         var orderedPanels = _panelLookup.Values
             .Where(panel => panel.IsDashboardPanel && panel.IsVisible)
-            .OrderBy(panel => panel.SortBucket)
+            .OrderBy(GetPanelOrderRank)
+            .ThenBy(panel => panel.SortBucket)
             .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
             .ThenBy(panel => panel.SortVariant)
             .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
@@ -386,6 +448,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (DashboardPanels.Count == orderedPanels.Length && DashboardPanels.SequenceEqual(orderedPanels))
         {
+            _dashboardPanelsDirty = false;
             return;
         }
 
@@ -394,14 +457,22 @@ public sealed class MainViewModel : ObservableObject
         {
             DashboardPanels.Add(panel);
         }
+
+        _dashboardPanelsDirty = false;
     }
 
     private void SyncPanelToggles()
     {
+        if (!_panelTogglesDirty)
+        {
+            return;
+        }
+
         var visibilityLookup = PanelToggles.ToDictionary(toggle => toggle.PanelKey, toggle => toggle.IsVisible, StringComparer.OrdinalIgnoreCase);
         var panels = _panelLookup.Values
             .Where(panel => panel.IsDashboardPanel)
-            .OrderBy(panel => panel.SortBucket)
+            .OrderBy(GetPanelOrderRank)
+            .ThenBy(panel => panel.SortBucket)
             .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
             .ThenBy(panel => panel.SortVariant)
             .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
@@ -415,6 +486,7 @@ public sealed class MainViewModel : ObservableObject
                 toggle.IsVisible = visibilityLookup.GetValueOrDefault(toggle.PanelKey, true);
             }
 
+            _panelTogglesDirty = false;
             return;
         }
 
@@ -423,6 +495,48 @@ public sealed class MainViewModel : ObservableObject
         {
             PanelToggles.Add(new PanelToggleViewModel(panel.PanelKey, panel.Title, visibilityLookup.GetValueOrDefault(panel.PanelKey, panel.IsVisible)));
         }
+
+        _panelTogglesDirty = false;
+    }
+
+    private void ApplyPanelOrder(IEnumerable<string>? orderedKeys)
+    {
+        _panelOrder.Clear();
+        if (orderedKeys is null)
+        {
+            return;
+        }
+
+        var index = 0;
+        foreach (var key in orderedKeys)
+        {
+            if (string.IsNullOrWhiteSpace(key) || _panelOrder.ContainsKey(key))
+            {
+                continue;
+            }
+
+            _panelOrder[key] = index++;
+        }
+    }
+
+    private IReadOnlyList<string> BuildPersistedPanelOrder()
+    {
+        return _panelLookup.Values
+            .Where(panel => panel.IsDashboardPanel)
+            .OrderBy(GetPanelOrderRank)
+            .ThenBy(panel => panel.SortBucket)
+            .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(panel => panel.SortVariant)
+            .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(panel => panel.PanelKey)
+            .ToArray();
+    }
+
+    private int GetPanelOrderRank(MetricPanelViewModel panel)
+    {
+        return _panelOrder.TryGetValue(panel.PanelKey, out var rank)
+            ? rank
+            : int.MaxValue;
     }
 
     private void UpdateSummaryCards(MetricSnapshot snapshot, PanelDetailContext detailContext)
@@ -800,7 +914,6 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     public bool PrefersGaugeVisual =>
         Category == MetricCategory.Disk &&
-        Unit == MetricUnit.Percent &&
         PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase);
 
     public bool SupportsProcessTable =>
@@ -958,8 +1071,18 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     internal void ApplyDetailContext(PanelDetailContext detailContext)
     {
+        var processDetailsChanged =
+            !ReferenceEquals(_detailContext.Processes, detailContext.Processes) ||
+            _detailContext.ProcessCount != detailContext.ProcessCount ||
+            _detailContext.ThreadCount != detailContext.ThreadCount ||
+            _detailContext.HandleCount != detailContext.HandleCount;
+
         _detailContext = detailContext;
-        RefreshProcessRows();
+        if (processDetailsChanged && SupportsProcessTable)
+        {
+            RefreshProcessRows();
+        }
+
         UpdateSummaryText();
     }
 
@@ -1062,7 +1185,6 @@ public sealed class MetricPanelViewModel : ObservableObject
             .ToArray();
 
         VisibleSeries = visibleSeries;
-        RefreshProcessRows();
         UpdateSummaryText();
         FooterText = BuildFooterText(start, end);
     }
@@ -1216,8 +1338,6 @@ public sealed class MetricPanelViewModel : ObservableObject
         };
 
         ProcessRows = processes
-            .Where(process => string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) || process.CpuPercent > 0.05d)
-            .Take(24)
             .Select(process => CreateProcessRow(process, peakMemory))
             .ToArray();
     }

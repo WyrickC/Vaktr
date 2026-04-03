@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json.Serialization;
 
 namespace Vaktr.Core.Models;
@@ -26,6 +27,8 @@ public sealed class VaktrConfig
     public bool MinimizeToTray { get; set; } = true;
 
     public Dictionary<string, bool> PanelVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<string> PanelOrder { get; set; } = [];
 
     [JsonIgnore]
     public static int DefaultScrapeIntervalSeconds => DefaultScrapeIntervalSecondsValue;
@@ -116,6 +119,11 @@ public sealed class VaktrConfig
             : StorageDirectory.Trim();
 
         PanelVisibility ??= new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        PanelOrder ??= [];
+        PanelOrder = PanelOrder
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         return this;
     }
