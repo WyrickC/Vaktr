@@ -66,6 +66,16 @@ public sealed class VaktrConfig
 
     public static string GetLegacyConfigPath() => Path.Combine(LegacySettingsDirectory, "vaktr-settings.json");
 
+    public TimeSpan GetRetentionWindow()
+    {
+        if (TryParseRetentionWindow(RetentionInputText, out var retentionWindow, out _))
+        {
+            return retentionWindow;
+        }
+
+        return TimeSpan.FromHours(Math.Clamp(MaxRetentionHours, 1, 24 * 3650));
+    }
+
     public VaktrConfig Normalize()
     {
         var migratedFromLegacyStorage = string.Equals(
@@ -96,7 +106,7 @@ public sealed class VaktrConfig
             };
         }
 
-        if (!TryNormalizeRetentionInput(RetentionInputText, out var normalizedRetentionInput))
+        if (!TryParseRetentionWindow(RetentionInputText, out var retentionWindow, out var normalizedRetentionInput))
         {
             RetentionInputText = MaxRetentionHours == DefaultMaxRetentionHoursValue
                 ? string.Empty
@@ -104,6 +114,7 @@ public sealed class VaktrConfig
         }
         else
         {
+            MaxRetentionHours = Math.Clamp((int)Math.Ceiling(retentionWindow.TotalHours), 1, 24 * 3650);
             RetentionInputText = normalizedRetentionInput;
         }
 
@@ -157,8 +168,9 @@ public sealed class VaktrConfig
         return $"{hours}h";
     }
 
-    private static bool TryNormalizeRetentionInput(string? text, out string normalizedText)
+    public static bool TryParseRetentionWindow(string? text, out TimeSpan retentionWindow, out string normalizedText)
     {
+        retentionWindow = TimeSpan.FromHours(DefaultMaxRetentionHoursValue);
         normalizedText = string.Empty;
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -178,14 +190,22 @@ public sealed class VaktrConfig
             return false;
         }
 
-        normalizedText = unit switch
+        switch (unit)
         {
-            'm' => $"{amount}m",
-            'h' => $"{amount}h",
-            'd' => $"{amount}d",
-            _ => string.Empty,
-        };
-
-        return normalizedText.Length > 0;
+            case 'm':
+                retentionWindow = TimeSpan.FromMinutes(amount);
+                normalizedText = $"{amount}m";
+                return true;
+            case 'h':
+                retentionWindow = TimeSpan.FromHours(amount);
+                normalizedText = $"{amount}h";
+                return true;
+            case 'd':
+                retentionWindow = TimeSpan.FromDays(amount);
+                normalizedText = $"{amount}d";
+                return true;
+            default:
+                return false;
+        }
     }
 }

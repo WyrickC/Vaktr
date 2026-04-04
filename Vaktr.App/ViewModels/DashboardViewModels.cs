@@ -23,6 +23,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _isSettingsOpen;
     private string _statusText = "Arming telemetry deck";
     private MetricPanelViewModel? _expandedPanel;
+    private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
 
     public MainViewModel(VaktrConfig config)
     {
@@ -121,6 +122,37 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public void ApplyGlobalWindowRange(int minutes)
+    {
+        if (_selectedWindowMinutes != minutes)
+        {
+            _selectedWindowMinutes = minutes;
+            RaisePropertyChanged(nameof(SelectedWindowMinutes));
+        }
+
+        var preset = MapToRangePreset(minutes);
+        foreach (var panel in _panelLookup.Values)
+        {
+            panel.ApplyRangePreset(preset);
+        }
+    }
+
+    public void ApplyGlobalAbsoluteRange(DateTimeOffset startUtc, DateTimeOffset endUtc)
+    {
+        foreach (var panel in _panelLookup.Values)
+        {
+            panel.ZoomToWindow(startUtc, endUtc);
+        }
+    }
+
+    public void ResetGlobalZoom()
+    {
+        foreach (var panel in _panelLookup.Values)
+        {
+            panel.ResetZoom();
+        }
+    }
+
     public string RetentionHoursInput
     {
         get => _retentionHoursInput;
@@ -185,6 +217,7 @@ public sealed class MainViewModel : ObservableObject
     public void ApplyConfig(VaktrConfig config)
     {
         var normalized = config.Normalize();
+        _retentionWindow = normalized.GetRetentionWindow();
         StorageDirectory = string.Equals(normalized.StorageDirectory, VaktrConfig.DefaultStorageDirectory, StringComparison.OrdinalIgnoreCase)
             ? string.Empty
             : normalized.StorageDirectory;
@@ -210,6 +243,7 @@ public sealed class MainViewModel : ObservableObject
 
         foreach (var panel in _panelLookup.Values)
         {
+            panel.SetRetentionWindow(_retentionWindow);
             panel.IsVisible = normalized.PanelVisibility.GetValueOrDefault(panel.PanelKey, panel.IsDashboardPanel);
             panel.SelectedRange = MapToRangePreset(normalized.GraphWindowMinutes);
         }
@@ -343,59 +377,19 @@ public sealed class MainViewModel : ObservableObject
             return true;
         }
 
-        var trimmed = text.Trim();
-        if (trimmed.Length < 2)
+        if (!VaktrConfig.TryParseRetentionWindow(text, out var retentionWindow, out normalizedText))
         {
             return false;
         }
 
-        var unit = char.ToLowerInvariant(trimmed[^1]);
-        var amountText = trimmed[..^1].Trim();
-        if (!int.TryParse(amountText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var amount) ||
-            amount <= 0)
+        var totalHours = retentionWindow.TotalHours;
+        if (totalHours > 24 * 3650)
         {
             return false;
         }
 
-        switch (unit)
-        {
-            case 'm':
-            {
-                var maxMinutes = 24 * 3650 * 60;
-                if (amount > maxMinutes)
-                {
-                    return false;
-                }
-
-                hours = Math.Clamp((int)Math.Ceiling(amount / 60d), 1, 24 * 3650);
-                normalizedText = $"{amount}m";
-                return true;
-            }
-            case 'h':
-            {
-                if (amount > 24 * 3650)
-                {
-                    return false;
-                }
-
-                hours = amount;
-                normalizedText = $"{amount}h";
-                return true;
-            }
-            case 'd':
-            {
-                if (amount > 3650)
-                {
-                    return false;
-                }
-
-                hours = amount * 24;
-                normalizedText = $"{amount}d";
-                return true;
-            }
-            default:
-                return false;
-        }
+        hours = Math.Clamp((int)Math.Ceiling(totalHours), 1, 24 * 3650);
+        return true;
     }
 
     public static string FormatRetentionInput(int hours)
@@ -433,6 +427,7 @@ public sealed class MainViewModel : ObservableObject
             IsVisible = true,
             IsNewlyCreated = true,
         };
+        panel.SetRetentionWindow(_retentionWindow);
 
         _panelLookup.Add(panelKey, panel);
         _dashboardPanelsDirty = true;
@@ -841,7 +836,6 @@ public sealed class ProcessListItemViewModel
 
 public sealed class MetricPanelViewModel : ObservableObject
 {
-    private static readonly TimeSpan LiveBufferWindow = TimeSpan.FromMinutes(75);
     private static readonly TimeSpan BufferTrimInterval = TimeSpan.FromSeconds(20);
     private readonly Dictionary<string, SeriesBuffer> _buffers = new(StringComparer.OrdinalIgnoreCase);
     private readonly SolidColorBrush _accentBrush;
@@ -861,6 +855,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     private PanelDetailContext _detailContext = PanelDetailContext.Empty;
     private IReadOnlyList<ProcessListItemViewModel> _processRows = Array.Empty<ProcessListItemViewModel>();
     private ProcessSortMode _processSortMode = ProcessSortMode.Highest;
+    private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
     {
@@ -1050,6 +1045,7 @@ public sealed class MetricPanelViewModel : ObservableObject
             paletteIndex++;
         }
 
+        TrimBuffers(DateTimeOffset.UtcNow);
         RefreshPresentation();
     }
 
@@ -1071,12 +1067,26 @@ public sealed class MetricPanelViewModel : ObservableObject
         buffer.Points.Add(new MetricPoint(sample.Timestamp, sample.Value));
         if (sample.Timestamp - buffer.LastTrimUtc >= BufferTrimInterval)
         {
-            var keepAfter = sample.Timestamp - LiveBufferWindow;
-            buffer.Points.RemoveAll(point => point.Timestamp < keepAfter);
-            buffer.LastTrimUtc = sample.Timestamp;
+            TrimBuffers(sample.Timestamp);
         }
 
         RefreshPresentation(sample.Timestamp);
+    }
+
+    public void SetRetentionWindow(TimeSpan retentionWindow)
+    {
+        var normalizedWindow = retentionWindow <= TimeSpan.Zero
+            ? TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours)
+            : retentionWindow;
+
+        if (_retentionWindow == normalizedWindow)
+        {
+            return;
+        }
+
+        _retentionWindow = normalizedWindow;
+        TrimBuffers(DateTimeOffset.UtcNow);
+        RefreshPresentation();
     }
 
     internal void ApplyDetailContext(PanelDetailContext detailContext)
@@ -1322,6 +1332,16 @@ public sealed class MetricPanelViewModel : ObservableObject
         }
 
         return string.Equals(buffer.Key, "used-percent", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void TrimBuffers(DateTimeOffset anchor)
+    {
+        var keepAfter = anchor - _retentionWindow;
+        foreach (var buffer in _buffers.Values)
+        {
+            buffer.Points.RemoveAll(point => point.Timestamp < keepAfter);
+            buffer.LastTrimUtc = anchor;
+        }
     }
 
     private void RefreshProcessRows()

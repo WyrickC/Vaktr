@@ -22,7 +22,7 @@ public sealed partial class ShellWindow
             Margin = new Thickness(-10),
             Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF"),
             CornerRadius = new CornerRadius(40),
-            Opacity = 0.1,
+            Opacity = 0.08,
         };
 
         var shellOutline = new Border
@@ -79,7 +79,7 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildShellStack // polished-v19");
         return new StackPanel
         {
-            Spacing = 18,
+            Spacing = 16,
             Children =
             {
                 BuildHeader(),
@@ -908,7 +908,7 @@ public sealed partial class ShellWindow
             Children =
             {
                 CreateAccentText("LIVE BOARD", 11, 85),
-                CreateSecondaryText("One shared timeline across CPU, memory, disk, network, and drive telemetry.", 13),
+                CreateSecondaryText("Shared CPU, memory, disk, network, and drive history.", 13),
             },
         });
 
@@ -939,11 +939,11 @@ public sealed partial class ShellWindow
             {
                 new StackPanel
                 {
-                    Spacing = 3,
+                    Spacing = 2,
                     Children =
                     {
                         CreateAccentText(eyebrow, 11, 85),
-                        CreateSecondaryText(text, 13),
+                        CreateSecondaryText(text, 12.5),
                     },
                 },
             },

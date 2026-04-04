@@ -26,6 +26,8 @@ public sealed class UsageGauge : UserControl
             new PropertyMetadata("Usage", OnGaugePropertyChanged));
 
     private readonly Canvas _canvas;
+    private readonly Border _frameBorder;
+    private readonly Border _innerBorder;
     private readonly TextBlock _valueText;
     private readonly TextBlock _captionText;
     private bool _redrawQueued;
@@ -33,6 +35,22 @@ public sealed class UsageGauge : UserControl
     public UsageGauge()
     {
         _canvas = new Canvas();
+        _frameBorder = new Border
+        {
+            CornerRadius = new CornerRadius(24),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(1),
+            Background = ResolveBrush("SurfaceBrush", "#102131"),
+            Opacity = 0.82,
+        };
+        _innerBorder = new Border
+        {
+            Margin = new Thickness(6),
+            CornerRadius = new CornerRadius(20),
+            BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A"),
+            BorderThickness = new Thickness(1),
+            Opacity = 0.18,
+        };
         _valueText = new TextBlock
         {
             FontFamily = new FontFamily("Bahnschrift"),
@@ -55,22 +73,8 @@ public sealed class UsageGauge : UserControl
         {
             Children =
             {
-                new Border
-                {
-                    CornerRadius = new CornerRadius(24),
-                    BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                    BorderThickness = new Thickness(1),
-                    Background = ResolveBrush("SurfaceBrush", "#102131"),
-                    Opacity = 0.82,
-                },
-                new Border
-                {
-                    Margin = new Thickness(6),
-                    CornerRadius = new CornerRadius(20),
-                    BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A"),
-                    BorderThickness = new Thickness(1),
-                    Opacity = 0.18,
-                },
+                _frameBorder,
+                _innerBorder,
                 _canvas,
                 new StackPanel
                 {
@@ -110,6 +114,16 @@ public sealed class UsageGauge : UserControl
     private static void OnGaugePropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
     {
         ((UsageGauge)dependencyObject).ScheduleRedraw();
+    }
+
+    public void RefreshThemeResources()
+    {
+        _frameBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _frameBorder.Background = ResolveBrush("SurfaceBrush", "#102131");
+        _innerBorder.BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A");
+        _valueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+        _captionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        ScheduleRedraw();
     }
 
     private void ScheduleRedraw()

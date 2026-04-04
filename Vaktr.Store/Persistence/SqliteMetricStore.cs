@@ -339,7 +339,8 @@ public sealed class SqliteMetricStore : IMetricStore
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var retentionCutoffMs = now.AddHours(-config.MaxRetentionHours).ToUnixTimeMilliseconds();
+        var retentionWindow = config.GetRetentionWindow();
+        var retentionCutoffMs = now.Subtract(retentionWindow).ToUnixTimeMilliseconds();
         var rawCutoffMs = now.Subtract(RawResolutionWindow).ToUnixTimeMilliseconds();
 
         if (retentionCutoffMs < rawCutoffMs)

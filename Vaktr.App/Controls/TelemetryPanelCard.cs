@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media;
@@ -46,8 +47,8 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly ActionChip _sortHighestButton;
     private readonly ActionChip _sortLowestButton;
     private readonly ActionChip _sortNameButton;
-    private readonly Dictionary<string, (Border Row, TextBlock ValueText)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private MetricPanelViewModel? _observedPanel;
     private bool _refreshQueued;
     private bool _isDropTarget;
@@ -66,6 +67,9 @@ public sealed class TelemetryPanelCard : UserControl
     private bool _isHeaderDragActive;
     private FrameworkElement? _headerDragHandle;
     private Windows.Foundation.Point _headerPointerStart;
+    private TelemetryPanelCard? _activeDropTargetCard;
+    private bool _isEffectivelyVisible = true;
+    private bool _deferredRefreshPending;
 
     public event EventHandler<TimeRangePresetRequestedEventArgs>? RangePresetRequested;
 
@@ -79,6 +83,7 @@ public sealed class TelemetryPanelCard : UserControl
     {
         MinHeight = 388;
         HorizontalAlignment = HorizontalAlignment.Stretch;
+        CacheMode = new BitmapCache();
 
         _badgeIconHost = new Grid
         {
@@ -368,6 +373,7 @@ public sealed class TelemetryPanelCard : UserControl
         };
         _cardBorder.PointerEntered += (_, _) => SetHoverState(true);
         _cardBorder.PointerExited += (_, _) => SetHoverState(false);
+        EffectiveViewportChanged += OnEffectiveViewportChanged;
 
         Content = _cardBorder;
         Loaded += (_, _) => RefreshFromPanel();
@@ -412,6 +418,12 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void OnPanelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (!_isEffectivelyVisible && !IsPriorityPanelProperty(e.PropertyName))
+        {
+            _deferredRefreshPending = true;
+            return;
+        }
+
         if (_refreshQueued)
         {
             return;
@@ -461,6 +473,12 @@ public sealed class TelemetryPanelCard : UserControl
         _currentValueText.Text = panel.CurrentValue;
         _secondaryValueText.Text = panel.SecondaryValue;
         _scaleText.Text = panel.ScaleLabel;
+
+        if (!_isEffectivelyVisible)
+        {
+            ApplyPalette(panel);
+            return;
+        }
 
         var chartChanged =
             !ReferenceEquals(_lastRenderedSeries, panel.VisibleSeries) ||
@@ -514,6 +532,79 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         ApplyPalette(panel);
+    }
+
+    private void OnEffectiveViewportChanged(FrameworkElement sender, EffectiveViewportChangedEventArgs args)
+    {
+        var viewport = args.EffectiveViewport;
+        var isVisible = viewport.Width > 0 && viewport.Height > 0;
+        if (_isEffectivelyVisible == isVisible)
+        {
+            return;
+        }
+
+        _isEffectivelyVisible = isVisible;
+        if (_isEffectivelyVisible && _deferredRefreshPending)
+        {
+            _deferredRefreshPending = false;
+            RefreshFromPanel();
+        }
+    }
+
+    private static bool IsPriorityPanelProperty(string? propertyName)
+    {
+        return string.Equals(propertyName, nameof(MetricPanelViewModel.CurrentValue), StringComparison.Ordinal) ||
+               string.Equals(propertyName, nameof(MetricPanelViewModel.SecondaryValue), StringComparison.Ordinal) ||
+               string.Equals(propertyName, nameof(MetricPanelViewModel.FooterText), StringComparison.Ordinal) ||
+               string.Equals(propertyName, nameof(MetricPanelViewModel.ScaleLabel), StringComparison.Ordinal);
+    }
+
+    public void RefreshThemeResources()
+    {
+        _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
+        _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _chartFrame.Background = CreateSurfaceGradient("#0E1A2B", "#13263B");
+        _chartFrame.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _processSection.Background = CreateSurfaceGradient("#0F1C2D", "#14263A");
+        _processSection.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _legendScroller.Background = null;
+        _processScroller.Background = null;
+
+        foreach (var rowParts in _legendRows.Values)
+        {
+            rowParts.Row.Background = CreateSurfaceGradient("#101C2D", "#132438");
+            rowParts.Row.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            rowParts.NameText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+            rowParts.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+        }
+
+        foreach (var rowParts in _processRowParts.Values)
+        {
+            rowParts.Row.Background = CreateSurfaceGradient("#101C2D", "#132438");
+            rowParts.Row.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            rowParts.NameText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+            rowParts.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+            rowParts.CaptionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+            rowParts.MeterTrack.Background = ResolveBrush("SurfaceStrongBrush", "#162A41");
+            rowParts.MeterTrack.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        }
+
+        if (Panel is { } panel)
+        {
+            ApplyPalette(panel);
+        }
+        else
+        {
+            _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+            _scaleText.Foreground = ResolveBrush("AccentStrongBrush", "#B7F7FF");
+            _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+            _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+            _secondaryValueText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+            _processSectionTitleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+        }
+
+        _chart.RefreshThemeResources();
+        _gauge.RefreshThemeResources();
     }
 
     private void RefreshLegend(MetricPanelViewModel panel)
@@ -752,6 +843,7 @@ public sealed class TelemetryPanelCard : UserControl
             _cardBorder.Opacity = 0.96;
         }
 
+        UpdateDropTargetState(e);
         e.Handled = true;
     }
 
@@ -763,7 +855,8 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         var wasDragging = _isHeaderDragActive;
-        var targetKey = wasDragging ? TryResolveDropTargetPanelKey(e) : null;
+        var targetCard = wasDragging ? ResolveDropTargetCard(e) : null;
+        var targetKey = targetCard?.Panel?.PanelKey;
         EndHeaderDragInteraction();
 
         if (!wasDragging || Panel is null || string.IsNullOrWhiteSpace(targetKey))
@@ -850,7 +943,20 @@ public sealed class TelemetryPanelCard : UserControl
         _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
     }
 
-    private string? TryResolveDropTargetPanelKey(PointerRoutedEventArgs e)
+    private void UpdateDropTargetState(PointerRoutedEventArgs e)
+    {
+        var targetCard = ResolveDropTargetCard(e);
+        if (ReferenceEquals(_activeDropTargetCard, targetCard))
+        {
+            return;
+        }
+
+        _activeDropTargetCard?.SetDropTargetState(false);
+        _activeDropTargetCard = targetCard;
+        _activeDropTargetCard?.SetDropTargetState(true);
+    }
+
+    private TelemetryPanelCard? ResolveDropTargetCard(PointerRoutedEventArgs e)
     {
         if (XamlRoot?.Content is not UIElement root)
         {
@@ -858,23 +964,37 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         var hostPoint = e.GetCurrentPoint(root).Position;
-        foreach (var element in VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, root))
+        TelemetryPanelCard? nearestCard = null;
+        var nearestDistance = double.MaxValue;
+        foreach (var targetCard in EnumeratePanelCards(root))
         {
-            DependencyObject? current = element;
-            while (current is not null)
+            if (ReferenceEquals(targetCard, this) || targetCard.Panel is null)
             {
-                if (current is TelemetryPanelCard targetCard &&
-                    !ReferenceEquals(targetCard, this) &&
-                    targetCard.Panel is { } panel)
-                {
-                    return panel.PanelKey;
-                }
+                continue;
+            }
 
-                current = VisualTreeHelper.GetParent(current);
+            if (!TryGetBounds(targetCard, root, out var bounds))
+            {
+                continue;
+            }
+
+            if (bounds.Contains(hostPoint))
+            {
+                return targetCard;
+            }
+
+            var center = new Windows.Foundation.Point(bounds.X + (bounds.Width / 2d), bounds.Y + (bounds.Height / 2d));
+            var deltaX = center.X - hostPoint.X;
+            var deltaY = center.Y - hostPoint.Y;
+            var distance = (deltaX * deltaX) + (deltaY * deltaY);
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestCard = targetCard;
             }
         }
 
-        return null;
+        return nearestCard;
     }
 
     private void EndHeaderDragInteraction()
@@ -882,24 +1002,66 @@ public sealed class TelemetryPanelCard : UserControl
         _headerDragHandle?.ReleasePointerCaptures();
         _isHeaderPointerDown = false;
         _isHeaderDragActive = false;
+        _activeDropTargetCard?.SetDropTargetState(false);
+        _activeDropTargetCard = null;
         _cardBorder.Opacity = 1.0;
         SetDropTargetState(false);
     }
 
-    private static (Border Row, TextBlock ValueText) CreateLegendRow(string name, Brush strokeBrush)
+    private static IEnumerable<TelemetryPanelCard> EnumeratePanelCards(DependencyObject root)
+    {
+        var childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (var index = 0; index < childCount; index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is TelemetryPanelCard panelCard)
+            {
+                yield return panelCard;
+            }
+
+            foreach (var nested in EnumeratePanelCards(child))
+            {
+                yield return nested;
+            }
+        }
+    }
+
+    private static bool TryGetBounds(FrameworkElement element, UIElement root, out Windows.Foundation.Rect bounds)
+    {
+        bounds = default;
+        if (element.ActualWidth <= 0 || element.ActualHeight <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var transform = element.TransformToVisual(root);
+            var topLeft = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+            bounds = new Windows.Foundation.Rect(topLeft.X, topLeft.Y, element.ActualWidth, element.ActualHeight);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static (Border Row, TextBlock NameText, TextBlock ValueText, Ellipse Dot) CreateLegendRow(string name, Brush strokeBrush)
     {
         var row = new Grid();
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        row.Children.Add(new Ellipse
+        var dot = new Ellipse
         {
             Width = 7,
             Height = 7,
             Margin = new Thickness(0, 3, 9, 0),
             Fill = strokeBrush,
-        });
+        };
+        row.Children.Add(dot);
 
         var nameText = new TextBlock
         {
@@ -930,10 +1092,10 @@ public sealed class TelemetryPanelCard : UserControl
             CornerRadius = new CornerRadius(12),
             Padding = new Thickness(12, 8, 12, 8),
             Child = row,
-        }, valueText);
+        }, nameText, valueText, dot);
     }
 
-    private static (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
+    private static (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
     {
         var nameText = new TextBlock
         {
@@ -1030,7 +1192,7 @@ public sealed class TelemetryPanelCard : UserControl
             CornerRadius = new CornerRadius(13),
             Padding = new Thickness(12, 9, 12, 9),
             Child = rowGrid,
-        }, nameText, valueText, captionText, meterFill);
+        }, nameText, valueText, captionText, meterFill, meterTrack);
     }
 
     private void UpdateBadgeIcon(MetricPanelViewModel? panel)

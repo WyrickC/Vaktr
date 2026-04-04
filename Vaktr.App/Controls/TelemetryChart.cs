@@ -2,6 +2,7 @@ using Vaktr.App.ViewModels;
 using Vaktr.Core.Models;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml.Media;
 using System.Linq;
 using System.Text;
 
@@ -65,6 +66,7 @@ public sealed class TelemetryChart : UserControl
     public TelemetryChart()
     {
         UseLayoutRounding = true;
+        CacheMode = new BitmapCache();
 
         _canvas = new Canvas();
         _interactionCanvas = new Canvas();
@@ -175,6 +177,17 @@ public sealed class TelemetryChart : UserControl
         ((TelemetryChart)dependencyObject).ScheduleRedraw();
     }
 
+    public void RefreshThemeResources()
+    {
+        _hoverLine.Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF");
+        _hoverTooltip.Background = CreateSurfaceGradient("#15283B", "#203851");
+        _hoverTooltip.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _hoverTooltipText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+        _emptyStateText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        HideHover();
+        ScheduleRedraw();
+    }
+
     private void ScheduleRedraw()
     {
         if (_redrawQueued)
@@ -224,7 +237,7 @@ public sealed class TelemetryChart : UserControl
         var seriesCount = series.Count;
         var drawFilledArea = seriesCount <= 3;
         var drawPointMarkers = seriesCount <= 4;
-        var pointBudget = ResolvePointBudget(width, seriesCount);
+        var pointBudget = ResolvePointBudget(width, seriesCount, end - start);
         var strokeThickness = seriesCount <= 2 ? 2d : seriesCount <= 6 ? 1.7d : 1.35d;
 
         _canvas.Children.Clear();
@@ -463,7 +476,7 @@ public sealed class TelemetryChart : UserControl
         return sampled;
     }
 
-    private static int ResolvePointBudget(double width, int seriesCount)
+    private static int ResolvePointBudget(double width, int seriesCount, TimeSpan window)
     {
         var density = seriesCount switch
         {
@@ -474,7 +487,17 @@ public sealed class TelemetryChart : UserControl
             _ => 0.3d,
         };
 
-        return Math.Max(36, (int)Math.Round(width * density));
+        var windowFactor = window switch
+        {
+            _ when window >= TimeSpan.FromDays(30) => 0.26d,
+            _ when window >= TimeSpan.FromDays(7) => 0.34d,
+            _ when window >= TimeSpan.FromDays(1) => 0.44d,
+            _ when window >= TimeSpan.FromHours(12) => 0.55d,
+            _ when window >= TimeSpan.FromHours(1) => 0.72d,
+            _ => 1d,
+        };
+
+        return Math.Max(30, (int)Math.Round(width * density * windowFactor));
     }
 
     private static IReadOnlyList<MetricPoint> GetRenderablePoints(
@@ -564,7 +587,15 @@ public sealed class TelemetryChart : UserControl
             return points;
         }
 
-        return startIndex == 0 ? points : points.Skip(startIndex).ToArray();
+        var candidatePoints = startIndex == 0 ? points : points.Skip(startIndex).ToArray();
+        if (candidatePoints.Count > 1 &&
+            candidatePoints[0].X <= LeftPadding + 20d &&
+            candidatePoints[1].X - candidatePoints[0].X >= 28d)
+        {
+            return candidatePoints.Skip(1).ToArray();
+        }
+
+        return candidatePoints;
     }
 
     private static int ResolveLeadingArtifactTrimIndex(IReadOnlyList<Windows.Foundation.Point> points)

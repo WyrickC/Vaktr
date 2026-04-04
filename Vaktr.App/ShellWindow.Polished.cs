@@ -64,7 +64,7 @@ public sealed partial class ShellWindow : Window
     private bool _windowIconApplied;
     private bool _summaryCardsBound;
     private bool _globalRangeEditorVisible;
-    private bool _themeRefreshQueued;
+    private bool _snapshotApplyQueued;
     private string _lastRenderedStatusText = string.Empty;
     private string _draftScrapeIntervalInput = string.Empty;
     private string _draftRetentionInput = string.Empty;
@@ -72,6 +72,7 @@ public sealed partial class ShellWindow : Window
     private ThemeMode _draftThemeMode;
     private DateTimeOffset? _globalAbsoluteStartUtc;
     private DateTimeOffset? _globalAbsoluteEndUtc;
+    private MetricSnapshot? _pendingSnapshot;
 
     public ShellWindow(
         MainViewModel viewModel,
@@ -149,10 +150,20 @@ public sealed partial class ShellWindow : Window
     public void ApplyTheme(ThemeMode mode)
     {
         var requestedTheme = mode == ThemeMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
-        var themeChanged = _rootLayout.RequestedTheme != requestedTheme;
         ApplyInitialTheme(mode);
         _draftThemeMode = mode;
+        RefreshThemeVisuals();
+    }
 
+    public void PreviewTheme(ThemeMode mode)
+    {
+        ApplyInitialTheme(mode);
+        _draftThemeMode = mode;
+        RefreshThemeVisuals();
+    }
+
+    private void RefreshThemeVisuals()
+    {
         if (_controlDeckEditableActive)
         {
             RenderEditableControlDeck();
@@ -167,9 +178,10 @@ public sealed partial class ShellWindow : Window
             RenderGlobalRangeEditor();
         }
 
-        if (themeChanged)
+        RebuildSummaryCards();
+        foreach (var card in _panelCards.Values)
         {
-            QueueThemeRefresh();
+            card.RefreshThemeResources();
         }
 
         RefreshGlobalRangeControls();
@@ -342,7 +354,7 @@ public sealed partial class ShellWindow : Window
         return width >= 1260 ? 3 : width >= 900 ? 2 : 1;
     }
 
-    private async void OnRootLoaded(object sender, RoutedEventArgs e)
+    private void OnRootLoaded(object sender, RoutedEventArgs e)
     {
         if (_initialized)
         {
@@ -357,14 +369,13 @@ public sealed partial class ShellWindow : Window
             var config = _viewModel.BuildConfig();
             StartupTrace.Write("OnRootLoaded resumed after first paint // polished-v19");
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
-            await EnsureCollectorRunningAsync(config);
             App.CurrentApp.MarkStartupSettled();
-            _ = TryLoadHistoryAsync(config);
+            _ = StartTelemetryAsync(config);
             _ = DispatcherQueue.TryEnqueue(() =>
             {
                 TryApplyWindowIcon();
             });
-            StartupTrace.Write("OnRootLoaded complete // polished-v19");
+            StartupTrace.Write("OnRootLoaded scheduled background startup // polished-v19");
         }
         catch (Exception ex)
         {
@@ -375,7 +386,26 @@ public sealed partial class ShellWindow : Window
         }
     }
 
-    private async void OnWindowClosed(object sender, WindowEventArgs args)
+    private async Task StartTelemetryAsync(VaktrConfig config)
+    {
+        try
+        {
+            await EnsureCollectorRunningAsync(config);
+            _ = TryLoadHistoryAsync(config);
+            StartupTrace.Write("Background startup complete // polished-v19");
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("StartTelemetryAsync", ex);
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                _viewModel.StatusText = $"Startup issue: {ex.Message}";
+                UpdateStatusText();
+            });
+        }
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.DashboardPanels.CollectionChanged -= OnDashboardPanelsChanged;
@@ -390,9 +420,21 @@ public sealed partial class ShellWindow : Window
 
         if (_collectorService is not null)
         {
-            _collectorService.SnapshotCollected -= OnSnapshotCollected;
-            _collectorService.CollectionFailed -= OnCollectionFailed;
-            await _collectorService.DisposeAsync();
+            var collectorService = _collectorService;
+            _collectorService = null;
+            collectorService.SnapshotCollected -= OnSnapshotCollected;
+            collectorService.CollectionFailed -= OnCollectionFailed;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await collectorService.DisposeAsync();
+                }
+                catch (Exception ex)
+                {
+                    StartupTrace.WriteException("Collector disposal", ex);
+                }
+            });
         }
     }
 
@@ -438,8 +480,12 @@ public sealed partial class ShellWindow : Window
             var config = _viewModel.BuildConfig();
             var scrapeChanged = config.ScrapeIntervalSeconds != previousConfig.ScrapeIntervalSeconds;
             var storageChanged = !string.Equals(config.StorageDirectory, previousConfig.StorageDirectory, StringComparison.OrdinalIgnoreCase);
-            var retentionChanged = config.MaxRetentionHours != previousConfig.MaxRetentionHours;
-            var retentionLowered = config.MaxRetentionHours < previousConfig.MaxRetentionHours;
+            var previousRetentionWindow = previousConfig.GetRetentionWindow();
+            var nextRetentionWindow = config.GetRetentionWindow();
+            var retentionChanged =
+                nextRetentionWindow != previousRetentionWindow ||
+                !string.Equals(config.RetentionInputText, previousConfig.RetentionInputText, StringComparison.OrdinalIgnoreCase);
+            var retentionLowered = nextRetentionWindow < previousRetentionWindow;
             var themeChanged = config.Theme != previousConfig.Theme;
             var collectorRestartRequired = scrapeChanged || storageChanged;
 
@@ -456,6 +502,10 @@ public sealed partial class ShellWindow : Window
             _controlDeckEditableActive = false;
             _autoLaunchService.SetEnabled(config.LaunchOnStartup);
             await _configStore.SaveAsync(config, CancellationToken.None);
+            if (themeChanged)
+            {
+                App.CurrentApp.ApplyTheme(config.Theme);
+            }
             RenderControlDeckSummary();
             _ = ApplyRuntimeSettingsAsync(config, collectorRestartRequired, retentionChanged, retentionLowered);
         }
@@ -471,7 +521,7 @@ public sealed partial class ShellWindow : Window
         _draftThemeMode = _draftThemeMode == ThemeMode.Dark
             ? ThemeMode.Light
             : ThemeMode.Dark;
-        App.CurrentApp.ApplyTheme(_draftThemeMode);
+        App.CurrentApp.PreviewTheme(_draftThemeMode);
     }
 
     private void OnToggleGlobalRangeEditor(object? sender, EventArgs e)
@@ -522,10 +572,7 @@ public sealed partial class ShellWindow : Window
     {
         _globalAbsoluteStartUtc = null;
         _globalAbsoluteEndUtc = null;
-        foreach (var panel in _viewModel.DashboardPanels)
-        {
-            panel.ResetZoom();
-        }
+        _viewModel.ResetGlobalZoom();
 
         HideGlobalRangeEditor();
         RefreshGlobalRangeControls();
@@ -533,25 +580,14 @@ public sealed partial class ShellWindow : Window
 
     private void OnSnapshotCollected(object? sender, MetricSnapshot snapshot)
     {
-        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        _pendingSnapshot = snapshot;
+        if (_snapshotApplyQueued)
         {
-            if (!_hasReceivedFirstSnapshot)
-            {
-                _hasReceivedFirstSnapshot = true;
-                StartupTrace.Write($"First snapshot collected // samples={snapshot.Samples.Count}");
-            }
+            return;
+        }
 
-            _viewModel.ApplySnapshot(snapshot);
-            if (_globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue)
-            {
-                foreach (var panel in _viewModel.DashboardPanels.Where(panel => !panel.IsZoomed))
-                {
-                    panel.ZoomToWindow(_globalAbsoluteStartUtc.Value, _globalAbsoluteEndUtc.Value);
-                }
-            }
-
-            UpdateStatusText();
-        });
+        _snapshotApplyQueued = true;
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, ApplyQueuedSnapshot);
     }
 
     private void OnCollectionFailed(object? sender, Exception ex)
@@ -565,6 +601,40 @@ public sealed partial class ShellWindow : Window
                 UpdateStatusText();
             }
         });
+    }
+
+    private void ApplyQueuedSnapshot()
+    {
+        _snapshotApplyQueued = false;
+        var snapshot = _pendingSnapshot;
+        _pendingSnapshot = null;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        if (!_hasReceivedFirstSnapshot)
+        {
+            _hasReceivedFirstSnapshot = true;
+            StartupTrace.Write($"First snapshot collected // samples={snapshot.Samples.Count}");
+        }
+
+        _viewModel.ApplySnapshot(snapshot);
+        if (_globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue)
+        {
+            foreach (var panel in _viewModel.DashboardPanels.Where(panel => !panel.IsZoomed))
+            {
+                panel.ZoomToWindow(_globalAbsoluteStartUtc.Value, _globalAbsoluteEndUtc.Value);
+            }
+        }
+
+        UpdateStatusText();
+
+        if (_pendingSnapshot is not null && !_snapshotApplyQueued)
+        {
+            _snapshotApplyQueued = true;
+            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, ApplyQueuedSnapshot);
+        }
     }
 
     private async Task PersistLayoutAsync()
@@ -597,30 +667,6 @@ public sealed partial class ShellWindow : Window
 
             StartupTrace.Write("Queued dashboard refresh after resize // polished-v19");
             RefreshDashboardPanels();
-        });
-    }
-
-    private void QueueThemeRefresh()
-    {
-        if (_themeRefreshQueued)
-        {
-            return;
-        }
-
-        _themeRefreshQueued = true;
-        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-        {
-            _themeRefreshQueued = false;
-            RebuildSummaryCards();
-            _panelCards.Clear();
-            RefreshDashboardPanels();
-
-            if (_globalRangeEditorVisible)
-            {
-                RenderGlobalRangeEditor();
-            }
-
-            RefreshGlobalRangeControls();
         });
     }
 
@@ -888,25 +934,28 @@ public sealed partial class ShellWindow : Window
     {
         try
         {
-            if (collectorRestartRequired)
+            await Task.Run(async () =>
             {
-                if (_collectorService is null)
+                if (collectorRestartRequired)
                 {
-                    _collectorService = new CollectorService(new WindowsMetricCollector(), _metricStore);
-                    _collectorService.SnapshotCollected += OnSnapshotCollected;
-                    _collectorService.CollectionFailed += OnCollectionFailed;
-                }
+                    if (_collectorService is null)
+                    {
+                        _collectorService = new CollectorService(new WindowsMetricCollector(), _metricStore);
+                        _collectorService.SnapshotCollected += OnSnapshotCollected;
+                        _collectorService.CollectionFailed += OnCollectionFailed;
+                    }
 
-                await _collectorService.StartAsync(config, CancellationToken.None);
-            }
-            else if (retentionChanged)
-            {
-                await _metricStore.InitializeAsync(config, CancellationToken.None);
-                if (retentionLowered)
-                {
-                    await _metricStore.PruneAsync(config, CancellationToken.None);
+                    await _collectorService.StartAsync(config, CancellationToken.None);
                 }
-            }
+                else if (retentionChanged)
+                {
+                    await _metricStore.InitializeAsync(config, CancellationToken.None);
+                    if (retentionLowered)
+                    {
+                        await _metricStore.PruneAsync(config, CancellationToken.None);
+                    }
+                }
+            });
 
             _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0
                 ? "Streaming local telemetry"
@@ -1101,6 +1150,11 @@ public sealed partial class ShellWindow : Window
         {
             StartupTrace.Write("TryLoadHistoryAsync start");
             var historyWindow = TimeSpan.FromMinutes(Math.Max(config.GraphWindowMinutes, 5));
+            var retentionWindow = config.GetRetentionWindow();
+            if (retentionWindow < historyWindow)
+            {
+                historyWindow = retentionWindow;
+            }
             var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
             _viewModel.LoadHistory(history);
             StartupTrace.Write($"TryLoadHistoryAsync complete // panels={history.Count}");
@@ -1154,7 +1208,7 @@ public sealed partial class ShellWindow : Window
     {
         _globalAbsoluteStartUtc = null;
         _globalAbsoluteEndUtc = null;
-        _viewModel.SelectedWindowMinutes = minutes;
+        _viewModel.ApplyGlobalWindowRange(minutes);
         HideGlobalRangeEditor();
         RefreshGlobalRangeControls();
     }
@@ -1368,10 +1422,7 @@ public sealed partial class ShellWindow : Window
     {
         _globalAbsoluteStartUtc = start;
         _globalAbsoluteEndUtc = end;
-        foreach (var panel in _viewModel.DashboardPanels)
-        {
-            panel.ZoomToWindow(start, end);
-        }
+        _viewModel.ApplyGlobalAbsoluteRange(start, end);
 
         HideGlobalRangeEditor();
         _viewModel.StatusText = $"Pinned {start.LocalDateTime:g} to {end.LocalDateTime:g}";

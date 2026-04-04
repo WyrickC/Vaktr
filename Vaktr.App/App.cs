@@ -67,6 +67,12 @@ public sealed class App : Application
         _window?.ApplyTheme(mode);
     }
 
+    public void PreviewTheme(ThemeMode mode)
+    {
+        ApplyThemeResources(mode);
+        _window?.PreviewTheme(mode);
+    }
+
     public void MarkStartupSettled()
     {
         _startupGuardActive = false;
