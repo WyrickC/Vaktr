@@ -795,6 +795,7 @@ public sealed partial class ShellWindow
         var chip = CreateActionChip(text, OnGlobalWindowRangeClick);
         chip.Tag = minutes;
         chip.MinWidth = 48;
+        chip.MinHeight = 0;
         return chip;
     }
 

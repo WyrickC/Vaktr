@@ -897,7 +897,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             var deltaX = point.X - _headerPointerStart.X;
             var deltaY = point.Y - _headerPointerStart.Y;
-            if ((deltaX * deltaX) + (deltaY * deltaY) < 25d)
+            if ((deltaX * deltaX) + (deltaY * deltaY) < 16d)
             {
                 return;
             }
@@ -906,7 +906,8 @@ public sealed class TelemetryPanelCard : UserControl
             Canvas.SetZIndex(this, 10);
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
-            _cardBorder.Opacity = 0.96;
+            _cardBorder.Opacity = 0.92;
+            _cardBorder.RenderTransform = new ScaleTransform { ScaleX = 0.97, ScaleY = 0.97, CenterX = _cardBorder.ActualWidth / 2, CenterY = _cardBorder.ActualHeight / 2 };
         }
 
         _dragTransform.X = point.X - _headerPointerStart.X;
@@ -1004,11 +1005,18 @@ public sealed class TelemetryPanelCard : UserControl
         {
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
+            _edgeGlow.Visibility = Visibility.Visible;
+            _edgeGlow.Width = 4;
+            _edgeGlow.Opacity = 1;
+            _edgeGlow.Background = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             return;
         }
 
         _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
+        _edgeGlow.Visibility = Visibility.Collapsed;
+        _edgeGlow.Width = 0;
+        _edgeGlow.Opacity = 0;
     }
 
     private void UpdateDropTargetState(PointerRoutedEventArgs e)
@@ -1073,6 +1081,7 @@ public sealed class TelemetryPanelCard : UserControl
         _activeDropTargetCard?.SetDropTargetState(false);
         _activeDropTargetCard = null;
         _cardBorder.Opacity = 1.0;
+        _cardBorder.RenderTransform = null;
         _dragTransform.X = 0;
         _dragTransform.Y = 0;
         Canvas.SetZIndex(this, 0);

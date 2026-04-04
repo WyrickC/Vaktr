@@ -5,8 +5,8 @@ namespace Vaktr.Collector;
 
 public sealed class CollectorService : IAsyncDisposable
 {
-    private static readonly TimeSpan InitialCollectionTimeout = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan RecurringCollectionTimeout = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan InitialCollectionTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan RecurringCollectionTimeout = TimeSpan.FromSeconds(5);
 
     private readonly IMetricCollector _collector;
     private readonly IMetricStore _store;
@@ -142,9 +142,13 @@ public sealed class CollectorService : IAsyncDisposable
         {
             try
             {
-                await loopTask.ConfigureAwait(false);
+                // Give the loop a short window to exit gracefully, then move on
+                await loopTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
+            {
+            }
+            catch (TimeoutException)
             {
             }
         }

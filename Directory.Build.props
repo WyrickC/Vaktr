@@ -1,13 +1,2 @@
 <Project>
-  <PropertyGroup Condition="'$(CODEX_SHELL)' == '1'">
-    <!--
-      The Codex desktop sandbox allows ordinary file writes but is brittle around
-      a handful of SDK/MSBuild cache and apphost rewrite paths under obj/bin.
-      Keep the user-facing build untouched while making sandbox validation
-      reliable enough to catch real compile errors locally.
-    -->
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <DisableRarCache>true</DisableRarCache>
-    <UseAppHost>false</UseAppHost>
-  </PropertyGroup>
 </Project>

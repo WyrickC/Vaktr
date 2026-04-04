@@ -36,6 +36,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly List<ProcessActivitySample> _cachedProcessActivity = [];
     private LiveBoardDetails? _cachedLiveBoardDetails;
     private readonly TemperatureSensorReader _temperatureReader = new();
+    private bool _temperatureBridgeStarted;
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
@@ -624,9 +625,35 @@ public sealed class WindowsMetricCollector : IMetricCollector
         if (shouldRefresh)
         {
             _cachedTemperatureValues.Clear();
+
+            // Try the local sensor reader first
             var reading = _temperatureReader.Read();
             var cpuTemperature = reading.CpuTemperatureCelsius;
             var gpuTemperature = reading.GpuTemperatureCelsius;
+
+            // If local reader couldn't get CPU temps (common when not elevated),
+            // fall back to the elevated bridge helper process.
+            // Only attempt the bridge when running as a standalone exe (not via dotnet run).
+            if (!cpuTemperature.HasValue || !gpuTemperature.HasValue)
+            {
+                if (TemperatureBridge.TryReadSnapshot(out var bridgeSnapshot))
+                {
+                    cpuTemperature ??= bridgeSnapshot.CpuTemperatureCelsius;
+                    gpuTemperature ??= bridgeSnapshot.GpuTemperatureCelsius;
+                }
+                else if (!_temperatureBridgeStarted && !TemperatureBridge.IsElevated())
+                {
+                    var exePath = Environment.ProcessPath;
+                    if (!string.IsNullOrWhiteSpace(exePath) &&
+                        exePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
+                        !exePath.Contains("dotnet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        TemperatureBridge.EnsureHelperRunning();
+                    }
+
+                    _temperatureBridgeStarted = true;
+                }
+            }
 
             if (cpuTemperature.HasValue)
             {

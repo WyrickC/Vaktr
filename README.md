@@ -1,121 +1,113 @@
 # Vaktr
 
-![Vaktr logo](C:/Repos/Vaktr/Vaktr.App/Assets/vaktr.png)
-
-Vaktr is a local-first Windows telemetry dashboard. It is built for people who want a polished, always-on view of what their PC is doing right now and over time, without sending machine data to a cloud service.
+Vaktr is a local-first Windows telemetry dashboard. It gives you a polished, always-on view of what your PC is doing right now and over time, without sending any data to a cloud service. Think Grafana-style time-series panels, but for a single Windows machine.
 
 ## Who It Is For
 
 - Windows power users who want a cleaner read on system behavior
-- gamers and creators watching performance while they work or play
-- developers and tinkerers who want Grafana-style visibility on a single Windows machine
+- Gamers and creators watching performance while they work or play
+- Developers and tinkerers who want Grafana-style visibility on a single Windows machine
 
-## What Vaktr Does
+## What Vaktr Shows
 
-Vaktr collects machine-local telemetry, stores a rolling history in SQLite, and renders it in a desktop dashboard with:
+- **CPU** - total usage, per-core breakdown, clock frequency, temperature
+- **GPU** - usage, dedicated memory, temperature
+- **Memory** - used/available with percentage
+- **Disk** - read/write throughput per logical drive, drive capacity gauges
+- **Network** - download/upload per interface
+- **System** - process count, thread count, handle count
+- **Process table** - per-process CPU and memory breakdown (on CPU and Memory panels)
 
-- live time-series panels
-- at-a-glance summaries and gauges
-- board-wide and per-panel time ranges
-- drag-reorderable panels
-- a control deck for scrape interval, retention, theme, and storage settings
+Each metric is rendered as a live time-series chart. Panels can be expanded for a focused view, reordered by dragging, and zoomed into any time window.
 
-## How It Works
+## Architecture
 
-Vaktr is split into three main parts:
+```
+Vaktr.Core        Data models, enums, interfaces (no UI dependency)
+Vaktr.Collector   PDH counters, WMI, LibreHardwareMonitor, process enumeration
+Vaktr.Store       SQLite persistence (WAL mode) + JSON config store
+Vaktr.App         WinUI 3 desktop shell (single-window dashboard)
+Vaktr.Tests       Unit tests
+tools/SensorProbe Standalone sensor discovery utility
+```
 
-- `Vaktr.Collector`
-  Reads Windows counters and hardware sensors, then produces telemetry snapshots
-- `Vaktr.Store`
-  Persists snapshots and app settings locally
-- `Vaktr.App`
-  The WinUI 3 desktop shell that renders the dashboard
+### Data flow
 
-The basic flow is:
+1. `CollectorService` drives a `PeriodicTimer` (default 2 s)
+2. `WindowsMetricCollector` samples PDH counters, memory, drives, network, temperatures, and processes
+3. `SqliteMetricStore` persists the snapshot in a transaction
+4. The `SnapshotCollected` event fires and `MainViewModel` updates the UI via `DispatcherQueue`
 
-1. the collector samples the machine
-2. the snapshot is written to local storage
-3. the app updates the live board and historical views
+### Storage
 
-## What Time-Series Metrics Are
-
-A time-series metric is a value captured repeatedly over time.
-
-Examples:
-
-- CPU usage sampled every 2 seconds
-- disk read throughput over the last 30 minutes
-- memory use over the last 24 hours
-
-That matters because a single number only tells you what is happening now, while a time-series tells you:
-
-- whether the system is spiking, flat, or trending
-- when a change started
-- whether a workload is recurring
-- how current behavior compares to the recent past
-
-Vaktr uses time-series panels so you can see both the current reading and the shape of the workload behind it.
+- **Settings:** `%LOCALAPPDATA%\Vaktr\vaktr-settings.json`
+- **Metrics DB:** `%LOCALAPPDATA%\Vaktr\Data\vaktr-metrics.db`
+- Raw samples are kept for up to 6 hours, then rolled up into 1-minute aggregates
+- Background pruning runs every 15 minutes and honors the configured retention window
 
 ## Running Vaktr
 
-From PowerShell:
+### From a terminal
 
 ```powershell
 cd C:\Repos\Vaktr
-dotnet restore .\Vaktr.sln
-dotnet run --project .\Vaktr.App\Vaktr.App.csproj -p:Platform=x64
+dotnet restore Vaktr.sln
+dotnet build Vaktr.sln -p:Platform=x64
+dotnet run --project Vaktr.App/Vaktr.App.csproj -p:Platform=x64
 ```
 
-From Visual Studio:
+> Use forward slashes for `dotnet run` in Git Bash. PowerShell handles both.
 
-1. Open [Vaktr.sln](C:/Repos/Vaktr/Vaktr.sln)
-2. Set [Vaktr.App.csproj](C:/Repos/Vaktr/Vaktr.App/Vaktr.App.csproj) as the startup project
-3. Choose `Debug` and `x64`
-4. Run with `F5` or `Ctrl+F5`
+### From Visual Studio
+
+1. Open `Vaktr.sln`
+2. Set `Vaktr.App` as the startup project
+3. Choose **Debug | x64**
+4. Press **F5**
 
 The desktop process is `Vaktr.exe`.
 
-## Data and Settings
+## Requirements
 
-Vaktr stores everything locally on the machine:
-
-- settings: `%LocalAppData%\Vaktr\vaktr-settings.json`
-- metrics database: `%LocalAppData%\Vaktr\Data\vaktr-metrics.db`
-
-`%LocalAppData%` is intentional. Vaktr tracks machine-local telemetry, so the data should stay on the local node instead of roaming with a Windows profile.
+- .NET 8 SDK
+- Windows 10 1809+ (build 17763)
+- Windows App SDK 1.8
+- Platform target: **x64**, x86, or ARM64 (`AnyCPU` is not supported for the App project)
 
 ## Defaults
 
-- scrape interval: `2s`
-- default board range: `15m`
-- retention: `24h`
-- storage path: `%LocalAppData%\Vaktr\Data`
-- theme: dark
+| Setting | Default |
+|---------|---------|
+| Scrape interval | 2 s |
+| Graph window | 15 min |
+| Retention | 24 h |
+| Storage path | `%LOCALAPPDATA%\Vaktr\Data` |
+| Theme | Dark |
 
 ## Retention
 
-Retention controls how much historical data Vaktr keeps.
+Retention controls how much historical data Vaktr keeps. You can set it with a number and unit:
 
-Examples:
+- `30m` - 30 minutes
+- `6h` - 6 hours
+- `7d` - 7 days
 
-- `30m`
-- `6h`
-- `7d`
-
-Vaktr prunes older data so the local database stays bounded while preserving a useful recent history window.
+Vaktr prunes data older than the retention window on a rolling basis so the local database stays bounded.
 
 ## Hardware Sensors
 
-Vaktr uses LibreHardwareMonitor for hardware sensors such as temperatures. LibreHardwareMonitor’s own documentation notes that some sensors require administrator privileges to access, so hardware visibility can depend on the CPU family, motherboard, sensor path, and how the app is launched.
+Vaktr uses [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) for hardware sensors (CPU/GPU temperatures). When running without administrator privileges, Vaktr automatically launches an elevated helper process to read sensors that require admin access. If the user declines the elevation prompt, Vaktr falls back to WMI thermal zone data when available.
 
-Source:
+## Tests
 
-- [LibreHardwareMonitor README](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
+```powershell
+dotnet test Vaktr.Tests/Vaktr.Tests.csproj
+```
 
 ## Project Goals
 
-- local-only telemetry
-- fast startup and low overhead
-- smooth, polished desktop UX
-- strong at-a-glance summaries plus deeper historical detail
-- sensible defaults without turning the app into a wall of settings
+- Local-only telemetry, no cloud dependency
+- Fast startup and low overhead
+- Smooth, polished desktop UX
+- Strong at-a-glance summaries plus deeper historical detail
+- Sensible defaults without a wall of settings

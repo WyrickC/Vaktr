@@ -1265,12 +1265,9 @@ public sealed partial class ShellWindow : Window
         try
         {
             StartupTrace.Write("TryLoadHistoryAsync start");
-            var historyWindow = TimeSpan.FromMinutes(Math.Max(config.GraphWindowMinutes, 5));
+            // Load the full retention window so users can zoom out to see all retained data
             var retentionWindow = config.GetRetentionWindow();
-            if (retentionWindow < historyWindow)
-            {
-                historyWindow = retentionWindow;
-            }
+            var historyWindow = retentionWindow;
             var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
             _viewModel.LoadHistory(history);
             StartupTrace.Write($"TryLoadHistoryAsync complete // panels={history.Count}");

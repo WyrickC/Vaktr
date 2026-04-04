@@ -7,17 +7,34 @@ obj/
 *_wpftmp.csproj
 *.nupkg
 TestResults/
+
+# Scratch / temp directories
 scratch-winui/
 .obj-scratch/
+.bin-scratch/
 temp-write-check/
+_WinUiDiag/
+objcodex*/
+
+# Temp and backup files
 write-test.txt
-NuGet.Config
 *.bak
 *-input.json
+*.tmp
+
+# Manual build artifacts
 manual-*.dll
 manual-*.exe
 manual-*.rsp
+
+# Build logs and diagnostics
 build-now.log
+restore-diag.log
 xaml-build.log
 xamlc-*.txt
+
+# Codex sandbox artifacts
+scripts/build-codex.ps1
+
+# Python
 .pydeps/

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf _WinUiDiag/ scratch-winui/ temp-write-check/ Vaktr.App/objcodexapp/ tools/SensorProbe/objcodex/)",
+      "Bash(rm -f manual-*.dll manual-*.exe manual-*.rsp build-now.log restore-diag.log xaml-build.log xamlc-*.txt write-test.txt)",
+      "Bash(dotnet build:*)"
+    ]
+  }
+}

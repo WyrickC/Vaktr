@@ -220,6 +220,7 @@ public sealed class SqliteMetricStore : IMetricStore
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         var command = connection.CreateCommand();
+        var rawBoundaryMs = DateTimeOffset.UtcNow.Subtract(RawResolutionWindow).ToUnixTimeMilliseconds();
         command.CommandText =
             """
             SELECT
@@ -243,6 +244,7 @@ public sealed class SqliteMetricStore : IMetricStore
                     value
                 FROM metric_rollups_1m
                 WHERE timestamp_ms >= $fromTimestamp
+                  AND timestamp_ms < $rawBoundary
 
                 UNION ALL
 
@@ -261,6 +263,7 @@ public sealed class SqliteMetricStore : IMetricStore
             ORDER BY panel_key, series_key, timestamp_ms;
             """;
         command.Parameters.AddWithValue("$fromTimestamp", fromUtc.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$rawBoundary", rawBoundaryMs);
 
         var panelMap = new Dictionary<string, PanelAccumulator>(StringComparer.OrdinalIgnoreCase);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -343,7 +346,9 @@ public sealed class SqliteMetricStore : IMetricStore
         var retentionCutoffMs = now.Subtract(retentionWindow).ToUnixTimeMilliseconds();
         var rawCutoffMs = now.Subtract(RawResolutionWindow).ToUnixTimeMilliseconds();
 
-        if (retentionCutoffMs < rawCutoffMs)
+        // Only compact raw samples into rollups if retention extends beyond the raw window.
+        // If retention is shorter than the raw window, we skip compaction and just delete everything older.
+        if (retentionWindow > RawResolutionWindow)
         {
             var compactCommand = connection.CreateCommand();
             compactCommand.CommandText =
@@ -385,13 +390,13 @@ public sealed class SqliteMetricStore : IMetricStore
             await compactCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var rawDeleteCutoffMs = Math.Max(retentionCutoffMs, rawCutoffMs);
-
+        // Delete raw samples: if retention < raw window, honor the retention cutoff directly
         var deleteRawCommand = connection.CreateCommand();
         deleteRawCommand.CommandText = "DELETE FROM metric_samples WHERE timestamp_ms < $cutoff;";
-        deleteRawCommand.Parameters.AddWithValue("$cutoff", rawDeleteCutoffMs);
+        deleteRawCommand.Parameters.AddWithValue("$cutoff", retentionWindow > RawResolutionWindow ? rawCutoffMs : retentionCutoffMs);
         await deleteRawCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
+        // Delete rollup data older than retention
         var deleteRollupCommand = connection.CreateCommand();
         deleteRollupCommand.CommandText = "DELETE FROM metric_rollups_1m WHERE timestamp_ms < $cutoff;";
         deleteRollupCommand.Parameters.AddWithValue("$cutoff", retentionCutoffMs);
