@@ -122,6 +122,11 @@ public sealed class InlineTextEntry : UserControl
         }
     }
 
+    public void RefreshThemeResources()
+    {
+        UpdateVisualState();
+    }
+
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
         Focus(FocusState.Pointer);

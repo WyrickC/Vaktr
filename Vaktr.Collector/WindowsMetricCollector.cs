@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Net.NetworkInformation;
+using LibreHardwareMonitor.Hardware;
 using Vaktr.Collector.Interop;
 using Vaktr.Core.Interfaces;
 using Vaktr.Core.Models;
@@ -13,8 +14,9 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private const double BytesPerMegabyte = 1024d * 1024d;
     private const double BitsPerMegabit = 1_000_000d;
     private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(75);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan TemperatureRefreshInterval = TimeSpan.FromSeconds(12);
 
     private readonly nint _query;
     private readonly nint _cpuTotalCounter;
@@ -24,13 +26,17 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly nint _diskWriteCounter;
     private readonly nint _networkReceiveCounter;
     private readonly nint _networkSendCounter;
+    private readonly nint _gpuEngineCounter;
+    private readonly nint _gpuMemoryCounter;
     private readonly bool _hasAnyPdhCounters;
     private readonly Dictionary<string, NetworkBaseline> _networkBaselines = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, ProcessCpuBaseline> _processCpuBaselines = [];
     private readonly List<CachedMetricValue> _cachedDriveUsageValues = [];
     private readonly List<CachedMetricValue> _cachedHostActivityValues = [];
+    private readonly List<CachedMetricValue> _cachedTemperatureValues = [];
     private readonly List<ProcessActivitySample> _cachedProcessActivity = [];
     private LiveBoardDetails? _cachedLiveBoardDetails;
+    private readonly Computer? _hardwareMonitor;
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
@@ -39,6 +45,10 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private DateTimeOffset _lastDriveUsageRefreshUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastHostActivityRefreshUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastProcessActivityRefreshUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastTemperatureRefreshUtc = DateTimeOffset.MinValue;
+    private int _cachedProcessCount;
+    private long _cachedThreadCount;
+    private long _cachedHandleCount;
 
     public WindowsMetricCollector()
     {
@@ -51,6 +61,8 @@ public sealed class WindowsMetricCollector : IMetricCollector
         _diskWriteCounter = TryAddCounter(@"\LogicalDisk(*)\Disk Write Bytes/sec");
         _networkReceiveCounter = TryAddCounter(@"\Network Interface(*)\Bytes Received/sec");
         _networkSendCounter = TryAddCounter(@"\Network Interface(*)\Bytes Sent/sec");
+        _gpuEngineCounter = TryAddCounter(@"\GPU Engine(*)\Utilization Percentage");
+        _gpuMemoryCounter = TryAddCounter(@"\GPU Adapter Memory(*)\Dedicated Usage");
 
         _hasAnyPdhCounters =
             _cpuTotalCounter != nint.Zero ||
@@ -59,11 +71,27 @@ public sealed class WindowsMetricCollector : IMetricCollector
             _diskReadCounter != nint.Zero ||
             _diskWriteCounter != nint.Zero ||
             _networkReceiveCounter != nint.Zero ||
-            _networkSendCounter != nint.Zero;
+            _networkSendCounter != nint.Zero ||
+            _gpuEngineCounter != nint.Zero ||
+            _gpuMemoryCounter != nint.Zero;
 
         if (_hasAnyPdhCounters)
         {
             _ = PdhNative.PdhCollectQueryData(_query);
+        }
+
+        try
+        {
+            _hardwareMonitor = new Computer
+            {
+                IsCpuEnabled = true,
+                IsGpuEnabled = true,
+            };
+            _hardwareMonitor.Open();
+        }
+        catch
+        {
+            _hardwareMonitor = null;
         }
     }
 
@@ -88,11 +116,13 @@ public sealed class WindowsMetricCollector : IMetricCollector
         AddMemory(samples, timestamp);
         var liveDetails = AddHostActivity(samples, timestamp);
         AddDriveUsage(samples, timestamp);
+        AddTemperatures(samples, timestamp);
 
         if (pdhAvailable)
         {
             AddDisk(samples, timestamp);
             AddNetwork(samples, timestamp);
+            AddGpu(samples, timestamp);
         }
         else
         {
@@ -104,6 +134,14 @@ public sealed class WindowsMetricCollector : IMetricCollector
 
     public ValueTask DisposeAsync()
     {
+        try
+        {
+            _hardwareMonitor?.Close();
+        }
+        catch
+        {
+        }
+
         if (_query != nint.Zero)
         {
             _ = PdhNative.PdhCloseQuery(_query);
@@ -377,9 +415,16 @@ public sealed class WindowsMetricCollector : IMetricCollector
 
             var processCount = 0;
             var threadCount = 0L;
-            var handleCount = 0L;
+            var handleCount = _cachedHandleCount;
             var activePids = new HashSet<int>();
-            EnumerateProcesses(timestamp, shouldRefreshProcesses, activePids, ref processCount, ref threadCount, ref handleCount);
+            EnumerateProcesses(
+                timestamp,
+                shouldRefreshProcesses,
+                shouldRefreshProcesses || _cachedHandleCount == 0,
+                activePids,
+                ref processCount,
+                ref threadCount,
+                ref handleCount);
 
             if (shouldRefreshProcesses)
             {
@@ -394,6 +439,10 @@ public sealed class WindowsMetricCollector : IMetricCollector
                     : new LiveBoardDetails(_cachedProcessActivity.ToArray());
             }
 
+            _cachedProcessCount = processCount;
+            _cachedThreadCount = threadCount;
+            _cachedHandleCount = handleCount;
+
             _cachedHostActivityValues.Add(new CachedMetricValue(
                 "host-activity",
                 "Host Activity",
@@ -401,7 +450,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 "Processes",
                 MetricCategory.System,
                 MetricUnit.Count,
-                processCount));
+                _cachedProcessCount));
 
             _cachedHostActivityValues.Add(new CachedMetricValue(
                 "host-activity",
@@ -410,7 +459,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 "Threads",
                 MetricCategory.System,
                 MetricUnit.Count,
-                threadCount));
+                _cachedThreadCount));
 
             _cachedHostActivityValues.Add(new CachedMetricValue(
                 "host-activity",
@@ -419,7 +468,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 "Handles",
                 MetricCategory.System,
                 MetricUnit.Count,
-                handleCount));
+                _cachedHandleCount));
 
             _lastHostActivityRefreshUtc = timestamp;
         }
@@ -485,6 +534,49 @@ public sealed class WindowsMetricCollector : IMetricCollector
         }
     }
 
+    private void AddGpu(List<MetricSample> samples, DateTimeOffset timestamp)
+    {
+        var usageValues = TryGetArrayValues(_gpuEngineCounter);
+        var engineUsage = usageValues
+            .Where(entry =>
+                !string.IsNullOrWhiteSpace(entry.Key) &&
+                !entry.Key.Equals("_Total", StringComparison.OrdinalIgnoreCase) &&
+                !entry.Key.Contains("engtype_copy", StringComparison.OrdinalIgnoreCase))
+            .Select(entry => Math.Max(0d, entry.Value))
+            .ToArray();
+
+        if (engineUsage.Length > 0)
+        {
+            samples.Add(new MetricSample(
+                "gpu-total",
+                    "GPU Usage",
+                "usage",
+                "Usage",
+                MetricCategory.Gpu,
+                MetricUnit.Percent,
+                Math.Clamp(engineUsage.Max(), 0d, 100d),
+                timestamp));
+        }
+
+        var memoryValues = TryGetArrayValues(_gpuMemoryCounter);
+        var dedicatedBytes = memoryValues
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && !entry.Key.Equals("_Total", StringComparison.OrdinalIgnoreCase))
+            .Sum(entry => Math.Max(0d, entry.Value));
+
+        if (dedicatedBytes > 0d)
+        {
+            samples.Add(new MetricSample(
+                "gpu-memory",
+                "GPU Memory",
+                "dedicated-gb",
+                "Dedicated",
+                MetricCategory.Gpu,
+                MetricUnit.Gigabytes,
+                dedicatedBytes / 1024d / 1024d / 1024d,
+                timestamp));
+        }
+    }
+
     private void AddNetworkFallback(List<MetricSample> samples, DateTimeOffset timestamp)
     {
         foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
@@ -543,6 +635,66 @@ public sealed class WindowsMetricCollector : IMetricCollector
             catch (PlatformNotSupportedException)
             {
             }
+        }
+    }
+
+    private void AddTemperatures(List<MetricSample> samples, DateTimeOffset timestamp)
+    {
+        if (_hardwareMonitor is null)
+        {
+            return;
+        }
+
+        var shouldRefresh = _cachedTemperatureValues.Count == 0 || timestamp - _lastTemperatureRefreshUtc >= TemperatureRefreshInterval;
+        if (shouldRefresh)
+        {
+            _cachedTemperatureValues.Clear();
+            var cpuTemperatures = new List<double>();
+            var gpuTemperatures = new List<double>();
+
+            foreach (var hardware in _hardwareMonitor.Hardware)
+            {
+                CollectTemperatures(hardware, cpuTemperatures, gpuTemperatures);
+            }
+
+            if (cpuTemperatures.Count > 0)
+            {
+                _cachedTemperatureValues.Add(new CachedMetricValue(
+                    "cpu-temperature",
+                    "CPU Temperature",
+                    "temperature",
+                    "Temperature",
+                    MetricCategory.Cpu,
+                    MetricUnit.Celsius,
+                    cpuTemperatures.Max()));
+            }
+
+            if (gpuTemperatures.Count > 0)
+            {
+                _cachedTemperatureValues.Add(new CachedMetricValue(
+                    "gpu-temperature",
+                    "GPU Temperature",
+                    "temperature",
+                    "Temperature",
+                    MetricCategory.Gpu,
+                    MetricUnit.Celsius,
+                    gpuTemperatures.Max()));
+            }
+
+            _lastTemperatureRefreshUtc = timestamp;
+        }
+
+        foreach (var cachedValue in _cachedTemperatureValues)
+        {
+            samples.Add(new MetricSample(
+                cachedValue.PanelKey,
+                cachedValue.PanelTitle,
+                cachedValue.SeriesKey,
+                cachedValue.SeriesName,
+                cachedValue.Category,
+                cachedValue.Unit,
+                cachedValue.Value,
+                timestamp));
         }
     }
 
@@ -653,6 +805,42 @@ public sealed class WindowsMetricCollector : IMetricCollector
         return builder.ToString().Trim('-');
     }
 
+    private static void CollectTemperatures(IHardware hardware, ICollection<double> cpuTemperatures, ICollection<double> gpuTemperatures)
+    {
+        hardware.Update();
+
+        foreach (var subHardware in hardware.SubHardware)
+        {
+            CollectTemperatures(subHardware, cpuTemperatures, gpuTemperatures);
+        }
+
+        var target = hardware.HardwareType switch
+        {
+            HardwareType.Cpu => cpuTemperatures,
+            HardwareType.GpuAmd or HardwareType.GpuIntel or HardwareType.GpuNvidia => gpuTemperatures,
+            _ => null,
+        };
+
+        if (target is null)
+        {
+            return;
+        }
+
+        foreach (var sensor in hardware.Sensors)
+        {
+            if (sensor.SensorType != SensorType.Temperature || !sensor.Value.HasValue)
+            {
+                continue;
+            }
+
+            var value = sensor.Value.Value;
+            if (value is > 0f and < 150f)
+            {
+                target.Add(value);
+            }
+        }
+    }
+
     private static void ThrowIfFailed(uint status, string message)
     {
         if (status != PdhNative.ErrorSuccess)
@@ -701,6 +889,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private void EnumerateProcesses(
         DateTimeOffset timestamp,
         bool shouldRefreshProcesses,
+        bool shouldRefreshHandleCounts,
         HashSet<int> activePids,
         ref int processCount,
         ref long threadCount,
@@ -743,15 +932,18 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 var workingSetGb = 0d;
                 var processName = NormalizeProcessName(entry.szExeFile, processId);
 
-                var processHandle = ProcessNative.OpenProcess(
-                    ProcessNative.ProcessQueryLimitedInformation | ProcessNative.ProcessVmRead,
-                    false,
-                    processId);
+                var shouldOpenProcess = shouldRefreshProcesses || shouldRefreshHandleCounts;
+                var processHandle = shouldOpenProcess
+                    ? ProcessNative.OpenProcess(
+                        ProcessNative.ProcessQueryLimitedInformation | ProcessNative.ProcessVmRead,
+                        false,
+                        processId)
+                    : nint.Zero;
                 if (ProcessNative.IsValidHandle(processHandle))
                 {
                     try
                     {
-                        if (ProcessNative.GetProcessHandleCount(processHandle, out var handleValue))
+                        if (shouldRefreshHandleCounts && ProcessNative.GetProcessHandleCount(processHandle, out var handleValue))
                         {
                             processHandles = unchecked((int)handleValue);
                             handleCount += processHandles;

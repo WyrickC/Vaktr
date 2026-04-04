@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Vaktr.App.ViewModels;
 
 namespace Vaktr.App.Controls;
@@ -31,6 +32,8 @@ public sealed class UsageGauge : UserControl
     private readonly TextBlock _valueText;
     private readonly TextBlock _captionText;
     private bool _redrawQueued;
+    private bool _redrawUpgradePending;
+    private DispatcherQueuePriority _queuedRedrawPriority = DispatcherQueuePriority.Low;
 
     public UsageGauge()
     {
@@ -123,23 +126,43 @@ public sealed class UsageGauge : UserControl
         _innerBorder.BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A");
         _valueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _captionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        ScheduleRedraw();
+        ScheduleRedraw(DispatcherQueuePriority.High);
     }
 
-    private void ScheduleRedraw()
+    private void ScheduleRedraw(DispatcherQueuePriority priority = DispatcherQueuePriority.Low)
     {
         if (_redrawQueued)
         {
+            if (GetPriorityRank(priority) > GetPriorityRank(_queuedRedrawPriority))
+            {
+                _queuedRedrawPriority = priority;
+                _redrawUpgradePending = true;
+            }
+
             return;
         }
 
         _redrawQueued = true;
-        _ = DispatcherQueue.TryEnqueue(() =>
+        _queuedRedrawPriority = priority;
+        _ = DispatcherQueue.TryEnqueue(priority, () =>
         {
             _redrawQueued = false;
             Redraw();
+
+            if (_redrawUpgradePending)
+            {
+                _redrawUpgradePending = false;
+                ScheduleRedraw(_queuedRedrawPriority);
+            }
         });
     }
+
+    private static int GetPriorityRank(DispatcherQueuePriority priority) => priority switch
+    {
+        DispatcherQueuePriority.High => 2,
+        DispatcherQueuePriority.Normal => 1,
+        _ => 0,
+    };
 
     private void Redraw()
     {

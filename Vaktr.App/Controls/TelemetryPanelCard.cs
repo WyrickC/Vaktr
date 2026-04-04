@@ -34,10 +34,15 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly UsageGauge _gauge;
     private readonly Grid _visualGrid;
     private readonly Border _chartFrame;
+    private readonly Border _rangeShell;
+    private readonly Border _scalePill;
     private readonly StackPanel _legendHost;
     private readonly ScrollViewer _legendScroller;
     private readonly Border _processSection;
     private readonly TextBlock _processSectionTitleText;
+    private readonly TextBlock _processLabelText;
+    private readonly TextBlock _activityLabelText;
+    private readonly TextBlock _valueLabelText;
     private readonly StackPanel _processRowsHost;
     private readonly ScrollViewer _processScroller;
     private readonly ActionChip _oneMinuteButton;
@@ -66,9 +71,11 @@ public sealed class TelemetryPanelCard : UserControl
     private bool _isHeaderPointerDown;
     private bool _isHeaderDragActive;
     private FrameworkElement? _headerDragHandle;
+    private readonly TranslateTransform _dragTransform = new();
     private Windows.Foundation.Point _headerPointerStart;
     private TelemetryPanelCard? _activeDropTargetCard;
     private bool _isEffectivelyVisible = true;
+    private bool _isRenderingSuspended;
     private bool _deferredRefreshPending;
 
     public event EventHandler<TimeRangePresetRequestedEventArgs>? RangePresetRequested;
@@ -83,7 +90,7 @@ public sealed class TelemetryPanelCard : UserControl
     {
         MinHeight = 388;
         HorizontalAlignment = HorizontalAlignment.Stretch;
-        CacheMode = new BitmapCache();
+        RenderTransform = _dragTransform;
 
         _badgeIconHost = new Grid
         {
@@ -229,25 +236,25 @@ public sealed class TelemetryPanelCard : UserControl
         processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) });
         processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var processLabel = CreateTextBlock(fontSize: 10);
-        processLabel.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        processLabel.CharacterSpacing = 60;
-        processLabel.Text = "PROCESS";
-        processColumns.Children.Add(processLabel);
+        _processLabelText = CreateTextBlock(fontSize: 10);
+        _processLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _processLabelText.CharacterSpacing = 60;
+        _processLabelText.Text = "PROCESS";
+        processColumns.Children.Add(_processLabelText);
 
-        var sparkLabel = CreateTextBlock(fontSize: 10);
-        sparkLabel.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        sparkLabel.CharacterSpacing = 60;
-        sparkLabel.Text = "ACTIVITY";
-        processColumns.Children.Add(sparkLabel);
-        Grid.SetColumn(sparkLabel, 1);
+        _activityLabelText = CreateTextBlock(fontSize: 10);
+        _activityLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _activityLabelText.CharacterSpacing = 60;
+        _activityLabelText.Text = "ACTIVITY";
+        processColumns.Children.Add(_activityLabelText);
+        Grid.SetColumn(_activityLabelText, 1);
 
-        var valueLabel = CreateTextBlock(fontSize: 10);
-        valueLabel.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        valueLabel.CharacterSpacing = 60;
-        valueLabel.Text = "VALUE";
-        processColumns.Children.Add(valueLabel);
-        Grid.SetColumn(valueLabel, 2);
+        _valueLabelText = CreateTextBlock(fontSize: 10);
+        _valueLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _valueLabelText.CharacterSpacing = 60;
+        _valueLabelText.Text = "VALUE";
+        processColumns.Children.Add(_valueLabelText);
+        Grid.SetColumn(_valueLabelText, 2);
 
         _processSection = new Border
         {
@@ -282,7 +289,7 @@ public sealed class TelemetryPanelCard : UserControl
             },
         };
 
-        var rangeShell = new Border
+        _rangeShell = new Border
         {
             Background = CreateSurfaceGradient("#102031", "#15283E"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
@@ -308,7 +315,7 @@ public sealed class TelemetryPanelCard : UserControl
                 _footerText,
             },
         });
-        var scalePill = new Border
+        _scalePill = new Border
         {
             Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
@@ -318,12 +325,14 @@ public sealed class TelemetryPanelCard : UserControl
             Child = _scaleText,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
-        metaGrid.Children.Add(scalePill);
-        Grid.SetColumn(scalePill, 1);
+        metaGrid.Children.Add(_scalePill);
+        Grid.SetColumn(_scalePill, 1);
 
         var headerContent = new StackPanel
         {
             Spacing = 3,
+            Padding = new Thickness(0, 2, 0, 2),
+            Background = BrushFactory.CreateBrush("#00FFFFFF"),
             Children =
             {
                 metaGrid,
@@ -332,18 +341,19 @@ public sealed class TelemetryPanelCard : UserControl
                 _secondaryValueText,
             },
         };
-        headerContent.PointerPressed += OnHeaderPointerPressed;
-        headerContent.PointerMoved += OnHeaderPointerMoved;
-        headerContent.PointerReleased += OnHeaderPointerReleased;
-        headerContent.PointerCaptureLost += OnHeaderPointerCaptureLost;
-        _headerDragHandle = headerContent;
-
         var headerGrid = new Grid();
+        headerGrid.Background = BrushFactory.CreateBrush("#00FFFFFF");
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.ManipulationMode = ManipulationModes.None;
         headerGrid.Children.Add(headerContent);
-        headerGrid.Children.Add(rangeShell);
-        Grid.SetColumn(rangeShell, 1);
+        headerGrid.Children.Add(_rangeShell);
+        Grid.SetColumn(_rangeShell, 1);
+        headerGrid.PointerPressed += OnHeaderPointerPressed;
+        headerGrid.PointerMoved += OnHeaderPointerMoved;
+        headerGrid.PointerReleased += OnHeaderPointerReleased;
+        headerGrid.PointerCaptureLost += OnHeaderPointerCaptureLost;
+        _headerDragHandle = headerGrid;
 
         _cardBorder = new Border
         {
@@ -418,7 +428,7 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void OnPanelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (!_isEffectivelyVisible && !IsPriorityPanelProperty(e.PropertyName))
+        if (_isRenderingSuspended || (!_isEffectivelyVisible && !IsPriorityPanelProperty(e.PropertyName)))
         {
             _deferredRefreshPending = true;
             return;
@@ -551,6 +561,21 @@ public sealed class TelemetryPanelCard : UserControl
         }
     }
 
+    public void SetRenderingSuspended(bool suspended)
+    {
+        if (_isRenderingSuspended == suspended)
+        {
+            return;
+        }
+
+        _isRenderingSuspended = suspended;
+        if (!_isRenderingSuspended && _deferredRefreshPending)
+        {
+            _deferredRefreshPending = false;
+            RefreshFromPanel();
+        }
+    }
+
     private static bool IsPriorityPanelProperty(string? propertyName)
     {
         return string.Equals(propertyName, nameof(MetricPanelViewModel.CurrentValue), StringComparison.Ordinal) ||
@@ -563,12 +588,27 @@ public sealed class TelemetryPanelCard : UserControl
     {
         _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
         _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _rangeShell.Background = CreateSurfaceGradient("#102031", "#15283E");
+        _rangeShell.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _scalePill.Background = ResolveBrush("SurfaceElevatedBrush", "#15283B");
+        _scalePill.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _chartFrame.Background = CreateSurfaceGradient("#0E1A2B", "#13263B");
         _chartFrame.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _processSection.Background = CreateSurfaceGradient("#0F1C2D", "#14263A");
         _processSection.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _legendScroller.Background = null;
         _processScroller.Background = null;
+        _processLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _activityLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _valueLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+
+        _oneMinuteButton.RefreshThemeResources();
+        _fiveMinuteButton.RefreshThemeResources();
+        _fifteenMinuteButton.RefreshThemeResources();
+        _oneHourButton.RefreshThemeResources();
+        _sortHighestButton.RefreshThemeResources();
+        _sortLowestButton.RefreshThemeResources();
+        _sortNameButton.RefreshThemeResources();
 
         foreach (var rowParts in _legendRows.Values)
         {
@@ -591,6 +631,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         if (Panel is { } panel)
         {
+            UpdateBadgeIcon(panel);
             ApplyPalette(panel);
         }
         else
@@ -808,6 +849,11 @@ public sealed class TelemetryPanelCard : UserControl
             return;
         }
 
+        if (IsInteractiveHeaderElement(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
         if (!e.GetCurrentPoint(_headerDragHandle).Properties.IsLeftButtonPressed)
         {
             return;
@@ -816,6 +862,8 @@ public sealed class TelemetryPanelCard : UserControl
         _isHeaderPointerDown = true;
         _isHeaderDragActive = false;
         _headerPointerStart = e.GetCurrentPoint(this).Position;
+        this.CancelDirectManipulations();
+        FindAncestor<ScrollViewer>(_headerDragHandle)?.CancelDirectManipulations();
         _headerDragHandle?.CapturePointer(e.Pointer);
         e.Handled = true;
     }
@@ -832,17 +880,20 @@ public sealed class TelemetryPanelCard : UserControl
         {
             var deltaX = point.X - _headerPointerStart.X;
             var deltaY = point.Y - _headerPointerStart.Y;
-            if ((deltaX * deltaX) + (deltaY * deltaY) < 64d)
+            if ((deltaX * deltaX) + (deltaY * deltaY) < 25d)
             {
                 return;
             }
 
             _isHeaderDragActive = true;
+            Canvas.SetZIndex(this, 10);
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
             _cardBorder.Opacity = 0.96;
         }
 
+        _dragTransform.X = point.X - _headerPointerStart.X;
+        _dragTransform.Y = point.Y - _headerPointerStart.Y;
         UpdateDropTargetState(e);
         e.Handled = true;
     }
@@ -855,7 +906,7 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         var wasDragging = _isHeaderDragActive;
-        var targetCard = wasDragging ? ResolveDropTargetCard(e) : null;
+        var targetCard = wasDragging ? _activeDropTargetCard ?? ResolveDropTargetCard(e) : null;
         var targetKey = targetCard?.Panel?.PanelKey;
         EndHeaderDragInteraction();
 
@@ -1005,7 +1056,41 @@ public sealed class TelemetryPanelCard : UserControl
         _activeDropTargetCard?.SetDropTargetState(false);
         _activeDropTargetCard = null;
         _cardBorder.Opacity = 1.0;
+        _dragTransform.X = 0;
+        _dragTransform.Y = 0;
+        Canvas.SetZIndex(this, 0);
         SetDropTargetState(false);
+    }
+
+    private static bool IsInteractiveHeaderElement(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is ActionChip)
+            {
+                return true;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return false;
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? source)
+        where T : class
+    {
+        while (source is not null)
+        {
+            if (source is T match)
+            {
+                return match;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return null;
     }
 
     private static IEnumerable<TelemetryPanelCard> EnumeratePanelCards(DependencyObject root)
@@ -1201,6 +1286,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             null => "collection",
             { Category: MetricCategory.Cpu } => "cpu",
+            { Category: MetricCategory.Gpu } => "gpu",
             { Category: MetricCategory.Memory } => "memory",
             { Category: MetricCategory.Disk, PrefersGaugeVisual: true } => "drive",
             { Category: MetricCategory.Disk } => "disk",
@@ -1295,6 +1381,7 @@ public sealed class TelemetryPanelCard : UserControl
     private static string FormatValue(double value, MetricUnit unit) => unit switch
     {
         MetricUnit.Percent => $"{value:0.#}%",
+        MetricUnit.Celsius => $"{value:0.#} C",
         MetricUnit.Gigabytes when value >= 1024d => $"{value / 1024d:0.0} TiB",
         MetricUnit.Gigabytes => $"{value:0.0} GiB",
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",

@@ -60,13 +60,14 @@ public sealed class TelemetryChart : UserControl
     private readonly TextBlock _emptyStateText;
     private bool _isSelecting;
     private bool _redrawQueued;
+    private bool _redrawUpgradePending;
+    private DispatcherQueuePriority _queuedRedrawPriority = DispatcherQueuePriority.Low;
     private double _selectionStartX;
     private double _selectionCurrentX;
 
     public TelemetryChart()
     {
         UseLayoutRounding = true;
-        CacheMode = new BitmapCache();
 
         _canvas = new Canvas();
         _interactionCanvas = new Canvas();
@@ -185,23 +186,43 @@ public sealed class TelemetryChart : UserControl
         _hoverTooltipText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _emptyStateText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         HideHover();
-        ScheduleRedraw();
+        ScheduleRedraw(DispatcherQueuePriority.High);
     }
 
-    private void ScheduleRedraw()
+    private void ScheduleRedraw(DispatcherQueuePriority priority = DispatcherQueuePriority.Low)
     {
         if (_redrawQueued)
         {
+            if (GetPriorityRank(priority) > GetPriorityRank(_queuedRedrawPriority))
+            {
+                _queuedRedrawPriority = priority;
+                _redrawUpgradePending = true;
+            }
+
             return;
         }
 
         _redrawQueued = true;
-        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        _queuedRedrawPriority = priority;
+        _ = DispatcherQueue.TryEnqueue(priority, () =>
         {
             _redrawQueued = false;
             Redraw();
+
+            if (_redrawUpgradePending)
+            {
+                _redrawUpgradePending = false;
+                ScheduleRedraw(_queuedRedrawPriority);
+            }
         });
     }
+
+    private static int GetPriorityRank(DispatcherQueuePriority priority) => priority switch
+    {
+        DispatcherQueuePriority.High => 2,
+        DispatcherQueuePriority.Normal => 1,
+        _ => 0,
+    };
 
     private void Redraw()
     {
@@ -480,24 +501,24 @@ public sealed class TelemetryChart : UserControl
     {
         var density = seriesCount switch
         {
-            <= 1 => 0.95d,
-            2 => 0.8d,
-            <= 4 => 0.6d,
-            <= 8 => 0.42d,
-            _ => 0.3d,
+            <= 1 => 0.72d,
+            2 => 0.58d,
+            <= 4 => 0.42d,
+            <= 8 => 0.3d,
+            _ => 0.22d,
         };
 
         var windowFactor = window switch
         {
-            _ when window >= TimeSpan.FromDays(30) => 0.26d,
-            _ when window >= TimeSpan.FromDays(7) => 0.34d,
-            _ when window >= TimeSpan.FromDays(1) => 0.44d,
-            _ when window >= TimeSpan.FromHours(12) => 0.55d,
-            _ when window >= TimeSpan.FromHours(1) => 0.72d,
-            _ => 1d,
+            _ when window >= TimeSpan.FromDays(30) => 0.24d,
+            _ when window >= TimeSpan.FromDays(7) => 0.3d,
+            _ when window >= TimeSpan.FromDays(1) => 0.38d,
+            _ when window >= TimeSpan.FromHours(12) => 0.5d,
+            _ when window >= TimeSpan.FromHours(1) => 0.66d,
+            _ => 0.88d,
         };
 
-        return Math.Max(30, (int)Math.Round(width * density * windowFactor));
+        return Math.Max(24, (int)Math.Round(width * density * windowFactor));
     }
 
     private static IReadOnlyList<MetricPoint> GetRenderablePoints(
@@ -510,11 +531,18 @@ public sealed class TelemetryChart : UserControl
             return Array.Empty<MetricPoint>();
         }
 
-        var filtered = points
-            .Where(point => point.Timestamp >= start && point.Timestamp <= end)
-            .ToArray();
+        var filtered = new List<MetricPoint>(points.Count);
 
-        if (filtered.Length > 0)
+        for (var index = 0; index < points.Count; index++)
+        {
+            var point = points[index];
+            if (point.Timestamp >= start && point.Timestamp <= end)
+            {
+                filtered.Add(point);
+            }
+        }
+
+        if (filtered.Count > 0)
         {
             return filtered;
         }
@@ -522,7 +550,11 @@ public sealed class TelemetryChart : UserControl
         var nearest = FindNearestPoint(points, start);
         return nearest is null
             ? Array.Empty<MetricPoint>()
-            : new MetricPoint[] { nearest };
+            :
+            [
+                new MetricPoint(start, nearest.Value),
+                new MetricPoint(end, nearest.Value),
+            ];
     }
 
     private static IReadOnlyList<Windows.Foundation.Point> NormalizeProjectedPoints(IEnumerable<Windows.Foundation.Point> points)
@@ -540,7 +572,7 @@ public sealed class TelemetryChart : UserControl
         for (var index = 1; index < source.Length; index++)
         {
             var point = source[index];
-            if (Math.Abs(point.X - active.X) < 3.5d)
+            if (Math.Abs(point.X - active.X) < 0.8d)
             {
                 active = point;
                 normalized[^1] = point;
@@ -549,13 +581,6 @@ public sealed class TelemetryChart : UserControl
 
             active = point;
             normalized.Add(point);
-        }
-
-        while (normalized.Count > 1 &&
-               normalized[0].X <= LeftPadding + 8d &&
-               normalized[1].X <= LeftPadding + 24d)
-        {
-            normalized.RemoveAt(0);
         }
 
         return normalized;
@@ -610,8 +635,8 @@ public sealed class TelemetryChart : UserControl
         {
             var current = points[startIndex];
             var next = points[startIndex + 1];
-            var nearLeadingEdge = current.X <= LeftPadding + 28d;
-            var compressedX = Math.Abs(next.X - current.X) < 10d;
+            var nearLeadingEdge = current.X <= LeftPadding + 10d;
+            var compressedX = Math.Abs(next.X - current.X) < 0.8d;
 
             if (!nearLeadingEdge || !compressedX)
             {
@@ -815,6 +840,7 @@ public sealed class TelemetryChart : UserControl
     private static string FormatAxisValue(double value, MetricUnit unit) => unit switch
     {
         MetricUnit.Percent => $"{value:0.#}%",
+        MetricUnit.Celsius => $"{value:0.#} C",
         MetricUnit.Gigabytes when value >= 1024d => $"{value / 1024d:0.0} TiB",
         MetricUnit.Gigabytes => $"{value:0.0} GiB",
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",

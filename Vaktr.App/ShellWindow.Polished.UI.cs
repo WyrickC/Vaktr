@@ -48,26 +48,22 @@ public sealed partial class ShellWindow
         {
             Background = ResolveBrush("AppBackdropBrush", "#030812"),
         };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.Children.Add(_titleBarDragHost);
 
-        root.Children.Add(new ScrollViewer
+        _scrollHost.Content = new Grid
         {
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollMode = ScrollMode.Enabled,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            HorizontalScrollMode = ScrollMode.Disabled,
-            ZoomMode = ZoomMode.Disabled,
-            IsTabStop = false,
-            Content = new Grid
+            Margin = new Thickness(24, 22, 24, 28),
+            Children =
             {
-                Margin = new Thickness(24, 22, 24, 28),
-                Children =
-                {
-                    shellHalo,
-                    shellOutline,
-                    shellBorder,
-                },
+                shellHalo,
+                shellOutline,
+                shellBorder,
             },
-        });
+        };
+        root.Children.Add(_scrollHost);
+        Grid.SetRow(_scrollHost, 1);
 
         root.Loaded += OnRootLoaded;
         root.SizeChanged += OnRootLayoutSizeChanged;
@@ -174,16 +170,6 @@ public sealed partial class ShellWindow
         };
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        actionRow.Children.Add(new StackPanel
-        {
-            Spacing = 2,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                CreateSecondaryText("Review and stage changes when you want them.", 12),
-                CreateMutedText("Nothing in the control deck applies until you enter edit mode and click Apply.", 11),
-            },
-        });
 
         var editButton = CreateChipRow(
             CreateActionChip("Edit", OnEditSettingsClick, filled: true));
@@ -336,16 +322,6 @@ public sealed partial class ShellWindow
         };
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         actionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        actionRow.Children.Add(new StackPanel
-        {
-            Spacing = 2,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                CreateSecondaryText("Changes stay staged until you click Apply.", 12),
-                CreateMutedText($"Default path: {VaktrConfig.DefaultStorageDirectory}", 11),
-            },
-        });
 
         var actionChips = CreateChipRow(
             CreateActionChip(
@@ -553,7 +529,7 @@ public sealed partial class ShellWindow
                         {
                             CreateFieldLabel("Retention window"),
                             retentionBox,
-                            CreateMutedText("Accepted formats: 30m, 24h, 7d. Minute inputs round up to the next full hour when Vaktr saves them.", 12),
+                            CreateMutedText("Accepted formats: 30m, 24h, 7d. Vaktr keeps the exact retention window you apply.", 12),
                         },
                     },
                     CreateChipWrapRow(
@@ -565,7 +541,7 @@ public sealed partial class ShellWindow
                         CreatePresetChip("90d", _viewModel.EffectiveRetentionHours == 2160, (_, _) => SetRetentionInput("90d"))),
                 },
             },
-            "Blank keeps the smart 24h default. Custom values still compact older data into 1-minute rollups after the first 6 hours.");
+            "Blank keeps the smart 24h default. Older samples are pruned to the exact retention window you apply.");
     }
 
     private Border CreateStorageEditorSurface()

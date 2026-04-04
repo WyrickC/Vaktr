@@ -26,8 +26,6 @@ public sealed class App : Application
         StartupTrace.Write("App.OnLaunched start");
         EnsureResourcesInitialized();
         StartupTrace.Write("Resources initialized // launch-cut-v19");
-        ApplyThemeResources(ThemeMode.Dark);
-        StartupTrace.Write("Default theme applied");
 
         var configStore = new JsonConfigStore();
         VaktrConfig config;
@@ -139,6 +137,16 @@ public sealed class App : Application
         SetBrushResource("AccentHaloBrush", palette.AccentHalo);
         SetBrushResource("WarningHaloBrush", palette.WarningHalo);
         SetBrushResource("OverlayScrimBrush", palette.OverlayScrim);
+    }
+
+    public Windows.UI.Color ResolveThemeColor(string key, string fallbackHex)
+    {
+        if (Resources.TryGetValue(key, out var value) && value is Microsoft.UI.Xaml.Media.SolidColorBrush brush)
+        {
+            return brush.Color;
+        }
+
+        return BrushFactory.ParseColor(fallbackHex);
     }
 
     private void SetBrushResource(string key, string hex)

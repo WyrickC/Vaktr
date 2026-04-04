@@ -20,6 +20,8 @@ public sealed class ActionChip : UserControl
 
     public ActionChip()
     {
+        UseLayoutRounding = true;
+
         _surface = new Border
         {
             CornerRadius = new CornerRadius(11),
@@ -126,6 +128,11 @@ public sealed class ActionChip : UserControl
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
         Click?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void RefreshThemeResources()
+    {
+        UpdateVisualState();
     }
 
     private void OnPointerEntered(object sender, PointerRoutedEventArgs e)

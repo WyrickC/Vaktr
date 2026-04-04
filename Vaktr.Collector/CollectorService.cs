@@ -5,8 +5,8 @@ namespace Vaktr.Collector;
 
 public sealed class CollectorService : IAsyncDisposable
 {
-    private static readonly TimeSpan InitialCollectionTimeout = TimeSpan.FromSeconds(4);
-    private static readonly TimeSpan RecurringCollectionTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan InitialCollectionTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RecurringCollectionTimeout = TimeSpan.FromSeconds(4);
 
     private readonly IMetricCollector _collector;
     private readonly IMetricStore _store;
@@ -35,9 +35,13 @@ public sealed class CollectorService : IAsyncDisposable
             await _store.InitializeAsync(config, cancellationToken).ConfigureAwait(false);
 
             _loopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            await CollectOnceAsync(_loopCancellation.Token, InitialCollectionTimeout).ConfigureAwait(false);
             _timer = new PeriodicTimer(TimeSpan.FromSeconds(config.ScrapeIntervalSeconds));
-            _loopTask = Task.Run(() => RunLoopAsync(_timer, _loopCancellation.Token));
+            _loopTask = Task.Factory.StartNew(
+                    () => RunLoopAsync(_timer, _loopCancellation.Token),
+                    _loopCancellation.Token,
+                    TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default)
+                .Unwrap();
         }
         finally
         {
@@ -68,6 +72,17 @@ public sealed class CollectorService : IAsyncDisposable
 
     private async Task RunLoopAsync(PeriodicTimer timer, CancellationToken cancellationToken)
     {
+        try
+        {
+            Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
+        }
+        catch
+        {
+            // If the runtime denies thread priority changes, we still keep the collector running.
+        }
+
+        await CollectOnceAsync(cancellationToken, InitialCollectionTimeout).ConfigureAwait(false);
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -10,6 +11,7 @@ using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage.Pickers;
+using Windows.UI;
 using WinRT.Interop;
 using Vaktr.App.Controls;
 using Vaktr.App.Services;
@@ -33,8 +35,11 @@ public sealed partial class ShellWindow : Window
     private readonly IConfigStore _configStore;
     private readonly AutoLaunchService _autoLaunchService;
     private readonly Dictionary<string, TelemetryPanelCard> _panelCards = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<SummaryCardVisual> _summaryCardVisuals = [];
 
     private readonly Grid _rootLayout;
+    private readonly Grid _titleBarDragHost;
+    private readonly ScrollViewer _scrollHost;
     private readonly Border _controlsBodyHost;
     private readonly Border _brandHost;
     private readonly Grid _summaryHost;
@@ -65,6 +70,8 @@ public sealed partial class ShellWindow : Window
     private bool _summaryCardsBound;
     private bool _globalRangeEditorVisible;
     private bool _snapshotApplyQueued;
+    private bool _controlDeckRenderQueued;
+    private bool _panelRenderingSuspended;
     private string _lastRenderedStatusText = string.Empty;
     private string _draftScrapeIntervalInput = string.Empty;
     private string _draftRetentionInput = string.Empty;
@@ -117,9 +124,26 @@ public sealed partial class ShellWindow : Window
         _globalSevenDayButton = CreateGlobalRangeChip("7d", 10080);
         _globalThirtyDayButton = CreateGlobalRangeChip("30d", 43200);
         _globalResetZoomButton = CreateActionChip("Reset zoom", OnResetAllZoomClick);
+        _titleBarDragHost = new Grid
+        {
+            Height = 34,
+            Background = ResolveBrush("AppBackdropBrush", "#030812"),
+        };
+        _scrollHost = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollMode = ScrollMode.Enabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            ZoomMode = ZoomMode.Disabled,
+            IsTabStop = false,
+        };
+        _scrollHost.ViewChanged += OnScrollHostViewChanged;
 
         _rootLayout = BuildRootLayout();
         Content = _rootLayout;
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(_titleBarDragHost);
 
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.DashboardPanels.CollectionChanged += OnDashboardPanelsChanged;
@@ -145,6 +169,8 @@ public sealed partial class ShellWindow : Window
         {
             _rootLayout.RequestedTheme = requestedTheme;
         }
+
+        RefreshWindowChrome();
     }
 
     public void ApplyTheme(ThemeMode mode)
@@ -164,27 +190,42 @@ public sealed partial class ShellWindow : Window
 
     private void RefreshThemeVisuals()
     {
-        if (_controlDeckEditableActive)
+        RunWithDeferredPanelRendering(() =>
         {
-            RenderEditableControlDeck();
-        }
-        else
-        {
-            RenderControlDeckSummary();
-        }
+            if (_controlDeckEditableActive)
+            {
+                RenderEditableControlDeck();
+            }
+            else
+            {
+                RenderControlDeckSummary();
+            }
 
-        if (_globalRangeEditorVisible)
-        {
-            RenderGlobalRangeEditor();
-        }
+            if (_globalRangeEditorVisible)
+            {
+                RenderGlobalRangeEditor();
+            }
 
-        RebuildSummaryCards();
-        foreach (var card in _panelCards.Values)
-        {
-            card.RefreshThemeResources();
-        }
+            RefreshSummaryCardThemeResources();
+            foreach (var card in _panelCards.Values)
+            {
+                card.RefreshThemeResources();
+            }
 
-        RefreshGlobalRangeControls();
+            RefreshGlobalRangeControls();
+            _globalRangeButton.RefreshThemeResources();
+            _globalOneMinuteButton.RefreshThemeResources();
+            _globalFiveMinuteButton.RefreshThemeResources();
+            _globalFifteenMinuteButton.RefreshThemeResources();
+            _globalThirtyMinuteButton.RefreshThemeResources();
+            _globalOneHourButton.RefreshThemeResources();
+            _globalTwelveHourButton.RefreshThemeResources();
+            _globalTwentyFourHourButton.RefreshThemeResources();
+            _globalSevenDayButton.RefreshThemeResources();
+            _globalThirtyDayButton.RefreshThemeResources();
+            _globalResetZoomButton.RefreshThemeResources();
+            RefreshWindowChrome();
+        });
     }
 
     private void BuildSummaryCards()
@@ -198,6 +239,7 @@ public sealed partial class ShellWindow : Window
         _summaryHost.Children.Clear();
         _summaryHost.RowDefinitions.Clear();
         _summaryHost.ColumnDefinitions.Clear();
+        _summaryCardVisuals.Clear();
         var summaryColumns = DetermineSummaryColumns();
         _lastSummaryColumnCount = summaryColumns;
         for (var column = 0; column < summaryColumns; column++)
@@ -207,7 +249,7 @@ public sealed partial class ShellWindow : Window
 
         foreach (var card in _viewModel.SummaryCards)
         {
-            var badgeHost = IconFactory.CreateTile(card.Title, card.AccentBrush, 48, 16);
+            var badgeHost = (Border)IconFactory.CreateTile(card.Title, card.AccentBrush, 48, 16);
             badgeHost.VerticalAlignment = VerticalAlignment.Center;
 
             var titleText = CreateMutedText(string.Empty, 9.5);
@@ -255,6 +297,7 @@ public sealed partial class ShellWindow : Window
                 Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);
+            _summaryCardVisuals.Add(new SummaryCardVisual(summaryCard, titleText, valueText, captionText, badgeHost, card));
             var index = _summaryHost.Children.Count - 1;
             while (_summaryHost.RowDefinitions.Count <= index / summaryColumns)
             {
@@ -268,13 +311,22 @@ public sealed partial class ShellWindow : Window
         _summaryCardsBound = true;
     }
 
-    private void RebuildSummaryCards()
+    private void RefreshSummaryCardThemeResources()
     {
-        _summaryCardsBound = false;
-        _summaryHost.Children.Clear();
-        _summaryHost.RowDefinitions.Clear();
-        _summaryHost.ColumnDefinitions.Clear();
-        BuildSummaryCards();
+        if (!_summaryCardsBound)
+        {
+            return;
+        }
+
+        foreach (var visual in _summaryCardVisuals)
+        {
+            visual.Surface.Background = CreateSurfaceGradient("#0F1C2D", "#15283F");
+            visual.Surface.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            visual.TitleText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+            visual.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+            visual.CaptionText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+            visual.BadgeHost.Child = IconFactory.CreateTile(visual.ViewModel.Title, visual.ViewModel.AccentBrush, 48, 16);
+        }
     }
 
     private void RefreshPanelToggles()
@@ -314,6 +366,8 @@ public sealed partial class ShellWindow : Window
             {
                 card.Panel = panel;
             }
+
+            card.SetRenderingSuspended(_panelRenderingSuspended);
         }
 
         _dashboardGrid.Children.Clear();
@@ -411,6 +465,7 @@ public sealed partial class ShellWindow : Window
         _viewModel.DashboardPanels.CollectionChanged -= OnDashboardPanelsChanged;
         _viewModel.PanelToggles.CollectionChanged -= OnPanelTogglesChanged;
         Activated -= OnWindowActivated;
+        _scrollHost.ViewChanged -= OnScrollHostViewChanged;
 
         if (_windowIconHandle != 0)
         {
@@ -440,6 +495,7 @@ public sealed partial class ShellWindow : Window
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
+        RefreshWindowChrome();
         if (_windowIconApplied)
         {
             return;
@@ -539,13 +595,13 @@ public sealed partial class ShellWindow : Window
     {
         if (sender is ActionChip { Tag: int minutes })
         {
-            ApplyGlobalWindowRange(minutes);
+            RunWithDeferredPanelRendering(() => ApplyGlobalWindowRange(minutes));
         }
     }
 
     private void OnPanelRangePresetRequested(object? sender, TimeRangePresetRequestedEventArgs e)
     {
-        ApplyGlobalWindowRange((int)e.Preset);
+        RunWithDeferredPanelRendering(() => ApplyGlobalWindowRange((int)e.Preset));
     }
 
     private void OnPanelZoomSelectionRequested(object? sender, ChartZoomSelectionEventArgs e)
@@ -565,14 +621,18 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
+        RefreshDashboardPanels();
         _ = PersistLayoutAsync();
     }
 
     private void OnResetAllZoomClick(object? sender, EventArgs e)
     {
-        _globalAbsoluteStartUtc = null;
-        _globalAbsoluteEndUtc = null;
-        _viewModel.ResetGlobalZoom();
+        RunWithDeferredPanelRendering(() =>
+        {
+            _globalAbsoluteStartUtc = null;
+            _globalAbsoluteEndUtc = null;
+            _viewModel.ResetGlobalZoom();
+        });
 
         HideGlobalRangeEditor();
         RefreshGlobalRangeControls();
@@ -668,6 +728,44 @@ public sealed partial class ShellWindow : Window
             StartupTrace.Write("Queued dashboard refresh after resize // polished-v19");
             RefreshDashboardPanels();
         });
+    }
+
+    private void OnScrollHostViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (e.IsIntermediate)
+        {
+            SetPanelRenderingSuspended(true);
+            return;
+        }
+
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => SetPanelRenderingSuspended(false));
+    }
+
+    private void RunWithDeferredPanelRendering(Action action)
+    {
+        SetPanelRenderingSuspended(true);
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => SetPanelRenderingSuspended(false));
+        }
+    }
+
+    private void SetPanelRenderingSuspended(bool suspended)
+    {
+        if (_panelRenderingSuspended == suspended)
+        {
+            return;
+        }
+
+        _panelRenderingSuspended = suspended;
+        foreach (var card in _panelCards.Values)
+        {
+            card.SetRenderingSuspended(suspended);
+        }
     }
 
     private void OnRootLayoutSizeChanged(object sender, SizeChangedEventArgs e)
@@ -803,6 +901,24 @@ public sealed partial class ShellWindow : Window
         RenderEditableControlDeck();
     }
 
+    private void QueueEditableControlDeckRender()
+    {
+        if (!_controlDeckEditableActive || _controlDeckRenderQueued)
+        {
+            return;
+        }
+
+        _controlDeckRenderQueued = true;
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            _controlDeckRenderQueued = false;
+            if (_controlDeckEditableActive)
+            {
+                RenderEditableControlDeck();
+            }
+        });
+    }
+
     private void SyncControlDeckDraftsFromViewModel()
     {
         _draftScrapeIntervalInput = _viewModel.ScrapeIntervalInput;
@@ -828,7 +944,7 @@ public sealed partial class ShellWindow : Window
         _draftScrapeIntervalInput = next == VaktrConfig.DefaultScrapeIntervalSeconds
             ? string.Empty
             : next.ToString(CultureInfo.InvariantCulture);
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private void SetScrapeInterval(int seconds)
@@ -836,7 +952,7 @@ public sealed partial class ShellWindow : Window
         _draftScrapeIntervalInput = seconds == VaktrConfig.DefaultScrapeIntervalSeconds
             ? string.Empty
             : seconds.ToString(CultureInfo.InvariantCulture);
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private void NudgeScrapeInterval(int delta)
@@ -848,26 +964,26 @@ public sealed partial class ShellWindow : Window
     private void ResetScrapeInterval()
     {
         _draftScrapeIntervalInput = string.Empty;
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private void SetRetentionInput(string value)
     {
         _draftRetentionInput = value;
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private void StepRetentionHours(int direction)
     {
         var next = MoveThroughPresets(GetDraftRetentionHours(), RetentionHourPresets, direction);
         _draftRetentionInput = FormatRetentionDraftInput(next);
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private void SetRetentionHours(int hours)
     {
         _draftRetentionInput = FormatRetentionDraftInput(hours);
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private void NudgeRetentionHours(int delta)
@@ -879,7 +995,7 @@ public sealed partial class ShellWindow : Window
     private void ResetRetentionHours()
     {
         _draftRetentionInput = string.Empty;
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private static string FormatRetentionDraftInput(int hours) =>
@@ -888,7 +1004,7 @@ public sealed partial class ShellWindow : Window
     private void ResetStorageDirectory()
     {
         _draftStorageDirectory = string.Empty;
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private void SetStorageDirectory(string? value)
@@ -899,7 +1015,7 @@ public sealed partial class ShellWindow : Window
         }
 
         _draftStorageDirectory = value.Trim();
-        RenderEditableControlDeck();
+        QueueEditableControlDeckRender();
     }
 
     private static bool TryNormalizeScrapeInput(string? text, out string normalizedText)
@@ -1231,6 +1347,41 @@ public sealed partial class ShellWindow : Window
         _globalResetZoomButton.Opacity = _viewModel.DashboardPanels.Any(panel => panel.IsZoomed) ? 1d : 0.82d;
     }
 
+    private void RefreshWindowChrome()
+    {
+        try
+        {
+            var titleBar = AppWindow.TitleBar;
+            if (titleBar is null)
+            {
+                return;
+            }
+
+            var transparent = Color.FromArgb(0, 0, 0, 0);
+            var foreground = App.CurrentApp.ResolveThemeColor("TextSecondaryBrush", _rootLayout.RequestedTheme == ElementTheme.Light ? "#4A6078" : "#C6D7EA");
+            var hoverBackground = App.CurrentApp.ResolveThemeColor("SurfaceElevatedBrush", _rootLayout.RequestedTheme == ElementTheme.Light ? "#F4F8FC" : "#112033");
+            var pressedBackground = App.CurrentApp.ResolveThemeColor("SurfaceStrongBrush", _rootLayout.RequestedTheme == ElementTheme.Light ? "#EDF4FB" : "#18314A");
+            var inactiveForeground = App.CurrentApp.ResolveThemeColor("TextMutedBrush", _rootLayout.RequestedTheme == ElementTheme.Light ? "#6F8399" : "#8098B2");
+
+            titleBar.BackgroundColor = transparent;
+            titleBar.ForegroundColor = foreground;
+            titleBar.InactiveBackgroundColor = transparent;
+            titleBar.InactiveForegroundColor = inactiveForeground;
+            titleBar.ButtonBackgroundColor = transparent;
+            titleBar.ButtonForegroundColor = foreground;
+            titleBar.ButtonInactiveBackgroundColor = transparent;
+            titleBar.ButtonInactiveForegroundColor = inactiveForeground;
+            titleBar.ButtonHoverBackgroundColor = hoverBackground;
+            titleBar.ButtonHoverForegroundColor = foreground;
+            titleBar.ButtonPressedBackgroundColor = pressedBackground;
+            titleBar.ButtonPressedForegroundColor = foreground;
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("RefreshWindowChrome", ex);
+        }
+    }
+
     private void RenderGlobalRangeEditor()
     {
         _globalRangeEditorVisible = true;
@@ -1264,10 +1415,6 @@ public sealed partial class ShellWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(18),
             Padding = new Thickness(14, 12, 14, 12),
-            Transitions = new TransitionCollection
-            {
-                new EntranceThemeTransition(),
-            },
             Child = new StackPanel
             {
                 Spacing = 10,
@@ -1318,10 +1465,6 @@ public sealed partial class ShellWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(18),
             Padding = new Thickness(14, 12, 14, 12),
-            Transitions = new TransitionCollection
-            {
-                new EntranceThemeTransition(),
-            },
             Child = new StackPanel
             {
                 Spacing = 10,
@@ -1375,10 +1518,6 @@ public sealed partial class ShellWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(22),
             Padding = new Thickness(16, 14, 16, 14),
-            Transitions = new TransitionCollection
-            {
-                new EntranceThemeTransition(),
-            },
             Child = new StackPanel
             {
                 Spacing = 14,
@@ -1420,9 +1559,12 @@ public sealed partial class ShellWindow : Window
 
     private void ApplyAbsoluteGlobalRange(DateTimeOffset start, DateTimeOffset end)
     {
-        _globalAbsoluteStartUtc = start;
-        _globalAbsoluteEndUtc = end;
-        _viewModel.ApplyGlobalAbsoluteRange(start, end);
+        RunWithDeferredPanelRendering(() =>
+        {
+            _globalAbsoluteStartUtc = start;
+            _globalAbsoluteEndUtc = end;
+            _viewModel.ApplyGlobalAbsoluteRange(start, end);
+        });
 
         HideGlobalRangeEditor();
         _viewModel.StatusText = $"Pinned {start.LocalDateTime:g} to {end.LocalDateTime:g}";
@@ -1504,6 +1646,14 @@ internal enum DeckEditorMode
     Retention,
     Storage,
 }
+
+internal sealed record SummaryCardVisual(
+    Border Surface,
+    TextBlock TitleText,
+    TextBlock ValueText,
+    TextBlock CaptionText,
+    Border BadgeHost,
+    SummaryCardViewModel ViewModel);
 
 internal static class NativeWindowMethods
 {

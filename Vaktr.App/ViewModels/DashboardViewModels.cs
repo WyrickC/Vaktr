@@ -616,7 +616,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private static string BuildSummaryCaption(params string?[] parts) =>
-        string.Join(" // ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+        string.Join(" / ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
 
     private static string FormatCompactCount(double value)
     {
@@ -852,6 +852,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     private DateTimeOffset _windowEndUtc = DateTimeOffset.UtcNow;
     private DateTimeOffset? _zoomWindowStartUtc;
     private DateTimeOffset? _zoomWindowEndUtc;
+    private DateTimeOffset _latestPointTimestampUtc = DateTimeOffset.UtcNow;
     private PanelDetailContext _detailContext = PanelDetailContext.Empty;
     private IReadOnlyList<ProcessListItemViewModel> _processRows = Array.Empty<ProcessListItemViewModel>();
     private ProcessSortMode _processSortMode = ProcessSortMode.Highest;
@@ -883,11 +884,15 @@ public sealed class MetricPanelViewModel : ObservableObject
         "cpu-total" => 0,
         "cpu-cores" => 1,
         "cpu-frequency" => 2,
-        "host-activity" => 3,
-        "memory" => 4,
-        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) || PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) => 5,
-        _ when PanelKey.StartsWith("net-", StringComparison.OrdinalIgnoreCase) => 6,
-        _ => 7,
+        "cpu-temperature" => 3,
+        "gpu-total" => 4,
+        "gpu-memory" => 5,
+        "gpu-temperature" => 6,
+        "host-activity" => 7,
+        "memory" => 8,
+        _ when PanelKey.StartsWith("disk-", StringComparison.OrdinalIgnoreCase) || PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) => 9,
+        _ when PanelKey.StartsWith("net-", StringComparison.OrdinalIgnoreCase) => 10,
+        _ => 11,
     };
 
     public int SortVariant => PanelKey switch
@@ -908,6 +913,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     {
         MetricCategory.Disk when PrefersGaugeVisual => "DRV",
         MetricCategory.Cpu => "CPU",
+        MetricCategory.Gpu => "GPU",
         MetricCategory.Memory => "MEM",
         MetricCategory.Disk => "DSK",
         MetricCategory.Network => "NET",
@@ -1033,6 +1039,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     {
         _buffers.Clear();
         var paletteIndex = 0;
+        var latestTimestamp = DateTimeOffset.MinValue;
         foreach (var series in history.Series)
         {
             _buffers[series.SeriesKey] = new SeriesBuffer(
@@ -1042,7 +1049,16 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ResolveBrush(paletteIndex),
                 ResolveFillBrush(paletteIndex),
                 series.Points.LastOrDefault()?.Timestamp ?? DateTimeOffset.UtcNow);
+            if (series.Points.Count > 0 && series.Points[^1].Timestamp > latestTimestamp)
+            {
+                latestTimestamp = series.Points[^1].Timestamp;
+            }
             paletteIndex++;
+        }
+
+        if (latestTimestamp > DateTimeOffset.MinValue)
+        {
+            _latestPointTimestampUtc = latestTimestamp;
         }
 
         TrimBuffers(DateTimeOffset.UtcNow);
@@ -1065,6 +1081,7 @@ public sealed class MetricPanelViewModel : ObservableObject
         }
 
         buffer.Points.Add(new MetricPoint(sample.Timestamp, sample.Value));
+        _latestPointTimestampUtc = sample.Timestamp;
         if (sample.Timestamp - buffer.LastTrimUtc >= BufferTrimInterval)
         {
             TrimBuffers(sample.Timestamp);
@@ -1184,27 +1201,31 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private void RefreshPresentation(DateTimeOffset? anchor = null)
     {
-        var latestPoint = _buffers.Values.SelectMany(buffer => buffer.Points).LastOrDefault();
-        var liveAnchor = anchor ?? latestPoint?.Timestamp ?? DateTimeOffset.UtcNow;
+        var liveAnchor = anchor ?? _latestPointTimestampUtc;
         var end = IsZoomed ? _zoomWindowEndUtc!.Value : liveAnchor;
         var start = IsZoomed ? _zoomWindowStartUtc!.Value : end.AddMinutes(-(int)SelectedRange);
         WindowStartUtc = start;
         WindowEndUtc = end;
 
-        var visibleSeries = _buffers.Values
-            .Where(ShouldShowSeries)
-            .Select(buffer =>
+        var pointBudget = ResolveVisiblePointBudget(end - start);
+        var visibleSeries = new List<ChartSeriesViewModel>(_buffers.Count);
+        foreach (var buffer in _buffers.Values)
+        {
+            if (!ShouldShowSeries(buffer))
             {
-                var points = buffer.Points.Where(point => point.Timestamp >= start && point.Timestamp <= end).ToArray();
-                return points.Length == 0
-                    ? null
-                    : new ChartSeriesViewModel(buffer.Name, points, buffer.StrokeBrush, buffer.FillBrush);
-            })
-            .Where(series => series is not null)
-            .Cast<ChartSeriesViewModel>()
-            .ToArray();
+                continue;
+            }
 
-        VisibleSeries = visibleSeries;
+            var points = BuildVisiblePoints(buffer.Points, start, end, pointBudget);
+            if (points.Count == 0)
+            {
+                continue;
+            }
+
+            visibleSeries.Add(new ChartSeriesViewModel(buffer.Name, points, buffer.StrokeBrush, buffer.FillBrush));
+        }
+
+        VisibleSeries = visibleSeries.ToArray();
         UpdateSummaryText();
         FooterText = BuildFooterText(start, end);
     }
@@ -1262,11 +1283,21 @@ public sealed class MetricPanelViewModel : ObservableObject
                     break;
                 }
 
+                if (string.Equals(PanelKey, "cpu-temperature", StringComparison.OrdinalIgnoreCase))
+                {
+                    var cpuTemp = latestBySeries.GetValueOrDefault("Temperature");
+                    CurrentValue = $"{cpuTemp:0.#} C";
+                    SecondaryValue = "Processor temperature";
+                    ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
+                    ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                    break;
+                }
+
                 CurrentValue = $"{averageCore:0.#}% avg";
                 SecondaryValue = BuildJoinedText(
                     latestBySeries.Count == 1 ? "1 core lane active" : $"{latestBySeries.Count} core lanes active",
                     _detailContext.CpuFrequencyMhz > 0 ? $"{_detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : null);
-                ScaleLabel = $"100% per core // {latestBySeries.Count} cores";
+                ScaleLabel = $"100% per core / {latestBySeries.Count} cores";
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Memory:
@@ -1281,6 +1312,26 @@ public sealed class MetricPanelViewModel : ObservableObject
                     _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
                 ScaleLabel = $"{FormatCapacity(total)} total";
                 ChartCeilingValue = Math.Max(total, 1d);
+                break;
+            case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-memory", StringComparison.OrdinalIgnoreCase):
+                var dedicated = latestBySeries.GetValueOrDefault("Dedicated");
+                CurrentValue = $"{FormatCapacity(dedicated)} used";
+                SecondaryValue = "Dedicated graphics memory";
+                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, Math.Max(1d, dedicated));
+                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                break;
+            case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase):
+                var gpuTemp = latestBySeries.GetValueOrDefault("Temperature");
+                CurrentValue = $"{gpuTemp:0.#} C";
+                SecondaryValue = "Graphics temperature";
+                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
+                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                break;
+            case MetricCategory.Gpu:
+                CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
+                SecondaryValue = "GPU usage";
+                ChartCeilingValue = 100d;
+                ScaleLabel = "Ceiling 100%";
                 break;
             case MetricCategory.Disk when PrefersGaugeVisual:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Used"):0.#}% used";
@@ -1298,7 +1349,7 @@ public sealed class MetricPanelViewModel : ObservableObject
                     driveDetail.TotalGigabytes > 0 ? $"{driveDetail.UsedPercent:0.#}% full" : null);
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
                 ScaleLabel = driveDetail.TotalGigabytes > 0
-                    ? $"{FormatCapacity(driveDetail.TotalGigabytes)} total // peak {FormatValue(ChartCeilingValue, Unit)}"
+                    ? $"{FormatCapacity(driveDetail.TotalGigabytes)} total / peak {FormatValue(ChartCeilingValue, Unit)}"
                     : $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Network:
@@ -1380,7 +1431,7 @@ public sealed class MetricPanelViewModel : ObservableObject
                 $"{process.ProcessId}",
                 process.Name,
                 FormatCapacity(process.MemoryGigabytes),
-                $"{process.CpuPercent:0.#}% cpu // {FormatCompactCount(process.ThreadCount)} thr // {FormatCompactCount(process.HandleCount)} handles",
+                $"{process.CpuPercent:0.#}% cpu / {FormatCompactCount(process.ThreadCount)} thr / {FormatCompactCount(process.HandleCount)} handles",
                 Math.Clamp(process.MemoryGigabytes / peakMemory, 0d, 1d));
         }
 
@@ -1388,7 +1439,7 @@ public sealed class MetricPanelViewModel : ObservableObject
             $"{process.ProcessId}",
             process.Name,
             $"{process.CpuPercent:0.#}%",
-            $"{FormatCapacity(process.MemoryGigabytes)} ram // {FormatCompactCount(process.ThreadCount)} thr // {FormatCompactCount(process.HandleCount)} handles",
+            $"{FormatCapacity(process.MemoryGigabytes)} ram / {FormatCompactCount(process.ThreadCount)} thr / {FormatCompactCount(process.HandleCount)} handles",
             Math.Clamp(process.CpuPercent / 100d, 0d, 1d));
     }
 
@@ -1400,6 +1451,8 @@ public sealed class MetricPanelViewModel : ObservableObject
             MetricCategory.Cpu => index % 2 == 0 ? BrushFactory.ParseColor("#3BB7FF") : BrushFactory.ParseColor("#8BF7FF"),
             MetricCategory.Memory when index == 0 => BrushFactory.ParseColor("#7BF7D0"),
             MetricCategory.Memory => BrushFactory.ParseColor("#54C99B"),
+            MetricCategory.Gpu when index == 0 => BrushFactory.ParseColor("#6DA8FF"),
+            MetricCategory.Gpu => BrushFactory.ParseColor("#8D7BFF"),
             MetricCategory.Disk when index == 0 => BrushFactory.ParseColor("#FF9B54"),
             MetricCategory.Disk => BrushFactory.ParseColor("#FFD166"),
             MetricCategory.Network when index == 0 => BrushFactory.ParseColor("#9A8CFF"),
@@ -1421,6 +1474,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     private static string FormatValue(double value, MetricUnit unit) => unit switch
     {
         MetricUnit.Percent => $"{value:0.#}%",
+        MetricUnit.Celsius => $"{value:0.#} C",
         MetricUnit.Gigabytes => FormatCapacity(value),
         MetricUnit.MegabytesPerSecond => $"{value:0.0} MB/s",
         MetricUnit.MegabitsPerSecond => $"{value:0.0} Mbps",
@@ -1432,7 +1486,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     private static string BuildJoinedText(params string?[] parts)
     {
         var filtered = parts.Where(part => !string.IsNullOrWhiteSpace(part)).ToArray();
-        return filtered.Length == 0 ? "Live metric" : string.Join(" // ", filtered);
+        return filtered.Length == 0 ? "Live metric" : string.Join(" / ", filtered);
     }
 
     private static string FormatCompactCount(double value)
@@ -1476,14 +1530,68 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ? $"{span.TotalMinutes:0.#}m"
                 : $"{span.TotalSeconds:0.#}s";
             return PrefersGaugeVisual
-                ? $"capacity // zoomed {spanText}"
+                ? $"capacity / zoomed {spanText}"
                 : $"zoomed {spanText}";
         }
 
         return PrefersGaugeVisual
-            ? $"capacity // {FormatRangeLabel((int)SelectedRange)} replay"
+            ? $"capacity / {FormatRangeLabel((int)SelectedRange)} replay"
             : $"{FormatRangeLabel((int)SelectedRange)} replay";
     }
+
+    private static IReadOnlyList<MetricPoint> BuildVisiblePoints(
+        IReadOnlyList<MetricPoint> points,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        int pointBudget)
+    {
+        if (points.Count == 0)
+        {
+            return Array.Empty<MetricPoint>();
+        }
+
+        var windowPoints = new List<MetricPoint>(Math.Min(points.Count, pointBudget));
+        for (var index = 0; index < points.Count; index++)
+        {
+            var point = points[index];
+            if (point.Timestamp < start)
+            {
+                continue;
+            }
+
+            if (point.Timestamp > end)
+            {
+                break;
+            }
+
+            windowPoints.Add(point);
+        }
+
+        if (windowPoints.Count <= pointBudget)
+        {
+            return windowPoints.ToArray();
+        }
+
+        var sampled = new MetricPoint[pointBudget];
+        var step = (windowPoints.Count - 1d) / (pointBudget - 1d);
+        for (var index = 0; index < pointBudget; index++)
+        {
+            var sourceIndex = (int)Math.Round(index * step);
+            sampled[index] = windowPoints[Math.Clamp(sourceIndex, 0, windowPoints.Count - 1)];
+        }
+
+        return sampled;
+    }
+
+    private static int ResolveVisiblePointBudget(TimeSpan window) => window switch
+    {
+        _ when window >= TimeSpan.FromDays(30) => 240,
+        _ when window >= TimeSpan.FromDays(7) => 300,
+        _ when window >= TimeSpan.FromDays(1) => 380,
+        _ when window >= TimeSpan.FromHours(12) => 460,
+        _ when window >= TimeSpan.FromHours(1) => 560,
+        _ => 680,
+    };
 
     private static string FormatRangeLabel(int minutes)
     {
