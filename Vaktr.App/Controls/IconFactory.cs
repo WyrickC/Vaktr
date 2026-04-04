@@ -109,6 +109,7 @@ internal static class IconFactory
             "drive" => "\uE8CE", // MapDrive
             "network" => "\uEDA3", // NetworkAdapter
             "gpu" => "\uE7F8", // Video
+            "temperature" => "\uE9CA", // Thermometer
             "system" => "\uF182", // ScreenTime
             _ => "\uF182",
         };
@@ -223,6 +224,7 @@ internal static class IconFactory
             "disk" or "dsk" => "disk",
             "drive" or "drv" or "volume" => "drive",
             "network" or "net" or "wan" => "network",
+            "temperature" or "temp" => "temperature",
             "gpu" or "graphics" => "gpu",
             "system" or "activity" or "host" => "system",
             _ => key.Trim().ToLowerInvariant(),

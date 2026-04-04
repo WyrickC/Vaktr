@@ -70,6 +70,7 @@ public sealed class MainViewModel : ObservableObject
             new SummaryCardViewModel("WAN", "Network", BrushFactory.CreateBrush("#9A8CFF")),
         ];
 
+        EnsureBaselinePanels();
         ApplyConfig(config);
     }
 
@@ -217,6 +218,7 @@ public sealed class MainViewModel : ObservableObject
     public void ApplyConfig(VaktrConfig config)
     {
         var normalized = config.Normalize();
+        EnsureBaselinePanels();
         _retentionWindow = normalized.GetRetentionWindow();
         StorageDirectory = string.Equals(normalized.StorageDirectory, VaktrConfig.DefaultStorageDirectory, StringComparison.OrdinalIgnoreCase)
             ? string.Empty
@@ -251,6 +253,7 @@ public sealed class MainViewModel : ObservableObject
         _dashboardPanelsDirty = true;
         _panelTogglesDirty = true;
         SyncDashboardPanels();
+        SyncPanelToggles();
     }
 
     public void LoadHistory(IReadOnlyList<MetricSeriesHistory> history)
@@ -542,6 +545,18 @@ public sealed class MainViewModel : ObservableObject
         return _panelOrder.TryGetValue(panel.PanelKey, out var rank)
             ? rank
             : int.MaxValue;
+    }
+
+    private void EnsureBaselinePanels()
+    {
+        EnsureBaselinePanel("cpu-temperature", "CPU Temperature", MetricCategory.Cpu, MetricUnit.Celsius);
+        EnsureBaselinePanel("gpu-temperature", "GPU Temperature", MetricCategory.Gpu, MetricUnit.Celsius);
+    }
+
+    private void EnsureBaselinePanel(string panelKey, string title, MetricCategory category, MetricUnit unit)
+    {
+        var panel = GetOrCreatePanel(panelKey, title, category, unit);
+        panel.IsNewlyCreated = false;
     }
 
     private void UpdateSummaryCards(MetricSnapshot snapshot, PanelDetailContext detailContext)
@@ -845,6 +860,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     private string _secondaryValue = "Collecting hardware samples";
     private string _footerText = "arming";
     private string _scaleLabel = string.Empty;
+    private string _emptyStateText = "Waiting for samples";
     private double _chartCeilingValue;
     private bool _isVisible;
     private TimeRangePreset _selectedRange = TimeRangePreset.FifteenMinutes;
@@ -981,6 +997,12 @@ public sealed class MetricPanelViewModel : ObservableObject
     {
         get => _scaleLabel;
         private set => SetProperty(ref _scaleLabel, value);
+    }
+
+    public string EmptyStateText
+    {
+        get => _emptyStateText;
+        private set => SetProperty(ref _emptyStateText, value);
     }
 
     public double ChartCeilingValue
@@ -1241,12 +1263,31 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         if (VisibleSeries.Count == 0)
         {
-            CurrentValue = "Waiting";
-            SecondaryValue = "Collecting hardware samples";
+            if (string.Equals(PanelKey, "cpu-temperature", StringComparison.OrdinalIgnoreCase))
+            {
+                CurrentValue = "Unavailable";
+                SecondaryValue = "No readable CPU sensor";
+                EmptyStateText = "CPU temperature sensor unavailable";
+            }
+            else if (string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase))
+            {
+                CurrentValue = "Unavailable";
+                SecondaryValue = "No readable GPU sensor";
+                EmptyStateText = "GPU temperature sensor unavailable";
+            }
+            else
+            {
+                CurrentValue = "Waiting";
+                SecondaryValue = "Collecting hardware samples";
+                EmptyStateText = "Waiting for samples";
+            }
+
             ScaleLabel = string.Empty;
             ChartCeilingValue = Unit == MetricUnit.Percent ? 100d : Unit == MetricUnit.Count ? 100d : 0d;
             return;
         }
+
+        EmptyStateText = "Waiting for samples";
 
         var latestBySeries = VisibleSeries.ToDictionary(
             series => series.Name,
@@ -1262,8 +1303,8 @@ public sealed class MetricPanelViewModel : ObservableObject
                     _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} proc" : null,
                     _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
                 ScaleLabel = _detailContext.HandleCount > 0
-                    ? $"Ceiling 100% // {FormatCompactCount(_detailContext.HandleCount)} handles"
-                    : "Ceiling 100%";
+                    ? $"100% ceiling · {FormatCompactCount(_detailContext.HandleCount)} handles"
+                    : "100% ceiling";
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Cpu:
@@ -1278,8 +1319,8 @@ public sealed class MetricPanelViewModel : ObservableObject
                         _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
                     ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, Math.Max(1000d, clockMhz));
                     ScaleLabel = _detailContext.HandleCount > 0
-                        ? $"{FormatCompactCount(_detailContext.HandleCount)} handles open"
-                        : $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                        ? $"{FormatCompactCount(_detailContext.HandleCount)} handles"
+                        : $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                     break;
                 }
 
@@ -1289,7 +1330,7 @@ public sealed class MetricPanelViewModel : ObservableObject
                     CurrentValue = $"{cpuTemp:0.#} C";
                     SecondaryValue = "Processor temperature";
                     ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
-                    ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                    ScaleLabel = $"Max {FormatValue(ChartCeilingValue, Unit)}";
                     break;
                 }
 
@@ -1318,27 +1359,27 @@ public sealed class MetricPanelViewModel : ObservableObject
                 CurrentValue = $"{FormatCapacity(dedicated)} used";
                 SecondaryValue = "Dedicated graphics memory";
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, Math.Max(1d, dedicated));
-                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase):
                 var gpuTemp = latestBySeries.GetValueOrDefault("Temperature");
                 CurrentValue = $"{gpuTemp:0.#} C";
                 SecondaryValue = "Graphics temperature";
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
-                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                ScaleLabel = $"Max {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Gpu:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
                 SecondaryValue = "GPU usage";
                 ChartCeilingValue = 100d;
-                ScaleLabel = "Ceiling 100%";
+                ScaleLabel = "100% ceiling";
                 break;
             case MetricCategory.Disk when PrefersGaugeVisual:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Used"):0.#}% used";
                 var totalGb = latestByKey.GetValueOrDefault("total-gb");
                 var usedGb = latestByKey.GetValueOrDefault("used-gb");
                 SecondaryValue = totalGb > 0 ? $"{FormatCapacity(usedGb)} of {FormatCapacity(totalGb)}" : "Drive capacity";
-                ScaleLabel = totalGb > 0 ? $"{FormatCapacity(totalGb)} total" : "Ceiling 100%";
+                ScaleLabel = totalGb > 0 ? $"{FormatCapacity(totalGb)} total" : "100% ceiling";
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Disk:
@@ -1349,14 +1390,14 @@ public sealed class MetricPanelViewModel : ObservableObject
                     driveDetail.TotalGigabytes > 0 ? $"{driveDetail.UsedPercent:0.#}% full" : null);
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
                 ScaleLabel = driveDetail.TotalGigabytes > 0
-                    ? $"{FormatCapacity(driveDetail.TotalGigabytes)} total / peak {FormatValue(ChartCeilingValue, Unit)}"
-                    : $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                    ? $"Peak {FormatValue(ChartCeilingValue, Unit)} · {FormatCapacity(driveDetail.TotalGigabytes)} total"
+                    : $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Network:
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Down"):0.0} Mbps down";
                 SecondaryValue = $"{latestBySeries.GetValueOrDefault("Up"):0.0} Mbps up";
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
-                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.System:
                 CurrentValue = $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Processes"))} proc";
@@ -1364,13 +1405,13 @@ public sealed class MetricPanelViewModel : ObservableObject
                     $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Threads"))} thr",
                     $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Handles"))} handles");
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
-                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             default:
                 CurrentValue = FormatValue(VisibleSeries[0].Points.Last().Value, Unit);
                 SecondaryValue = "Live metric";
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 1d);
-                ScaleLabel = $"Peak scale {FormatValue(ChartCeilingValue, Unit)}";
+                ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
         }
     }

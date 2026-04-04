@@ -51,6 +51,13 @@ public sealed class TelemetryChart : UserControl
             typeof(TelemetryChart),
             new PropertyMetadata(0d, OnChartPropertyChanged));
 
+    public static readonly DependencyProperty EmptyStateTextProperty =
+        DependencyProperty.Register(
+            nameof(EmptyStateText),
+            typeof(string),
+            typeof(TelemetryChart),
+            new PropertyMetadata("Waiting for samples", OnChartPropertyChanged));
+
     private readonly Canvas _canvas;
     private readonly Canvas _interactionCanvas;
     private readonly Rectangle _selectionRectangle;
@@ -112,10 +119,12 @@ public sealed class TelemetryChart : UserControl
         _interactionCanvas.Children.Add(_hoverTooltip);
         _emptyStateText = new TextBlock
         {
-            Margin = new Thickness(10, 8, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
             FontSize = 12,
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
             Text = "Waiting for samples",
+            TextAlignment = TextAlignment.Center,
             Visibility = Visibility.Collapsed,
         };
 
@@ -173,6 +182,12 @@ public sealed class TelemetryChart : UserControl
         set => SetValue(CeilingValueProperty, value);
     }
 
+    public string EmptyStateText
+    {
+        get => (string)GetValue(EmptyStateTextProperty);
+        set => SetValue(EmptyStateTextProperty, value);
+    }
+
     private static void OnChartPropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
     {
         ((TelemetryChart)dependencyObject).ScheduleRedraw();
@@ -185,6 +200,7 @@ public sealed class TelemetryChart : UserControl
         _hoverTooltip.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _hoverTooltipText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _emptyStateText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _emptyStateText.Text = string.IsNullOrWhiteSpace(EmptyStateText) ? "Waiting for samples" : EmptyStateText;
         HideHover();
         ScheduleRedraw(DispatcherQueuePriority.High);
     }
@@ -237,7 +253,11 @@ public sealed class TelemetryChart : UserControl
         if (!TryGetPointBounds(series, out var minTimestamp, out var maxTimestamp, out var maxObservedValue))
         {
             _canvas.Children.Clear();
-            DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(0d));
+            var emptyPlotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
+            var emptyPlotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
+            DrawPlotSurface(emptyPlotWidth, emptyPlotHeight);
+            DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(0d), includeLabels: false);
+            _emptyStateText.Text = string.IsNullOrWhiteSpace(EmptyStateText) ? "Waiting for samples" : EmptyStateText;
             _emptyStateText.Visibility = Visibility.Visible;
             HideHover();
             return;
@@ -357,7 +377,7 @@ public sealed class TelemetryChart : UserControl
         _canvas.Children.Add(tint);
     }
 
-    private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue)
+    private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue, bool includeLabels = true)
     {
         var gridBrush = ResolveBrush("SurfaceGridBrush", "#35587A");
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
@@ -412,6 +432,11 @@ public sealed class TelemetryChart : UserControl
                 });
             }
 
+            if (!includeLabels)
+            {
+                continue;
+            }
+
             var tick = start + TimeSpan.FromTicks((end - start).Ticks / divisions * index);
             var label = new TextBlock
             {
@@ -422,6 +447,11 @@ public sealed class TelemetryChart : UserControl
             _canvas.Children.Add(label);
             Canvas.SetLeft(label, Math.Clamp(x - 18, LeftPadding, width - 54));
             Canvas.SetTop(label, bottomY + 4);
+        }
+
+        if (!includeLabels)
+        {
+            return;
         }
 
         var ceiling = new TextBlock

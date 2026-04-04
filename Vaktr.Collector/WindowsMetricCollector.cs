@@ -2,7 +2,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Net.NetworkInformation;
-using LibreHardwareMonitor.Hardware;
 using Vaktr.Collector.Interop;
 using Vaktr.Core.Interfaces;
 using Vaktr.Core.Models;
@@ -36,7 +35,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly List<CachedMetricValue> _cachedTemperatureValues = [];
     private readonly List<ProcessActivitySample> _cachedProcessActivity = [];
     private LiveBoardDetails? _cachedLiveBoardDetails;
-    private readonly Computer? _hardwareMonitor;
+    private readonly TemperatureSensorReader _temperatureReader = new();
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
@@ -80,19 +79,6 @@ public sealed class WindowsMetricCollector : IMetricCollector
             _ = PdhNative.PdhCollectQueryData(_query);
         }
 
-        try
-        {
-            _hardwareMonitor = new Computer
-            {
-                IsCpuEnabled = true,
-                IsGpuEnabled = true,
-            };
-            _hardwareMonitor.Open();
-        }
-        catch
-        {
-            _hardwareMonitor = null;
-        }
     }
 
     public Task<MetricSnapshot> CollectAsync(CancellationToken cancellationToken)
@@ -134,13 +120,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
 
     public ValueTask DisposeAsync()
     {
-        try
-        {
-            _hardwareMonitor?.Close();
-        }
-        catch
-        {
-        }
+        _temperatureReader.Dispose();
 
         if (_query != nint.Zero)
         {
@@ -640,24 +620,15 @@ public sealed class WindowsMetricCollector : IMetricCollector
 
     private void AddTemperatures(List<MetricSample> samples, DateTimeOffset timestamp)
     {
-        if (_hardwareMonitor is null)
-        {
-            return;
-        }
-
         var shouldRefresh = _cachedTemperatureValues.Count == 0 || timestamp - _lastTemperatureRefreshUtc >= TemperatureRefreshInterval;
         if (shouldRefresh)
         {
             _cachedTemperatureValues.Clear();
-            var cpuTemperatures = new List<double>();
-            var gpuTemperatures = new List<double>();
+            var reading = _temperatureReader.Read();
+            var cpuTemperature = reading.CpuTemperatureCelsius;
+            var gpuTemperature = reading.GpuTemperatureCelsius;
 
-            foreach (var hardware in _hardwareMonitor.Hardware)
-            {
-                CollectTemperatures(hardware, cpuTemperatures, gpuTemperatures);
-            }
-
-            if (cpuTemperatures.Count > 0)
+            if (cpuTemperature.HasValue)
             {
                 _cachedTemperatureValues.Add(new CachedMetricValue(
                     "cpu-temperature",
@@ -666,10 +637,10 @@ public sealed class WindowsMetricCollector : IMetricCollector
                     "Temperature",
                     MetricCategory.Cpu,
                     MetricUnit.Celsius,
-                    cpuTemperatures.Max()));
+                    cpuTemperature.Value));
             }
 
-            if (gpuTemperatures.Count > 0)
+            if (gpuTemperature.HasValue)
             {
                 _cachedTemperatureValues.Add(new CachedMetricValue(
                     "gpu-temperature",
@@ -678,7 +649,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                     "Temperature",
                     MetricCategory.Gpu,
                     MetricUnit.Celsius,
-                    gpuTemperatures.Max()));
+                    gpuTemperature.Value));
             }
 
             _lastTemperatureRefreshUtc = timestamp;
@@ -803,42 +774,6 @@ public sealed class WindowsMetricCollector : IMetricCollector
         }
 
         return builder.ToString().Trim('-');
-    }
-
-    private static void CollectTemperatures(IHardware hardware, ICollection<double> cpuTemperatures, ICollection<double> gpuTemperatures)
-    {
-        hardware.Update();
-
-        foreach (var subHardware in hardware.SubHardware)
-        {
-            CollectTemperatures(subHardware, cpuTemperatures, gpuTemperatures);
-        }
-
-        var target = hardware.HardwareType switch
-        {
-            HardwareType.Cpu => cpuTemperatures,
-            HardwareType.GpuAmd or HardwareType.GpuIntel or HardwareType.GpuNvidia => gpuTemperatures,
-            _ => null,
-        };
-
-        if (target is null)
-        {
-            return;
-        }
-
-        foreach (var sensor in hardware.Sensors)
-        {
-            if (sensor.SensorType != SensorType.Temperature || !sensor.Value.HasValue)
-            {
-                continue;
-            }
-
-            var value = sensor.Value.Value;
-            if (value is > 0f and < 150f)
-            {
-                target.Add(value);
-            }
-        }
     }
 
     private static void ThrowIfFailed(uint status, string message)

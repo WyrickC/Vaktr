@@ -101,6 +101,9 @@ public sealed class TelemetryPanelCard : UserControl
         };
         _footerText = CreateTextBlock(fontSize: 10.5);
         _scaleText = CreateTextBlock("Segoe UI Variable Text", 10.5, FontWeights.Medium);
+        _scaleText.TextWrapping = TextWrapping.NoWrap;
+        _scaleText.TextTrimming = TextTrimming.CharacterEllipsis;
+        _scaleText.MaxWidth = 220;
         _titleText = CreateTextBlock("Segoe UI Variable Display", 17.5, FontWeights.SemiBold);
         _currentValueText = CreateTextBlock("Segoe UI Variable Display", 21.5, FontWeights.SemiBold);
         _secondaryValueText = CreateTextBlock(fontSize: 11.5);
@@ -301,7 +304,10 @@ public sealed class TelemetryPanelCard : UserControl
             VerticalAlignment = VerticalAlignment.Top,
         };
 
-        var metaGrid = new Grid();
+        var metaGrid = new Grid
+        {
+            ColumnSpacing = 12,
+        };
         metaGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         metaGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         metaGrid.Children.Add(new StackPanel
@@ -317,13 +323,15 @@ public sealed class TelemetryPanelCard : UserControl
         });
         _scalePill = new Border
         {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            Background = ResolveBrush("PanelOverlayBrush", "#112132"),
+            BorderBrush = ResolveBrush("SurfaceStrongBrush", "#20364C"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(9, 4, 9, 4),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(10, 4, 10, 4),
             Child = _scaleText,
             HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            MinHeight = 28,
         };
         metaGrid.Children.Add(_scalePill);
         Grid.SetColumn(_scalePill, 1);
@@ -341,7 +349,10 @@ public sealed class TelemetryPanelCard : UserControl
                 _secondaryValueText,
             },
         };
-        var headerGrid = new Grid();
+        var headerGrid = new Grid
+        {
+            ColumnSpacing = 12,
+        };
         headerGrid.Background = BrushFactory.CreateBrush("#00FFFFFF");
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -455,14 +466,16 @@ public sealed class TelemetryPanelCard : UserControl
             UpdateBadgeIcon(null);
             _footerText.Text = string.Empty;
             _scaleText.Text = string.Empty;
+            _scalePill.Visibility = Visibility.Collapsed;
             _titleText.Text = "Telemetry";
             _currentValueText.Text = "Waiting";
             _secondaryValueText.Text = "Collecting hardware samples";
             _chart.Series = Array.Empty<ChartSeriesViewModel>();
             _chart.CeilingValue = 0d;
+            _chart.EmptyStateText = "Waiting for samples";
             _legendHost.Children.Clear();
             _legendRows.Clear();
-            _legendHost.Children.Add(CreateEmptyText("Waiting for samples"));
+            _legendScroller.Visibility = Visibility.Collapsed;
             _processRowsHost.Children.Clear();
             _processRowParts.Clear();
             _processSection.Visibility = Visibility.Collapsed;
@@ -483,6 +496,8 @@ public sealed class TelemetryPanelCard : UserControl
         _currentValueText.Text = panel.CurrentValue;
         _secondaryValueText.Text = panel.SecondaryValue;
         _scaleText.Text = panel.ScaleLabel;
+        _chart.EmptyStateText = panel.EmptyStateText;
+        _scalePill.Visibility = string.IsNullOrWhiteSpace(panel.ScaleLabel) ? Visibility.Collapsed : Visibility.Visible;
 
         if (!_isEffectivelyVisible)
         {
@@ -590,8 +605,8 @@ public sealed class TelemetryPanelCard : UserControl
         _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _rangeShell.Background = CreateSurfaceGradient("#102031", "#15283E");
         _rangeShell.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _scalePill.Background = ResolveBrush("SurfaceElevatedBrush", "#15283B");
-        _scalePill.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _scalePill.Background = ResolveBrush("PanelOverlayBrush", "#112132");
+        _scalePill.BorderBrush = ResolveBrush("SurfaceStrongBrush", "#20364C");
         _chartFrame.Background = CreateSurfaceGradient("#0E1A2B", "#13263B");
         _chartFrame.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _processSection.Background = CreateSurfaceGradient("#0F1C2D", "#14263A");
@@ -637,7 +652,7 @@ public sealed class TelemetryPanelCard : UserControl
         else
         {
             _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-            _scaleText.Foreground = ResolveBrush("AccentStrongBrush", "#B7F7FF");
+            _scaleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
             _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             _secondaryValueText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
@@ -654,9 +669,11 @@ public sealed class TelemetryPanelCard : UserControl
         {
             _legendRows.Clear();
             _legendHost.Children.Clear();
-            _legendHost.Children.Add(CreateEmptyText("Waiting for samples"));
+            _legendScroller.Visibility = Visibility.Collapsed;
             return;
         }
+
+        _legendScroller.Visibility = panel.SupportsProcessTable ? Visibility.Collapsed : Visibility.Visible;
 
         if (_legendRows.Count == 0 && _legendHost.Children.Count > 0)
         {
@@ -791,7 +808,7 @@ public sealed class TelemetryPanelCard : UserControl
         _badgeBorder.BorderBrush = panel.AccentBrush;
         _edgeGlow.Background = panel.AccentBrush;
         _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _scaleText.Foreground = ResolveBrush("AccentStrongBrush", "#B7F7FF");
+        _scaleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
         _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _secondaryValueText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
@@ -1285,6 +1302,7 @@ public sealed class TelemetryPanelCard : UserControl
         var iconKey = panel switch
         {
             null => "collection",
+            { PanelKey: var key } when key.Contains("temperature", StringComparison.OrdinalIgnoreCase) => "temperature",
             { Category: MetricCategory.Cpu } => "cpu",
             { Category: MetricCategory.Gpu } => "gpu",
             { Category: MetricCategory.Memory } => "memory",
