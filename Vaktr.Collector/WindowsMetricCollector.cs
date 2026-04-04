@@ -36,7 +36,6 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly List<ProcessActivitySample> _cachedProcessActivity = [];
     private LiveBoardDetails? _cachedLiveBoardDetails;
     private readonly TemperatureSensorReader _temperatureReader = new();
-    private bool _temperatureBridgeStarted;
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
@@ -632,26 +631,15 @@ public sealed class WindowsMetricCollector : IMetricCollector
             var gpuTemperature = reading.GpuTemperatureCelsius;
 
             // If local reader couldn't get CPU temps (common when not elevated),
-            // fall back to the elevated bridge helper process.
-            // Only attempt the bridge when running as a standalone exe (not via dotnet run).
+            // check the bridge cache in case an elevated helper is already running.
+            // The bridge helper is NOT auto-launched to avoid surprise UAC prompts.
+            // To get CPU temps, run Vaktr as administrator.
             if (!cpuTemperature.HasValue || !gpuTemperature.HasValue)
             {
                 if (TemperatureBridge.TryReadSnapshot(out var bridgeSnapshot))
                 {
                     cpuTemperature ??= bridgeSnapshot.CpuTemperatureCelsius;
                     gpuTemperature ??= bridgeSnapshot.GpuTemperatureCelsius;
-                }
-                else if (!_temperatureBridgeStarted && !TemperatureBridge.IsElevated())
-                {
-                    var exePath = Environment.ProcessPath;
-                    if (!string.IsNullOrWhiteSpace(exePath) &&
-                        exePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
-                        !exePath.Contains("dotnet", StringComparison.OrdinalIgnoreCase))
-                    {
-                        TemperatureBridge.EnsureHelperRunning();
-                    }
-
-                    _temperatureBridgeStarted = true;
                 }
             }
 

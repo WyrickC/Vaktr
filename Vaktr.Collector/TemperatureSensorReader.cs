@@ -95,7 +95,7 @@ internal sealed class TemperatureSensorReader : IDisposable
             }
 
             var value = sensor.Value.Value;
-            if (value is not > 0f or >= 150f)
+            if (value <= 0d || value >= 150d)
             {
                 continue;
             }

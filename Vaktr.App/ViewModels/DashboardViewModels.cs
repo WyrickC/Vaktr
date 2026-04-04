@@ -1265,15 +1265,15 @@ public sealed class MetricPanelViewModel : ObservableObject
         {
             if (string.Equals(PanelKey, "cpu-temperature", StringComparison.OrdinalIgnoreCase))
             {
-                CurrentValue = "Unavailable";
-                SecondaryValue = "No readable CPU sensor";
-                EmptyStateText = "CPU temperature sensor unavailable";
+                CurrentValue = "Not detected";
+                SecondaryValue = "Sensor not supported on this hardware";
+                EmptyStateText = "CPU temperature sensor not available — this can happen with some AMD/motherboard combinations";
             }
             else if (string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase))
             {
-                CurrentValue = "Unavailable";
-                SecondaryValue = "No readable GPU sensor";
-                EmptyStateText = "GPU temperature sensor unavailable";
+                CurrentValue = "Not detected";
+                SecondaryValue = "Sensor not supported on this hardware";
+                EmptyStateText = "GPU temperature sensor not detected on this system";
             }
             else
             {
