@@ -12,64 +12,72 @@ computer.Open();
 
 try
 {
-    Console.WriteLine("LibreHardwareMonitor probe");
+    Console.WriteLine("=== LibreHardwareMonitor: ALL sensors on CPU ===");
     foreach (var hardware in computer.Hardware)
     {
-        DumpHardware(hardware, "");
+        DumpAllSensors(hardware, "");
     }
 
     Console.WriteLine();
-    Console.WriteLine("WMI thermal zone probe");
-    TryDumpThermalZones();
+    Console.WriteLine("=== WMI Win32_TemperatureProbe ===");
+    TryWmiQuery(@"root\CIMV2", "SELECT * FROM Win32_TemperatureProbe");
+
+    Console.WriteLine();
+    Console.WriteLine("=== WMI MSAcpi_ThermalZoneTemperature ===");
+    TryWmiQuery(@"root\WMI", "SELECT InstanceName, CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+
+    Console.WriteLine();
+    Console.WriteLine("=== WMI Win32_PerfFormattedData_Counters_ThermalZoneInformation ===");
+    TryWmiQuery(@"root\CIMV2", "SELECT Name, Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation");
 }
 finally
 {
     computer.Close();
 }
 
-static void DumpHardware(IHardware hardware, string indent)
+static void DumpAllSensors(IHardware hardware, string indent)
 {
     hardware.Update();
     Console.WriteLine($"{indent}HW {hardware.HardwareType}: {hardware.Name}");
 
-    foreach (var sensor in hardware.Sensors.Where(sensor => sensor.SensorType == SensorType.Temperature))
+    foreach (var sensor in hardware.Sensors)
     {
-        Console.WriteLine($"{indent}  TEMP {sensor.Name}: {sensor.Value}");
+        Console.WriteLine($"{indent}  [{sensor.SensorType}] {sensor.Name}: {sensor.Value} (id={sensor.Identifier})");
     }
 
     foreach (var subHardware in hardware.SubHardware)
     {
-        DumpHardware(subHardware, indent + "  ");
+        DumpAllSensors(subHardware, indent + "  ");
     }
 }
 
-static void TryDumpThermalZones()
+static void TryWmiQuery(string scope, string query)
 {
     try
     {
-        using var searcher = new ManagementObjectSearcher(
-            @"root\WMI",
-            "SELECT InstanceName, CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+        using var searcher = new ManagementObjectSearcher(scope, query);
         using var results = searcher.Get();
-        var foundAny = false;
+        var count = 0;
         foreach (ManagementObject result in results)
         {
-            foundAny = true;
-            var instanceName = Convert.ToString(result["InstanceName"]) ?? "(unknown)";
-            var rawValue = result["CurrentTemperature"];
-            var celsius = rawValue is null
-                ? double.NaN
-                : (Convert.ToDouble(rawValue, System.Globalization.CultureInfo.InvariantCulture) / 10d) - 273.15d;
-            Console.WriteLine($"  ZONE {instanceName}: {celsius:0.0} C");
+            count++;
+            Console.Write($"  [{count}] ");
+            foreach (var prop in result.Properties)
+            {
+                if (prop.Value is not null)
+                {
+                    Console.Write($"{prop.Name}={prop.Value}  ");
+                }
+            }
+            Console.WriteLine();
         }
-
-        if (!foundAny)
+        if (count == 0)
         {
-            Console.WriteLine("  No thermal zones returned.");
+            Console.WriteLine("  (no results)");
         }
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"  Thermal zone query failed: {ex.GetType().Name}: {ex.Message}");
+        Console.WriteLine($"  Failed: {ex.GetType().Name}: {ex.Message}");
     }
 }

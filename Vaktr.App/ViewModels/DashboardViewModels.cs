@@ -1265,9 +1265,9 @@ public sealed class MetricPanelViewModel : ObservableObject
         {
             if (string.Equals(PanelKey, "cpu-temperature", StringComparison.OrdinalIgnoreCase))
             {
-                CurrentValue = "Not detected";
-                SecondaryValue = "Sensor not supported on this hardware";
-                EmptyStateText = "CPU temperature sensor not available — this can happen with some AMD/motherboard combinations";
+                CurrentValue = "Not available";
+                SecondaryValue = "Hardware sensor not readable on this board";
+                EmptyStateText = "CPU temperature not available — some AMD/chipset combinations require a proprietary driver (e.g. HWiNFO) that Vaktr cannot use";
             }
             else if (string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase))
             {
