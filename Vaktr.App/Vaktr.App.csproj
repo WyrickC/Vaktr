@@ -37,31 +37,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="AssemblyInfo.cs" />
-    <Compile Remove="App.xaml.cs" />
-    <Compile Remove="App.WinUI.cs" />
-    <Compile Remove="Controls\MetricDeck.cs" />
-    <Compile Remove="Controls\WinUiChartSurface.cs" />
-    <Compile Remove="GlobalUsings.cs" />
-    <Compile Remove="MainWindow.xaml.cs" />
     <Compile Remove="obj_winui3\**\*.cs" />
-    <Compile Remove="Services\TrayIconHost.cs" />
-    <Compile Remove="ShellWindow.cs" />
-    <Compile Remove="ShellWindow.Minimal.cs" />
-    <Compile Remove="ShellWindow.xaml.cs" />
-    <Compile Remove="Controls\MetricPanelControl.xaml.cs" />
-    <Compile Remove="Controls\MetricDeck.xaml.cs" />
-    <Compile Remove="Controls\LineChartSurface.cs" />
-    <Compile Remove="ViewModels\MainViewModel.cs" />
-    <Page Remove="MainWindow.xaml" />
-    <ApplicationDefinition Remove="App.xaml" />
-    <Page Remove="Controls\MetricPanelControl.xaml" />
-    <Page Remove="Controls\MetricDeck.xaml" />
-    <Page Remove="ShellWindow.xaml" />
-    <Page Remove="Themes\Styles.xaml" />
-    <Page Remove="Themes\Palette.Dark.xaml" />
-    <Page Remove="Themes\Palette.Light.xaml" />
-    <Page Remove="Themes\WinUiStyles.xaml" />
   </ItemGroup>
 
   <ItemGroup>

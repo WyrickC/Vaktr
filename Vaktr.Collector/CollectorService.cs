@@ -15,6 +15,7 @@ public sealed class CollectorService : IAsyncDisposable
     private CancellationTokenSource? _loopCancellation;
     private PeriodicTimer? _timer;
     private Task? _loopTask;
+    private volatile bool _paused;
 
     public CollectorService(IMetricCollector collector, IMetricStore store)
     {
@@ -62,6 +63,12 @@ public sealed class CollectorService : IAsyncDisposable
         }
     }
 
+    public bool IsPaused => _paused;
+
+    public void Pause() => _paused = true;
+
+    public void Resume() => _paused = false;
+
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);
@@ -95,6 +102,11 @@ public sealed class CollectorService : IAsyncDisposable
             catch (OperationCanceledException)
             {
                 break;
+            }
+
+            if (_paused)
+            {
+                continue;
             }
 
             await CollectOnceAsync(cancellationToken, RecurringCollectionTimeout).ConfigureAwait(false);

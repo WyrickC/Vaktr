@@ -8,6 +8,7 @@ internal sealed class TemperatureSensorReader : IDisposable
 {
     private readonly Computer? _hardwareMonitor;
     private readonly UpdateVisitor _updateVisitor = new();
+    private bool _wmiFailed;
 
     public TemperatureSensorReader()
     {
@@ -17,11 +18,6 @@ internal sealed class TemperatureSensorReader : IDisposable
             {
                 IsCpuEnabled = true,
                 IsGpuEnabled = true,
-                IsMemoryEnabled = true,
-                IsMotherboardEnabled = true,
-                IsNetworkEnabled = true,
-                IsStorageEnabled = true,
-                IsControllerEnabled = true,
             };
             _hardwareMonitor.Open();
         }
@@ -54,7 +50,7 @@ internal sealed class TemperatureSensorReader : IDisposable
         }
 
         double? cpuTemperature = cpuTemperatures.Count > 0 ? cpuTemperatures.Max() : null;
-        if (!cpuTemperature.HasValue &&
+        if (!cpuTemperature.HasValue && !_wmiFailed &&
             TryGetThermalZoneTemperatureCelsius(out var thermalZoneTemperatureCelsius))
         {
             cpuTemperature = thermalZoneTemperatureCelsius;
@@ -180,12 +176,15 @@ internal sealed class TemperatureSensorReader : IDisposable
         }
         catch (ManagementException)
         {
+            _wmiFailed = true;
         }
         catch (COMException)
         {
+            _wmiFailed = true;
         }
         catch (InvalidOperationException)
         {
+            _wmiFailed = true;
         }
 
         return false;

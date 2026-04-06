@@ -162,6 +162,9 @@ public sealed partial class ShellWindow
         AddStatusField(settingsGrid, 0, 0, "Collection", FormatScrapeInterval(_viewModel.EffectiveScrapeIntervalSeconds), "Live sample cadence");
         AddStatusField(settingsGrid, 0, 1, "Retention", GetRetentionFieldValue(), "Local rollups stay lean");
         AddStatusField(settingsGrid, 0, 2, "Storage path", GetStorageFieldTitle(), GetStorageFieldCaption());
+        AddStatusField(settingsGrid, 1, 0, "Background",
+            _viewModel.CollectWhenMinimized ? "Collects in background" : "Pauses when hidden",
+            _viewModel.CollectWhenMinimized ? "Metrics accumulate while minimized" : "Saves resources when not visible");
 
         var actionRow = new Grid
         {
@@ -236,6 +239,16 @@ public sealed partial class ShellWindow
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
+        var backgroundToggle = new CheckBox
+        {
+            Content = "Collect metrics when minimized",
+            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+            IsChecked = _viewModel.CollectWhenMinimized,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        backgroundToggle.Checked += (_, _) => _viewModel.CollectWhenMinimized = true;
+        backgroundToggle.Unchecked += (_, _) => _viewModel.CollectWhenMinimized = false;
+
         AddCardToGrid(fieldGrid, 0, 0, CreateControlEditorCard(
             "collection",
             "COLLECTION",
@@ -263,6 +276,7 @@ public sealed partial class ShellWindow
                         CreatePresetChip("5s", GetDraftScrapeIntervalSeconds() == 5, (_, _) => SetScrapeInterval(5)),
                         CreatePresetChip("10s", GetDraftScrapeIntervalSeconds() == 10, (_, _) => SetScrapeInterval(10)),
                         CreatePresetChip("15s", GetDraftScrapeIntervalSeconds() == 15, (_, _) => SetScrapeInterval(15))),
+                    backgroundToggle,
                 },
             }));
 
@@ -1268,7 +1282,8 @@ public sealed partial class ShellWindow
     {
         var startup = _viewModel.LaunchOnStartup ? "Launch on sign-in enabled" : "Manual launch";
         var tray = _viewModel.MinimizeToTray ? "close => tray" : "close => exit";
-        return $"{startup} // {tray}";
+        var background = _viewModel.CollectWhenMinimized ? "background collection on" : "pauses when hidden";
+        return $"{startup} // {tray} // {background}";
     }
 
 }

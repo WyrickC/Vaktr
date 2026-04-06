@@ -397,7 +397,12 @@ public sealed class TelemetryPanelCard : UserControl
         EffectiveViewportChanged += OnEffectiveViewportChanged;
 
         Content = _cardBorder;
-        Loaded += (_, _) => RefreshFromPanel();
+        Opacity = 0;
+        Loaded += (_, _) =>
+        {
+            RefreshFromPanel();
+            PlayEntranceAnimation();
+        };
     }
 
     public MetricPanelViewModel? Panel
@@ -1419,6 +1424,38 @@ public sealed class TelemetryPanelCard : UserControl
         MetricUnit.Count => $"{value:0}",
         _ => $"{value:0.##}",
     };
+
+    private void PlayEntranceAnimation()
+    {
+        var fadeIn = new DoubleAnimation
+        {
+            From = 0,
+            To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(280)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        var slideUp = new DoubleAnimation
+        {
+            From = 12,
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(320)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        var translate = new TranslateTransform();
+        _cardBorder.RenderTransform = translate;
+
+        Storyboard.SetTarget(fadeIn, this);
+        Storyboard.SetTargetProperty(fadeIn, "Opacity");
+        Storyboard.SetTarget(slideUp, translate);
+        Storyboard.SetTargetProperty(slideUp, "Y");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(fadeIn);
+        storyboard.Children.Add(slideUp);
+        storyboard.Begin();
+    }
 }
 
 public sealed class TimeRangePresetRequestedEventArgs : EventArgs

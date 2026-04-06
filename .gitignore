@@ -34,7 +34,7 @@ xaml-build.log
 xamlc-*.txt
 
 # Codex sandbox artifacts
-scripts/build-codex.ps1
+scripts/
 
 # Python
 .pydeps/

@@ -20,6 +20,7 @@ public sealed class MainViewModel : ObservableObject
     private ThemeMode _selectedTheme = ThemeMode.Dark;
     private bool _launchOnStartup;
     private bool _minimizeToTray = true;
+    private bool _collectWhenMinimized;
     private bool _isSettingsOpen;
     private string _statusText = "Arming telemetry deck";
     private MetricPanelViewModel? _expandedPanel;
@@ -178,6 +179,12 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _minimizeToTray, value);
     }
 
+    public bool CollectWhenMinimized
+    {
+        get => _collectWhenMinimized;
+        set => SetProperty(ref _collectWhenMinimized, value);
+    }
+
     public bool IsSettingsOpen
     {
         get => _isSettingsOpen;
@@ -210,6 +217,7 @@ public sealed class MainViewModel : ObservableObject
             StorageDirectory = EffectiveStorageDirectory,
             LaunchOnStartup = LaunchOnStartup,
             MinimizeToTray = MinimizeToTray,
+            CollectWhenMinimized = CollectWhenMinimized,
             PanelVisibility = visibility,
             PanelOrder = BuildPersistedPanelOrder().ToList(),
         }.Normalize();
@@ -236,6 +244,7 @@ public sealed class MainViewModel : ObservableObject
         SelectedTheme = normalized.Theme;
         LaunchOnStartup = normalized.LaunchOnStartup;
         MinimizeToTray = normalized.MinimizeToTray;
+        CollectWhenMinimized = normalized.CollectWhenMinimized;
         ApplyPanelOrder(normalized.PanelOrder);
 
         foreach (var toggle in PanelToggles)
