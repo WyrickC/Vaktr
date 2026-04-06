@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using System.IO;
-using Vaktr.Collector;
 
 namespace Vaktr.App;
 
@@ -9,12 +8,6 @@ public static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        // If launched as an elevated temperature helper, run that loop and exit
-        if (TemperatureBridge.TryHandleHelperMode(args))
-        {
-            return;
-        }
-
         StartupTrace.Reset();
         StartupTrace.Write("Program.Main start // launch-cut-v19");
         StartupTrace.Write($"Assembly path: {typeof(Program).Assembly.Location}");

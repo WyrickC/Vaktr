@@ -96,7 +96,7 @@ Vaktr prunes data older than the retention window on a rolling basis so the loca
 
 ## Hardware Sensors
 
-Vaktr uses [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) for hardware sensors (CPU/GPU temperatures). When running without administrator privileges, Vaktr automatically launches an elevated helper process to read sensors that require admin access. If the user declines the elevation prompt, Vaktr falls back to WMI thermal zone data when available.
+Vaktr uses [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) for hardware sensors. GPU temperatures (AMD and Nvidia) work out of the box. CPU temperature monitoring is on the [roadmap](ROADMAP.md) — it requires a signed kernel driver that will be bundled into a future Vaktr installer.
 
 ## Tests
 

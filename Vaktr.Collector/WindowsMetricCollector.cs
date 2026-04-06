@@ -624,24 +624,9 @@ public sealed class WindowsMetricCollector : IMetricCollector
         if (shouldRefresh)
         {
             _cachedTemperatureValues.Clear();
-
-            // Try the local sensor reader first
             var reading = _temperatureReader.Read();
             var cpuTemperature = reading.CpuTemperatureCelsius;
             var gpuTemperature = reading.GpuTemperatureCelsius;
-
-            // If local reader couldn't get CPU temps (common when not elevated),
-            // check the bridge cache in case an elevated helper is already running.
-            // The bridge helper is NOT auto-launched to avoid surprise UAC prompts.
-            // To get CPU temps, run Vaktr as administrator.
-            if (!cpuTemperature.HasValue || !gpuTemperature.HasValue)
-            {
-                if (TemperatureBridge.TryReadSnapshot(out var bridgeSnapshot))
-                {
-                    cpuTemperature ??= bridgeSnapshot.CpuTemperatureCelsius;
-                    gpuTemperature ??= bridgeSnapshot.GpuTemperatureCelsius;
-                }
-            }
 
             if (cpuTemperature.HasValue)
             {

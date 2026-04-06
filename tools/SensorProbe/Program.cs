@@ -1,5 +1,8 @@
-using System.Management;
 using LibreHardwareMonitor.Hardware;
+
+Console.WriteLine($"PawnIO installed: {PawnIo.IsInstalled}");
+Console.WriteLine($"PawnIO version: {PawnIo.Version}");
+Console.WriteLine();
 
 var computer = new Computer
 {
@@ -12,72 +15,61 @@ computer.Open();
 
 try
 {
-    Console.WriteLine("=== LibreHardwareMonitor: ALL sensors on CPU ===");
+    Console.WriteLine("=== All temperature sensors ===");
     foreach (var hardware in computer.Hardware)
     {
-        DumpAllSensors(hardware, "");
+        hardware.Update();
+        foreach (var sensor in hardware.Sensors)
+        {
+            if (sensor.SensorType == SensorType.Temperature)
+            {
+                Console.WriteLine($"  {hardware.HardwareType} / {hardware.Name} / {sensor.Name}: {sensor.Value} C");
+            }
+        }
+
+        foreach (var sub in hardware.SubHardware)
+        {
+            sub.Update();
+            foreach (var sensor in sub.Sensors)
+            {
+                if (sensor.SensorType == SensorType.Temperature)
+                {
+                    Console.WriteLine($"  {sub.HardwareType} / {sub.Name} / {sensor.Name}: {sensor.Value} C");
+                }
+            }
+        }
     }
-
-    Console.WriteLine();
-    Console.WriteLine("=== WMI Win32_TemperatureProbe ===");
-    TryWmiQuery(@"root\CIMV2", "SELECT * FROM Win32_TemperatureProbe");
-
-    Console.WriteLine();
-    Console.WriteLine("=== WMI MSAcpi_ThermalZoneTemperature ===");
-    TryWmiQuery(@"root\WMI", "SELECT InstanceName, CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
-
-    Console.WriteLine();
-    Console.WriteLine("=== WMI Win32_PerfFormattedData_Counters_ThermalZoneInformation ===");
-    TryWmiQuery(@"root\CIMV2", "SELECT Name, Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation");
 }
 finally
 {
     computer.Close();
 }
 
-static void DumpAllSensors(IHardware hardware, string indent)
+public class PawnIo
 {
-    hardware.Update();
-    Console.WriteLine($"{indent}HW {hardware.HardwareType}: {hardware.Name}");
-
-    foreach (var sensor in hardware.Sensors)
+    public static bool IsInstalled
     {
-        Console.WriteLine($"{indent}  [{sensor.SensorType}] {sensor.Name}: {sensor.Value} (id={sensor.Identifier})");
-    }
-
-    foreach (var subHardware in hardware.SubHardware)
-    {
-        DumpAllSensors(subHardware, indent + "  ");
-    }
-}
-
-static void TryWmiQuery(string scope, string query)
-{
-    try
-    {
-        using var searcher = new ManagementObjectSearcher(scope, query);
-        using var results = searcher.Get();
-        var count = 0;
-        foreach (ManagementObject result in results)
+        get
         {
-            count++;
-            Console.Write($"  [{count}] ");
-            foreach (var prop in result.Properties)
+            try
             {
-                if (prop.Value is not null)
-                {
-                    Console.Write($"{prop.Name}={prop.Value}  ");
-                }
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO");
+                return key?.GetValue("DisplayVersion") is not null;
             }
-            Console.WriteLine();
-        }
-        if (count == 0)
-        {
-            Console.WriteLine("  (no results)");
+            catch { return false; }
         }
     }
-    catch (Exception ex)
+
+    public static string? Version
     {
-        Console.WriteLine($"  Failed: {ex.GetType().Name}: {ex.Message}");
+        get
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO");
+                return key?.GetValue("DisplayVersion") as string;
+            }
+            catch { return null; }
+        }
     }
 }

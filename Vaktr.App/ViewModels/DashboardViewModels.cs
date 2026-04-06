@@ -549,7 +549,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void EnsureBaselinePanels()
     {
-        EnsureBaselinePanel("cpu-temperature", "CPU Temperature", MetricCategory.Cpu, MetricUnit.Celsius);
+        // GPU temp shows up without a kernel driver; CPU temp requires PawnIO (roadmap item)
         EnsureBaselinePanel("gpu-temperature", "GPU Temperature", MetricCategory.Gpu, MetricUnit.Celsius);
     }
 
@@ -1263,16 +1263,11 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         if (VisibleSeries.Count == 0)
         {
-            if (string.Equals(PanelKey, "cpu-temperature", StringComparison.OrdinalIgnoreCase))
-            {
-                CurrentValue = "Not available";
-                SecondaryValue = "Hardware sensor not readable on this board";
-                EmptyStateText = "CPU temperature not available — some AMD/chipset combinations require a proprietary driver (e.g. HWiNFO) that Vaktr cannot use";
-            }
-            else if (string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(PanelKey, "cpu-temperature", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase))
             {
                 CurrentValue = "Not detected";
-                SecondaryValue = "Sensor not supported on this hardware";
+                SecondaryValue = "No readable GPU sensor";
                 EmptyStateText = "GPU temperature sensor not detected on this system";
             }
             else

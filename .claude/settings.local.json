@@ -6,7 +6,8 @@
       "Bash(dotnet build:*)",
       "Bash(dotnet --info)",
       "Bash(dotnet run:*)",
-      "Bash(tasklist)"
+      "Bash(tasklist)",
+      "Skill(update-config)"
     ]
   }
 }
