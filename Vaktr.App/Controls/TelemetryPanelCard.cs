@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Linq;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
@@ -74,6 +75,7 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly TranslateTransform _dragTransform = new();
     private Windows.Foundation.Point _headerPointerStart;
     private TelemetryPanelCard? _activeDropTargetCard;
+    private List<(TelemetryPanelCard Card, Windows.Foundation.Rect Bounds)>? _dragTargetCache;
     private bool _isEffectivelyVisible = true;
     private bool _isRenderingSuspended;
     private bool _deferredRefreshPending;
@@ -908,11 +910,19 @@ public sealed class TelemetryPanelCard : UserControl
             }
 
             _isHeaderDragActive = true;
-            Canvas.SetZIndex(this, 10);
+            Canvas.SetZIndex(this, 100);
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
-            _cardBorder.Opacity = 0.92;
-            _cardBorder.RenderTransform = new ScaleTransform { ScaleX = 0.97, ScaleY = 0.97, CenterX = _cardBorder.ActualWidth / 2, CenterY = _cardBorder.ActualHeight / 2 };
+            _cardBorder.Opacity = 0.88;
+            _cardBorder.RenderTransform = new ScaleTransform
+            {
+                ScaleX = 0.95,
+                ScaleY = 0.95,
+                CenterX = _cardBorder.ActualWidth / 2,
+                CenterY = _cardBorder.ActualHeight / 2,
+            };
+            ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
+            CacheDragTargets();
         }
 
         _dragTransform.X = point.X - _headerPointerStart.X;
@@ -1024,6 +1034,28 @@ public sealed class TelemetryPanelCard : UserControl
         _edgeGlow.Opacity = 0;
     }
 
+    private void CacheDragTargets()
+    {
+        _dragTargetCache = [];
+        if (XamlRoot?.Content is not UIElement root)
+        {
+            return;
+        }
+
+        foreach (var card in EnumeratePanelCards(root))
+        {
+            if (ReferenceEquals(card, this) || card.Panel is null)
+            {
+                continue;
+            }
+
+            if (TryGetBounds(card, root, out var bounds))
+            {
+                _dragTargetCache.Add((card, bounds));
+            }
+        }
+    }
+
     private void UpdateDropTargetState(PointerRoutedEventArgs e)
     {
         var targetCard = ResolveDropTargetCard(e);
@@ -1039,7 +1071,7 @@ public sealed class TelemetryPanelCard : UserControl
 
     private TelemetryPanelCard? ResolveDropTargetCard(PointerRoutedEventArgs e)
     {
-        if (XamlRoot?.Content is not UIElement root)
+        if (_dragTargetCache is null || _dragTargetCache.Count == 0 || XamlRoot?.Content is not UIElement root)
         {
             return null;
         }
@@ -1047,31 +1079,23 @@ public sealed class TelemetryPanelCard : UserControl
         var hostPoint = e.GetCurrentPoint(root).Position;
         TelemetryPanelCard? nearestCard = null;
         var nearestDistance = double.MaxValue;
-        foreach (var targetCard in EnumeratePanelCards(root))
+
+        foreach (var (card, bounds) in _dragTargetCache)
         {
-            if (ReferenceEquals(targetCard, this) || targetCard.Panel is null)
-            {
-                continue;
-            }
-
-            if (!TryGetBounds(targetCard, root, out var bounds))
-            {
-                continue;
-            }
-
             if (bounds.Contains(hostPoint))
             {
-                return targetCard;
+                return card;
             }
 
-            var center = new Windows.Foundation.Point(bounds.X + (bounds.Width / 2d), bounds.Y + (bounds.Height / 2d));
-            var deltaX = center.X - hostPoint.X;
-            var deltaY = center.Y - hostPoint.Y;
-            var distance = (deltaX * deltaX) + (deltaY * deltaY);
-            if (distance < nearestDistance)
+            var centerX = bounds.X + (bounds.Width / 2d);
+            var centerY = bounds.Y + (bounds.Height / 2d);
+            var dx = centerX - hostPoint.X;
+            var dy = centerY - hostPoint.Y;
+            var dist = (dx * dx) + (dy * dy);
+            if (dist < nearestDistance)
             {
-                nearestDistance = distance;
-                nearestCard = targetCard;
+                nearestDistance = dist;
+                nearestCard = card;
             }
         }
 
@@ -1085,6 +1109,10 @@ public sealed class TelemetryPanelCard : UserControl
         _isHeaderDragActive = false;
         _activeDropTargetCard?.SetDropTargetState(false);
         _activeDropTargetCard = null;
+        _dragTargetCache = null;
+        ProtectedCursor = null;
+
+        // Reset immediately — the grid will reflow panels to their new positions
         _cardBorder.Opacity = 1.0;
         _cardBorder.RenderTransform = null;
         _dragTransform.X = 0;

@@ -159,12 +159,9 @@ public sealed partial class ShellWindow
         settingsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         settingsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        AddStatusField(settingsGrid, 0, 0, "Collection", FormatScrapeInterval(_viewModel.EffectiveScrapeIntervalSeconds), "Live sample cadence");
-        AddStatusField(settingsGrid, 0, 1, "Retention", GetRetentionFieldValue(), "Local rollups stay lean");
-        AddStatusField(settingsGrid, 0, 2, "Storage path", GetStorageFieldTitle(), GetStorageFieldCaption());
-        AddStatusField(settingsGrid, 1, 0, "Background",
-            _viewModel.CollectWhenMinimized ? "Collects in background" : "Pauses when hidden",
-            _viewModel.CollectWhenMinimized ? "Metrics accumulate while minimized" : "Saves resources when not visible");
+        AddStatusField(settingsGrid, 0, 0, "Interval", FormatScrapeInterval(_viewModel.EffectiveScrapeIntervalSeconds), "Sample cadence");
+        AddStatusField(settingsGrid, 0, 1, "Retention", GetRetentionFieldValue(), "History window");
+        AddStatusField(settingsGrid, 0, 2, "Storage", GetStorageFieldTitle(), GetStorageFieldCaption());
 
         var actionRow = new Grid
         {
@@ -223,7 +220,7 @@ public sealed partial class ShellWindow
                 {
                     CreateFieldLabel("Storage directory"),
                     storageBox,
-                    CreateMutedText("Drop a folder here, browse for one, or leave this blank to keep the safe local default.", 12),
+                    CreateMutedText("Leave blank for the default location.", 12),
                 },
             },
         };
@@ -238,16 +235,6 @@ public sealed partial class ShellWindow
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var backgroundToggle = new CheckBox
-        {
-            Content = "Collect metrics when minimized",
-            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
-            IsChecked = _viewModel.CollectWhenMinimized,
-            Margin = new Thickness(0, 4, 0, 0),
-        };
-        backgroundToggle.Checked += (_, _) => _viewModel.CollectWhenMinimized = true;
-        backgroundToggle.Unchecked += (_, _) => _viewModel.CollectWhenMinimized = false;
 
         AddCardToGrid(fieldGrid, 0, 0, CreateControlEditorCard(
             "collection",
@@ -267,7 +254,7 @@ public sealed partial class ShellWindow
                         {
                             CreateFieldLabel("Scrape interval (seconds)"),
                             scrapeBox,
-                            CreateMutedText("Valid range: 1 to 60 seconds. Blank keeps the default 2 second cadence.", 12),
+                            CreateMutedText("1–60 seconds. Leave blank for the default 2s.", 12),
                         },
                     },
                     CreateChipWrapRow(
@@ -276,7 +263,6 @@ public sealed partial class ShellWindow
                         CreatePresetChip("5s", GetDraftScrapeIntervalSeconds() == 5, (_, _) => SetScrapeInterval(5)),
                         CreatePresetChip("10s", GetDraftScrapeIntervalSeconds() == 10, (_, _) => SetScrapeInterval(10)),
                         CreatePresetChip("15s", GetDraftScrapeIntervalSeconds() == 15, (_, _) => SetScrapeInterval(15))),
-                    backgroundToggle,
                 },
             }));
 
@@ -298,7 +284,7 @@ public sealed partial class ShellWindow
                         {
                             CreateFieldLabel("Retention window"),
                             retentionBox,
-                            CreateMutedText("Use m, h, or d only. Example: 30m, 24h, 7d.", 12),
+                            CreateMutedText("Format: 30m, 24h, or 7d.", 12),
                         },
                     },
                     CreateChipWrapRow(
@@ -507,7 +493,7 @@ public sealed partial class ShellWindow
                         {
                             CreateFieldLabel("Scrape interval (seconds)"),
                             scrapeBox,
-                            CreateMutedText("Blank keeps the default 2 second cadence. Valid range: 1 to 60 seconds.", 12),
+                            CreateMutedText("1–60 seconds. Leave blank for the default 2s.", 12),
                         },
                     },
                     CreateChipWrapRow(
@@ -543,7 +529,7 @@ public sealed partial class ShellWindow
                         {
                             CreateFieldLabel("Retention window"),
                             retentionBox,
-                            CreateMutedText("Accepted formats: 30m, 24h, 7d. Vaktr keeps the exact retention window you apply.", 12),
+                            CreateMutedText("Format: 30m, 24h, or 7d.", 12),
                         },
                     },
                     CreateChipWrapRow(
@@ -582,7 +568,7 @@ public sealed partial class ShellWindow
                 {
                     CreateFieldLabel("Storage directory"),
                     storageBox,
-                    CreateMutedText("Drop a folder here, browse for one, or type a path directly. Leave it blank to use the safe local default.", 12),
+                    CreateMutedText("Browse, drop a folder, or type a path. Blank uses the default.", 12),
                 },
             },
         };
@@ -606,7 +592,7 @@ public sealed partial class ShellWindow
                     CreateChipWrapRow(
                         CreateActionChip("Browse folder", OnBrowseStorageClick, filled: true),
                         CreateActionChip("Use default", (_, _) => ResetStorageDirectory())),
-                    CreateSecondaryText("Default: %LocalAppData%\\Vaktr\\Data. That keeps metrics local to this Windows machine and avoids roaming-profile churn.", 12),
+                    CreateSecondaryText("Default: %LocalAppData%\\Vaktr\\Data", 12),
                 },
             },
         };
@@ -899,7 +885,7 @@ public sealed partial class ShellWindow
             Children =
             {
                 CreateAccentText("LIVE BOARD", 11, 85),
-                CreateSecondaryText("Shared CPU, memory, disk, network, and drive history.", 13),
+                CreateSecondaryText("Real-time telemetry panels.", 13),
             },
         });
 
@@ -1280,10 +1266,9 @@ public sealed partial class ShellWindow
 
     private string GetBehaviorSummaryText()
     {
-        var startup = _viewModel.LaunchOnStartup ? "Launch on sign-in enabled" : "Manual launch";
-        var tray = _viewModel.MinimizeToTray ? "close => tray" : "close => exit";
-        var background = _viewModel.CollectWhenMinimized ? "background collection on" : "pauses when hidden";
-        return $"{startup} // {tray} // {background}";
+        var startup = _viewModel.LaunchOnStartup ? "Auto-start" : "Manual start";
+        var tray = _viewModel.MinimizeToTray ? "Close to tray" : "Close to exit";
+        return $"{startup} · {tray}";
     }
 
 }

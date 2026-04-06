@@ -497,25 +497,6 @@ public sealed partial class ShellWindow : Window
     {
         RefreshWindowChrome();
 
-        // Pause or resume collection based on window visibility and user preference
-        if (_collectorService is not null)
-        {
-            var isDeactivated = args.WindowActivationState == WindowActivationState.Deactivated;
-            if (isDeactivated && !_viewModel.CollectWhenMinimized)
-            {
-                _collectorService.Pause();
-            }
-            else if (!isDeactivated && _collectorService.IsPaused)
-            {
-                _collectorService.Resume();
-                // If background collection was on, reload history to pick up accumulated data
-                if (_viewModel.CollectWhenMinimized)
-                {
-                    _ = TryLoadHistoryAsync(_viewModel.BuildConfig());
-                }
-            }
-        }
-
         if (_windowIconApplied)
         {
             return;
@@ -523,6 +504,7 @@ public sealed partial class ShellWindow : Window
 
         _ = DispatcherQueue.TryEnqueue(TryApplyWindowIcon);
     }
+
 
     private async void OnSaveSettingsClick(object? sender, EventArgs e)
     {

@@ -297,50 +297,58 @@ public sealed class TelemetryChart : UserControl
                 continue;
             }
 
-            var projected = NormalizeProjectedPoints(
-                    Downsample(renderablePoints, pointBudget)
-                        .Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue)))
-                .ToArray();
-            var strokeProjected = ResolveStrokePoints(projected);
+            var downsampled = Downsample(renderablePoints, pointBudget);
 
-            if (strokeProjected.Count == 0)
-            {
-                continue;
-            }
+            // Split into contiguous segments at gaps (>3x the expected interval between points)
+            var segments = SplitAtGaps(downsampled, end - start);
 
-            if (strokeProjected.Count == 1)
+            foreach (var segment in segments)
             {
-                DrawPoint(strokeProjected[0], item.StrokeBrush, 5);
-                continue;
-            }
+                var projected = NormalizeProjectedPoints(
+                        segment.Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue)))
+                    .ToArray();
+                var strokeProjected = ResolveStrokePoints(projected);
 
-            if (drawFilledArea)
-            {
-                var fillProjected = ResolveFillPoints(strokeProjected);
-                if (fillProjected.Count >= 2)
+                if (strokeProjected.Count == 0)
                 {
-                    _canvas.Children.Add(new Path
-                    {
-                        Data = BuildAreaGeometry(fillProjected, TopPadding + plotHeight),
-                        Fill = item.FillBrush,
-                        Opacity = seriesCount == 1 ? 0.7 : 0.5,
-                    });
+                    continue;
                 }
+
+                if (strokeProjected.Count == 1)
+                {
+                    DrawPoint(strokeProjected[0], item.StrokeBrush, 5);
+                    continue;
+                }
+
+                if (drawFilledArea)
+                {
+                    var fillProjected = ResolveFillPoints(strokeProjected);
+                    if (fillProjected.Count >= 2)
+                    {
+                        _canvas.Children.Add(new Path
+                        {
+                            Data = BuildAreaGeometry(fillProjected, TopPadding + plotHeight),
+                            Fill = item.FillBrush,
+                            Opacity = seriesCount == 1 ? 0.7 : 0.5,
+                        });
+                    }
+                }
+
+                _canvas.Children.Add(new Path
+                {
+                    Data = BuildLineGeometry(strokeProjected),
+                    Stroke = item.StrokeBrush,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round,
+                    StrokeThickness = strokeThickness,
+                });
             }
 
-            _canvas.Children.Add(new Path
+            if (drawPointMarkers && renderablePoints.Count > 0)
             {
-                Data = BuildLineGeometry(strokeProjected),
-                Stroke = item.StrokeBrush,
-                StrokeLineJoin = PenLineJoin.Round,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round,
-                StrokeThickness = strokeThickness,
-            });
-
-            if (drawPointMarkers)
-            {
-                DrawPoint(strokeProjected[^1], item.StrokeBrush, 5);
+                var lastPoint = Project(renderablePoints[^1], LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue);
+                DrawPoint(lastPoint, item.StrokeBrush, 5);
             }
         }
     }
@@ -740,6 +748,56 @@ public sealed class TelemetryChart : UserControl
         return new Windows.Foundation.Point(
             leftPadding + (Math.Clamp(xRatio, 0d, 1d) * plotWidth),
             topPadding + plotHeight - (Math.Clamp(yRatio, 0d, 1d) * plotHeight));
+    }
+
+    private static IReadOnlyList<IReadOnlyList<MetricPoint>> SplitAtGaps(
+        IReadOnlyList<MetricPoint> points,
+        TimeSpan windowSpan)
+    {
+        if (points.Count <= 1)
+        {
+            return [points];
+        }
+
+        // Detect the typical interval between points, then treat anything >3x that as a gap
+        var medianIntervalMs = 0d;
+        if (points.Count >= 3)
+        {
+            var intervals = new List<double>(points.Count - 1);
+            for (var i = 1; i < points.Count; i++)
+            {
+                intervals.Add((points[i].Timestamp - points[i - 1].Timestamp).TotalMilliseconds);
+            }
+            intervals.Sort();
+            medianIntervalMs = intervals[intervals.Count / 2];
+        }
+
+        // Minimum gap threshold: 3x the median interval, but at least 10 seconds
+        var gapThresholdMs = Math.Max(medianIntervalMs * 3d, 10_000d);
+
+        var segments = new List<IReadOnlyList<MetricPoint>>();
+        var current = new List<MetricPoint> { points[0] };
+
+        for (var i = 1; i < points.Count; i++)
+        {
+            var delta = (points[i].Timestamp - points[i - 1].Timestamp).TotalMilliseconds;
+            if (delta > gapThresholdMs)
+            {
+                if (current.Count > 0)
+                {
+                    segments.Add(current.ToArray());
+                }
+                current = [];
+            }
+            current.Add(points[i]);
+        }
+
+        if (current.Count > 0)
+        {
+            segments.Add(current.ToArray());
+        }
+
+        return segments;
     }
 
     private static Geometry BuildLineGeometry(IReadOnlyList<Windows.Foundation.Point> points)

@@ -8,7 +8,7 @@ internal sealed class TemperatureSensorReader : IDisposable
 {
     private readonly Computer? _hardwareMonitor;
     private readonly UpdateVisitor _updateVisitor = new();
-    private bool _wmiFailed;
+    private static bool _wmiFailed;
 
     public TemperatureSensorReader()
     {

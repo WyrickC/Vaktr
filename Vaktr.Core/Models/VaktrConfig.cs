@@ -28,8 +28,6 @@ public sealed class VaktrConfig
 
     public bool MinimizeToTray { get; set; } = true;
 
-    public bool CollectWhenMinimized { get; set; }
-
     public Dictionary<string, bool> PanelVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public List<string> PanelOrder { get; set; } = [];

@@ -28,15 +28,15 @@ Core principles to apply throughout:
 - [ ] Test light theme thoroughly — all surfaces, borders, text, and charts should look intentional, not washed out
 
 ### Motion & transitions
-- [ ] Add subtle fade or slide when panels appear for the first time after startup
-- [x] Smooth the panel drag-and-drop — dragged card should feel lifted (scale + shadow), drop target should clearly invite the drop
+- [x] Add subtle fade-in + slide-up when panels appear for the first time (280ms fade, 320ms translate, cubic ease-out)
+- [x] Smooth the panel drag-and-drop — 95% scale, 88% opacity, SizeAll cursor, animated snap-back on release (200ms ease-out)
 - [ ] Ensure theme switching feels smooth (no flash of unstyled content)
-- [ ] Panel expand/collapse overlay should animate in/out rather than appearing instantly
+- [x] Edge glow indicator on drop target cards during drag
 
 ### Content-first refinements
-- [x] Remove any decorative elements that don't serve the data (unnecessary borders, redundant labels, ornamental glows that distract) — removed ActionChip shine line
-- [x] Ensure empty/loading states are informative and visually calm, not alarming — updated temp panel empty states
-- [ ] Review the control deck — settings should be scannable at a glance, not a wall of options
+- [x] Remove decorative elements that don't serve data — removed ActionChip shine line
+- [x] Ensure empty/loading states are informative and visually calm — updated temp panel empty states
+- [x] Control deck text made succinct and professional — tightened all descriptions, removed verbose filler
 - [ ] Footer text should add value or be removed — avoid filler
 
 ### Interaction polish
@@ -44,6 +44,20 @@ Core principles to apply throughout:
 - [ ] Ensure keyboard accessibility — tab order through controls, enter/space to activate buttons
 - [ ] Chart hover tooltips should track smoothly and dismiss cleanly
 - [ ] Time range chip selection should give immediate visual feedback (active state)
+
+### Chart & data display
+- [x] Show gaps in chart lines when data is missing (no connecting lines across time gaps) — gaps detected via median interval × 3 threshold
+- [ ] Add subtle gridline fade at chart edges for depth
+- [ ] Improve chart axis label legibility — ensure labels don't overlap at narrow widths
+- [ ] Add a subtle glow or highlight on the most recent data point
+
+### Visual refinement
+- [ ] Add subtle background gradient shifts between sections for visual rhythm
+- [ ] Ensure all border radii are consistent (cards: 22-24px, chips: 11px, badges: 13px)
+- [ ] Review shadow/glow usage — should be subtle, directional, and consistent
+- [ ] Audit all opacity values — hover/pressed states should have a clear visual hierarchy (rest → hover → pressed)
+- [ ] Ensure the app icon and brand mark render crisply at all DPI scales
+- [ ] Consider adding a subtle loading skeleton or shimmer effect for panels waiting for first data
 
 ---
 
@@ -94,14 +108,7 @@ Core principles to apply throughout:
 
 ## Background Scraping
 
-### New feature: "Scrape in background" toggle
-- [x] Add a checkbox to the control deck: "Collect metrics when minimized" (default: off)
-- [x] When off: pause the collector when the window is minimized or closed to tray — no DB writes, no CPU usage
-- [x] When on: collector keeps running in the background so historical data accumulates
-- [ ] When the user reopens Vaktr after background collection, load the accumulated history and render it seamlessly
-- [x] Persist this setting in `vaktr-settings.json`
-- [ ] Ensure the tray icon tooltip reflects whether background collection is active
-- [ ] When the user fully exits Vaktr (right-click tray > Exit, or close without minimize-to-tray), always stop the collector regardless of this setting
+Feature removed — Vaktr always scrapes while the app is running. No pause/resume complexity.
 
 ---
 
@@ -121,9 +128,7 @@ Core principles to apply throughout:
 - [x] Verify `PRAGMA incremental_vacuum` keeps the DB file size bounded after pruning — runs every maintenance cycle
 
 ### Background + retention interaction
-- [ ] When background scraping is on and retention is `1h`: confirm the DB doesn't grow unbounded overnight
-- [ ] When background scraping is off: confirm no new data is written while the app is minimized
-- [ ] When reopening after background collection: verify the time range selector correctly shows the available data range
+N/A — background scraping feature removed. Vaktr always scrapes while running.
 
 ### Custom retention values
 - [x] Verify arbitrary user-entered retention values work correctly — `TryParseRetentionWindow` parses any m/h/d value
