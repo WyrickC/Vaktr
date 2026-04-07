@@ -422,6 +422,19 @@ public sealed class SqliteMetricStore : IMetricStore
 
         if (_writeConnection is not null)
         {
+            // Explicitly checkpoint the WAL before closing so the database
+            // file is self-contained and safe for the next launch
+            try
+            {
+                var checkpoint = _writeConnection.CreateCommand();
+                checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                await checkpoint.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Best-effort — connection may already be in a bad state
+            }
+
             await _writeConnection.DisposeAsync().ConfigureAwait(false);
             _writeConnection = null;
         }
