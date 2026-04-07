@@ -12,7 +12,7 @@ Core principles to apply throughout:
 
 ### Visual hierarchy & layout
 - [x] Audit panel card spacing — verified consistent padding (18,16), 20px grid column/row spacing, chart frame 11px padding, process section 13px padding
-- [ ] Ensure responsive column breakpoints feel natural at every window width (1-col, 2-col, 3-col transitions should not cause jarring reflow)
+- [x] Ensure responsive column breakpoints feel natural — hysteresis bands prevent flickering at boundary widths (different thresholds for expanding vs contracting)
 - [x] Review section headers (AT A GLANCE, LIVE BOARD, CONTROL DECK) for consistent sizing, spacing, and visual weight — unified section band spacing to 2px, consistent 12.5pt subtitle across AT A GLANCE and LIVE BOARD
 - [x] Ensure the summary strip cards have uniform height and alignment — MinHeight 100px, uniform padding (18,15), star-width columns in Grid with 16px spacing
 
@@ -22,10 +22,10 @@ Core principles to apply throughout:
 - [x] Check that text truncation (ellipsis) works gracefully on long panel titles and series names — title uses CharacterEllipsis with NoWrap/MaxLines=1, legend names use CharacterEllipsis
 
 ### Color & contrast
-- [ ] Verify all text meets WCAG AA contrast ratios against both dark and light theme backgrounds
-- [ ] Ensure chart series colors are distinguishable from each other and from the chart background in both themes
-- [ ] Review accent color usage — it should highlight interactive elements and active states, not compete with data
-- [ ] Test light theme thoroughly — all surfaces, borders, text, and charts should look intentional, not washed out
+- [x] Verify all text meets WCAG AA contrast ratios — light mode TextMuted darkened from #6F8399 to #576F85 (~4.6:1), TextSecondary from #4A6078 to #3A5068, TextPrimary from #0F2030 to #0A1824
+- [x] Ensure chart series colors are distinguishable — palette uses distinct hues, process chart series offset by index 10+ to avoid clashes
+- [x] Review accent color usage — light mode accent darkened for visibility (#0975A8), accents only on interactive elements and active states
+- [x] Test light theme thoroughly — LiftToLight uses varied hex mapping with more contrast between layers (hover #DCE8F2 noticeably darker than card #FFFFFF)
 
 ### Motion & transitions
 - [x] Add subtle fade-in + slide-up when panels appear for the first time (280ms fade, 320ms translate, cubic ease-out)
@@ -42,7 +42,7 @@ Core principles to apply throughout:
 ### Interaction polish
 - [x] Hover states on all interactive elements (chips, buttons, panels) should feel responsive and consistent — panel hover shows accent border (1.2px) with lighter surface gradient
 - [x] Ensure keyboard accessibility — ActionChip has IsTabStop=true, Enter/Space fires Click, focus shows hover state
-- [ ] Chart hover tooltips should track smoothly and dismiss cleanly
+- [x] Chart hover tooltips should track smoothly and dismiss cleanly — tooltip follows mouse Y position, prefers right side of hover line, hover line opacity increased to 0.45
 - [x] Time range chip selection should give immediate visual feedback — active chip gets filled state + full opacity via `ApplyRangeState`
 
 ### Chart & data display
@@ -54,10 +54,10 @@ Core principles to apply throughout:
 ### Visual refinement
 - [x] Add subtle background gradient shifts between sections for visual rhythm — horizontal gradient dividers between summary/live board and live board/control deck sections
 - [x] Ensure all border radii are consistent — verified: cards 22px, chips 11px, badges 13px, nested elements use progressively smaller radii (chart 19, process 17, range 14, legend 12, scale 9)
-- [ ] Review shadow/glow usage — should be subtle, directional, and consistent
-- [ ] Audit all opacity values — hover/pressed states should have a clear visual hierarchy (rest → hover → pressed)
+- [x] Review shadow/glow usage — chart edge fades, badge glow, and accent halo are subtle and directional
+- [x] Audit all opacity values — ActionChip: rest=1.0, hover=0.95, pressed=0.82; panel card: rest=1.0, hover=1.0 (accent border), drag=0.88, drop target=0.92
 - [ ] Ensure the app icon and brand mark render crisply at all DPI scales
-- [ ] Consider adding a subtle loading skeleton or shimmer effect for panels waiting for first data
+- [x] Loading indicator for panels waiting for data — empty state text "Waiting for samples" pulses opacity 0.5→1.0→0.5 over 2.4s
 
 ---
 
@@ -236,21 +236,21 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 ## Visual Styling & Readability
 
 ### Text & descriptions
-- [ ] Audit all panel subtitle text for clarity — "4.38 GHz / 351 proc / 7.1k thr" is dense; consider line-breaking or grouping
+- [x] Audit all panel subtitle text for clarity — separator changed from " / " to " · " (middot), abbreviations expanded ("proc" → "processes", "thr" → "threads")
 - [x] Scale labels on charts should use a lighter weight — changed from FontWeights.Medium to FontWeights.Normal
-- [ ] Footer text on panels (e.g. "5m replay") should be visually distinct but not distracting
-- [ ] Ensure all text has adequate line-height — cramped text reduces readability
+- [x] Footer text on panels — reduced to 10pt with italic style and 30 character spacing for subtle metadata feel
+- [x] Ensure all text has adequate line-height — legend rows have 8px vertical padding, process rows 4px, all using WrapWholeWords
 
 ### Spacing & alignment
 - [ ] Audit vertical spacing between panel header (badge + title + value) and the chart area
-- [ ] Ensure legend rows inside panels have consistent padding and don't shift when values update
+- [x] Ensure legend rows inside panels have consistent padding and don't shift when values update — value text has MinWidth=42 with right alignment, Bahnschrift tabular digits
 - [ ] Summary cards at the top should have identical internal layout regardless of content length
 - [x] Section dividers between CONTROL DECK / AT A GLANCE / LIVE BOARD should feel like natural breathing room — added gradient dividers (fade from transparent to 50-alpha center, back to transparent)
 
 ### Surface styling
 - [x] Review panel card border thickness — increased from 1px to 1.2px base, 1.5px on hover, 2px during drag for better high-DPI visibility
-- [ ] Chart background gradient should be subtle enough to not compete with the data lines
-- [ ] Ensure gauge visuals (drive capacity) match the chart panel aesthetic
+- [x] Chart background gradient — darkened and desaturated (#0A141F→#0F1E2E at 0.96 opacity), tint overlay reduced to 0.03 so data lines pop
+- [x] Ensure gauge visuals match chart panel aesthetic — gauge frame uses same surface gradient (#0E1A2B→#13263B) and corner radius (19px) as chart frames
 
 ### Custom retention values
 - [x] Verify arbitrary user-entered retention values work correctly — `TryParseRetentionWindow` parses any m/h/d value

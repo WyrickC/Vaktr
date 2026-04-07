@@ -109,7 +109,9 @@ public sealed class TelemetryPanelCard : UserControl
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        _footerText = CreateTextBlock(fontSize: 10.5);
+        _footerText = CreateTextBlock(fontSize: 10);
+        _footerText.CharacterSpacing = 30;
+        _footerText.FontStyle = Windows.UI.Text.FontStyle.Italic;
         _scaleText = CreateTextBlock("Segoe UI Variable Text", 10.5, FontWeights.Normal);
         _scaleText.TextWrapping = TextWrapping.NoWrap;
         _scaleText.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -193,7 +195,7 @@ public sealed class TelemetryPanelCard : UserControl
         };
         _legendScroller = new ScrollViewer
         {
-            MaxHeight = 184,
+            MaxHeight = 400,
             VerticalScrollMode = ScrollMode.Enabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollMode = ScrollMode.Disabled,
@@ -1179,7 +1181,10 @@ public sealed class TelemetryPanelCard : UserControl
 
         if (Panel is { } panel)
         {
+            // Update button states immediately for snappy feedback
+            RefreshProcessSortButtons(panel);
             panel.ProcessSortMode = sortMode;
+            RefreshProcessSortButtons(panel);
         }
     }
 
@@ -1466,6 +1471,8 @@ public sealed class TelemetryPanelCard : UserControl
             FontWeight = FontWeights.SemiBold,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
             Text = "--",
+            MinWidth = 42,
+            TextAlignment = TextAlignment.Right,
         };
         row.Children.Add(valueText);
         Grid.SetColumn(valueText, 2);

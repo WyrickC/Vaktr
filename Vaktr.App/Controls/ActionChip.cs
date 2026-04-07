@@ -186,7 +186,7 @@ public sealed class ActionChip : UserControl
             ? ResolveBrush("AccentStrongBrush", "#9EEFFF")
             : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#2C4866" : "#243D55");
 
-        Opacity = _isPressed ? 0.94 : 1.0;
+        Opacity = _isPressed ? 0.82 : _isHovered ? 0.95 : 1.0;
         _label.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _glow.Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF");
         _glow.Opacity = useAccent ? 0.045 : _isHovered ? 0.015 : 0;

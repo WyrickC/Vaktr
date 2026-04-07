@@ -1487,8 +1487,8 @@ public sealed class MetricPanelViewModel : ObservableObject
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
                 SecondaryValue = BuildJoinedText(
                     _detailContext.CpuFrequencyMhz > 0 ? $"{_detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : "Total processor load",
-                    _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} proc" : null,
-                    _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
+                    _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} processes" : null,
+                    _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} threads" : null);
                 ScaleLabel = _detailContext.HandleCount > 0
                     ? $"100% ceiling · {FormatCompactCount(_detailContext.HandleCount)} handles"
                     : "100% ceiling";
@@ -1607,6 +1607,13 @@ public sealed class MetricPanelViewModel : ObservableObject
     {
         // Hide per-process chart series when toggle is off
         if (buffer.Key.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal) && !_perProcessChartsEnabled)
+        {
+            return false;
+        }
+
+        // Memory panel: only show used-gb (hide available-gb to keep chart clean)
+        if (string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(buffer.Key, "available-gb", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -1771,10 +1778,10 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         if (!hasA && !hasB && !hasC) return "Live metric";
         if (hasA && !hasB && !hasC) return a!;
-        if (hasA && hasB && !hasC) return $"{a} / {b}";
-        if (hasA && hasB && hasC) return $"{a} / {b} / {c}";
-        if (hasA && !hasB && hasC) return $"{a} / {c}";
-        if (!hasA && hasB) return hasC ? $"{b} / {c}" : b!;
+        if (hasA && hasB && !hasC) return $"{a} · {b}";
+        if (hasA && hasB && hasC) return $"{a} · {b} · {c}";
+        if (hasA && !hasB && hasC) return $"{a} · {c}";
+        if (!hasA && hasB) return hasC ? $"{b} · {c}" : b!;
         return c!;
     }
 

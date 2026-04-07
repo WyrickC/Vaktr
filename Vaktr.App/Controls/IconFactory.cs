@@ -61,7 +61,14 @@ internal static class IconFactory
     public static FrameworkElement CreateIcon(string key, Brush accentBrush, double size = 18)
     {
         var glyph = ResolveGlyph(Normalize(key));
-        var glowBrush = CreateOpacityBrush(accentBrush, 0.18);
+        var isLight = IsLightPaletteActive();
+
+        // In light mode, darken the icon color for better contrast
+        var iconBrush = isLight && accentBrush is SolidColorBrush solid
+            ? new SolidColorBrush(DarkenColor(solid.Color, 0.55))
+            : accentBrush;
+
+        var glowBrush = CreateOpacityBrush(accentBrush, isLight ? 0.12 : 0.18);
 
         return new Grid
         {
@@ -77,7 +84,7 @@ internal static class IconFactory
                     Width = size + 2,
                     Height = size + 2,
                     Fill = glowBrush,
-                    Opacity = 0.28,
+                    Opacity = isLight ? 0.4 : 0.28,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                     IsHitTestVisible = false,
@@ -87,13 +94,22 @@ internal static class IconFactory
                     Glyph = glyph,
                     FontFamily = FluentIconFont,
                     FontSize = size,
-                    Foreground = accentBrush,
+                    Foreground = iconBrush,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                     IsHitTestVisible = false,
                 },
             },
         };
+    }
+
+    private static Windows.UI.Color DarkenColor(Windows.UI.Color color, double factor)
+    {
+        return Windows.UI.Color.FromArgb(
+            color.A,
+            (byte)(color.R * factor),
+            (byte)(color.G * factor),
+            (byte)(color.B * factor));
     }
 
     private static string ResolveGlyph(string key)

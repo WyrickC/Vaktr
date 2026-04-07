@@ -40,11 +40,10 @@ public sealed class UsageGauge : UserControl
         _canvas = new Canvas();
         _frameBorder = new Border
         {
-            CornerRadius = new CornerRadius(24),
+            CornerRadius = new CornerRadius(19),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            Background = ResolveBrush("SurfaceBrush", "#102131"),
-            Opacity = 0.82,
+            Background = CreateThemedGradient(),
         };
         _innerBorder = new Border
         {
@@ -122,11 +121,36 @@ public sealed class UsageGauge : UserControl
     public void RefreshThemeResources()
     {
         _frameBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _frameBorder.Background = ResolveBrush("SurfaceBrush", "#102131");
+        _frameBorder.Background = CreateThemedGradient();
         _innerBorder.BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A");
         _valueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _captionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         ScheduleRedraw(DispatcherQueuePriority.High);
+    }
+
+    private static LinearGradientBrush CreateThemedGradient()
+    {
+        var isLight = IsLightMode();
+        return new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops = new GradientStopCollection
+            {
+                new GradientStop { Color = BrushFactory.ParseColor(isLight ? "#F2F6FB" : "#0E1A2B"), Offset = 0d },
+                new GradientStop { Color = BrushFactory.ParseColor(isLight ? "#E6EFF7" : "#13263B"), Offset = 1d },
+            },
+        };
+    }
+
+    private static bool IsLightMode()
+    {
+        if (Application.Current.Resources.TryGetValue("AppBackdropBrush", out var value) && value is SolidColorBrush brush)
+        {
+            var c = brush.Color;
+            return (0.2126 * c.R) + (0.7152 * c.G) + (0.0722 * c.B) >= 170d;
+        }
+        return false;
     }
 
     private void ScheduleRedraw(DispatcherQueuePriority priority = DispatcherQueuePriority.Low)

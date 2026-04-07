@@ -1278,21 +1278,21 @@ public sealed partial class ShellWindow
 
     private static Color LiftToLight(string darkHex)
     {
-        // Map dark surface hex to distinct light equivalents — preserves visual depth hierarchy
+        // Map dark surface hex to distinct light equivalents — more contrast between layers
         return darkHex.TrimStart('#').ToUpperInvariant() switch
         {
-            "0E1B2C" => ParseColor("#F8FBFF"),  // card surface start
-            "13253A" => ParseColor("#EEF5FB"),  // card surface end
-            "0F1C2D" => ParseColor("#F5F9FE"),  // process/summary surface start
-            "15283F" or "14263A" => ParseColor("#EBF3FA"), // process/summary surface end
-            "102131" or "17304A" => ParseColor("#E8F0F8"), // badge surface
-            "0E1A2B" or "13263B" => ParseColor("#F2F7FC"), // chart frame
-            "101C2D" or "132438" => ParseColor("#F0F5FB"), // legend row
-            "102031" or "15283E" => ParseColor("#ECF2FA"), // range shell
-            "0B1726" or "12243A" => ParseColor("#F4F8FD"), // chart plot
-            "102133" or "162A40" => ParseColor("#E6EFF8"), // hover surface
-            "0F1B2D" or "13243A" => ParseColor("#F0F6FC"), // control editor card
-            _ => ParseColor("#F6F9FD"),  // default light surface
+            "0E1B2C" => ParseColor("#FFFFFF"),  // card surface start (brightest)
+            "13253A" => ParseColor("#F4F8FC"),  // card surface end
+            "0F1C2D" => ParseColor("#F0F5FB"),  // process/summary surface start
+            "15283F" or "14263A" => ParseColor("#E6EFF7"), // process/summary surface end
+            "102131" or "17304A" => ParseColor("#E2EBF4"), // badge surface (darker for depth)
+            "0E1A2B" or "13263B" => ParseColor("#F2F6FB"), // chart frame
+            "101C2D" or "132438" => ParseColor("#EAF1F8"), // legend row
+            "102031" or "15283E" => ParseColor("#E6EEF6"), // range shell
+            "0B1726" or "12243A" => ParseColor("#F6F9FD"), // chart plot (lighter bg)
+            "102133" or "162A40" => ParseColor("#DCE8F2"), // hover surface (noticeably darker)
+            "0F1B2D" or "13243A" => ParseColor("#ECF3FA"), // control editor card
+            _ => ParseColor("#F5F8FC"),  // default light surface
         };
     }
 

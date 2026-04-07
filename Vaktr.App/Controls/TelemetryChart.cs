@@ -94,7 +94,7 @@ public sealed class TelemetryChart : UserControl
             Visibility = Visibility.Collapsed,
             Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
             StrokeThickness = 1,
-            Opacity = 0.32,
+            Opacity = 0.45,
             IsHitTestVisible = false,
         };
         _hoverTooltipText = new TextBlock
@@ -128,6 +128,23 @@ public sealed class TelemetryChart : UserControl
             TextAlignment = TextAlignment.Center,
             Visibility = Visibility.Collapsed,
         };
+
+        // Gentle pulse animation on empty state text — subtle loading indicator
+        var emptyPulse = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimationUsingKeyFrames
+        {
+            RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever,
+        };
+        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.LinearDoubleKeyFrame
+            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.Zero), Value = 0.5 });
+        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.LinearDoubleKeyFrame
+            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1200)), Value = 1.0 });
+        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.LinearDoubleKeyFrame
+            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2400)), Value = 0.5 });
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(emptyPulse, _emptyStateText);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(emptyPulse, "Opacity");
+        var emptyStoryboard = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+        emptyStoryboard.Children.Add(emptyPulse);
+        _emptyStateText.Loaded += (_, _) => emptyStoryboard.Begin();
 
         Content = new Grid
         {
@@ -398,8 +415,8 @@ public sealed class TelemetryChart : UserControl
             RadiusY = 16,
             Stroke = ResolveBrush("SurfaceGridBrush", "#27425E"),
             StrokeThickness = 1,
-            Fill = CreateSurfaceGradient("#0B1726", "#12243A"),
-            Opacity = 0.98,
+            Fill = CreateSurfaceGradient("#0A141F", "#0F1E2E"),
+            Opacity = 0.96,
         };
 
         var tint = new Rectangle
@@ -409,7 +426,7 @@ public sealed class TelemetryChart : UserControl
             RadiusX = 16,
             RadiusY = 16,
             Fill = ResolveBrush("AccentSoftBrush", "#10394D"),
-            Opacity = 0.06,
+            Opacity = 0.03,
         };
 
         Canvas.SetLeft(frame, LeftPadding);
@@ -421,7 +438,7 @@ public sealed class TelemetryChart : UserControl
 
         // Subtle edge fade for depth at left and right edges
         var edgeFadeWidth = Math.Min(24d, plotWidth * 0.06);
-        var plotBg = BrushFactory.ParseColor("#0B1726");
+        var plotBg = IsLightPaletteActive() ? BrushFactory.ParseColor("#F6F9FD") : BrushFactory.ParseColor("#0A141F");
         var leftFade = new Rectangle
         {
             Width = edgeFadeWidth,
@@ -1172,10 +1189,16 @@ public sealed class TelemetryChart : UserControl
         _hoverTooltipText.Text = tooltip;
         _hoverTooltip.Measure(new Windows.Foundation.Size(240, double.PositiveInfinity));
         var desired = _hoverTooltip.DesiredSize;
-        var tooltipLeft = hoverX > (ActualWidth - desired.Width - 20)
-            ? hoverX - desired.Width - 12
-            : hoverX + 12;
-        var tooltipTop = Math.Max(8, TopPadding + 10);
+
+        // Prefer right side of hover line, flip to left only when near right edge
+        var tooltipLeft = hoverX + 14;
+        if (tooltipLeft + desired.Width + 8 > ActualWidth)
+        {
+            tooltipLeft = hoverX - desired.Width - 14;
+        }
+
+        // Follow mouse Y with clamping
+        var tooltipTop = Math.Clamp(position.Y - desired.Height / 2, TopPadding + 4, Math.Max(TopPadding + 4, ActualHeight - desired.Height - 8));
         _hoverTooltip.Visibility = Visibility.Visible;
         Canvas.SetLeft(_hoverTooltip, Math.Clamp(tooltipLeft, 8, Math.Max(8, ActualWidth - desired.Width - 8)));
         Canvas.SetTop(_hoverTooltip, tooltipTop);

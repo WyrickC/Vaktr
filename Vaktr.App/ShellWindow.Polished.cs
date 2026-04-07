@@ -453,7 +453,18 @@ public sealed partial class ShellWindow : Window
     private int DetermineDashboardColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        return width >= 1260 ? 3 : width >= 900 ? 2 : 1;
+
+        // Hysteresis: use slightly different thresholds for expanding vs contracting
+        // to prevent flickering at boundary widths
+        var columns = _lastDashboardColumnCount switch
+        {
+            3 => width >= 1180 ? 3 : width >= 840 ? 2 : 1,  // shrinking: hold 3-col longer
+            1 => width >= 960 ? (width >= 1300 ? 3 : 2) : 1, // growing: require more width
+            _ => width >= 1260 ? 3 : width >= 900 ? 2 : 1,
+        };
+
+        _lastDashboardColumnCount = columns;
+        return columns;
     }
 
     private void OnRootLoaded(object sender, RoutedEventArgs e)
