@@ -125,34 +125,22 @@ public sealed class CollectorService : IAsyncDisposable
         }
     }
 
-    private async Task StopInternalAsync()
+    private Task StopInternalAsync()
     {
         var loopCancellation = _loopCancellation;
         var timer = _timer;
-        var loopTask = _loopTask;
 
         _loopTask = null;
         _timer = null;
         _loopCancellation = null;
 
+        // Cancel and dispose immediately — don't wait for the loop to exit.
+        // The loop handles OperationCanceledException gracefully and will wind down
+        // on its own. No need to block shutdown waiting for it.
         timer?.Dispose();
         loopCancellation?.Cancel();
-
-        if (loopTask is not null)
-        {
-            try
-            {
-                // Give the loop a short window to exit gracefully, then move on
-                await loopTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (TimeoutException)
-            {
-            }
-        }
-
         loopCancellation?.Dispose();
+
+        return Task.CompletedTask;
     }
 }

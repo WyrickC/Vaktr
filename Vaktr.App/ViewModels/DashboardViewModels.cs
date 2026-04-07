@@ -65,6 +65,7 @@ public sealed class MainViewModel : ObservableObject
         SummaryCards =
         [
             new SummaryCardViewModel("CPU", "CPU", BrushFactory.CreateBrush("#5DE6FF")),
+            new SummaryCardViewModel("GPU", "GPU", BrushFactory.CreateBrush("#E87BFF")),
             new SummaryCardViewModel("RAM", "Memory", BrushFactory.CreateBrush("#7BF7D0")),
             new SummaryCardViewModel("IO", "Disk", BrushFactory.CreateBrush("#FF9B54")),
             new SummaryCardViewModel("WAN", "Network", BrushFactory.CreateBrush("#9A8CFF")),
@@ -580,6 +581,8 @@ public sealed class MainViewModel : ObservableObject
     {
         // Single-pass extraction — no GroupBy/ToDictionary/Where/Sum allocations
         var cpuUsage = 0d;
+        var gpuUsage = 0d;
+        var gpuMemoryGb = 0d;
         var usedMemory = 0d;
         var availableMemory = 0d;
         var diskRead = 0d;
@@ -592,6 +595,12 @@ public sealed class MainViewModel : ObservableObject
             if (string.Equals(sample.PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(sample.SeriesKey, "usage", StringComparison.OrdinalIgnoreCase))
                 cpuUsage = sample.Value;
+            else if (string.Equals(sample.PanelKey, "gpu-total", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(sample.SeriesKey, "usage", StringComparison.OrdinalIgnoreCase))
+                gpuUsage = sample.Value;
+            else if (string.Equals(sample.PanelKey, "gpu-memory", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(sample.SeriesKey, "dedicated-gb", StringComparison.OrdinalIgnoreCase))
+                gpuMemoryGb = sample.Value;
             else if (string.Equals(sample.PanelKey, "memory", StringComparison.OrdinalIgnoreCase))
             {
                 if (string.Equals(sample.SeriesKey, "used-gb", StringComparison.OrdinalIgnoreCase))
@@ -622,17 +631,21 @@ public sealed class MainViewModel : ObservableObject
                 detailContext.ProcessCount > 0 ? $"{FormatCompactCount(detailContext.ProcessCount)} proc" : null,
                 detailContext.ThreadCount > 0 ? $"{FormatCompactCount(detailContext.ThreadCount)} thr" : null));
 
+        SummaryCards[1].Update(
+            $"{gpuUsage:0.#}%",
+            gpuMemoryGb > 0 ? $"{gpuMemoryGb:0.0} GB VRAM" : "GPU utilization");
+
         var totalMemory = usedMemory + availableMemory;
         var memoryPct = totalMemory > 0 ? usedMemory / totalMemory * 100d : 0d;
-        SummaryCards[1].Update(
+        SummaryCards[2].Update(
             FormatCapacityForSummary(usedMemory),
             totalMemory > 0 ? $"{memoryPct:0.#}% of {FormatCapacityForSummary(totalMemory)}" : "Memory in play");
 
-        SummaryCards[2].Update(
+        SummaryCards[3].Update(
             $"{diskRead + diskWrite:0.0} MB/s",
             $"{diskRead:0.0} read / {diskWrite:0.0} write");
 
-        SummaryCards[3].Update(
+        SummaryCards[4].Update(
             $"{netDown:0.0} Mbps",
             $"{netUp:0.0} up");
     }
@@ -949,6 +962,8 @@ public sealed class MetricPanelViewModel : ObservableObject
     private PanelDetailContext _detailContext = PanelDetailContext.Empty;
     private IReadOnlyList<ProcessListItemViewModel> _processRows = Array.Empty<ProcessListItemViewModel>();
     private ProcessSortMode _processSortMode = ProcessSortMode.Highest;
+    private bool _processListExpanded;
+    private int _totalProcessCount;
     private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
@@ -1112,6 +1127,22 @@ public sealed class MetricPanelViewModel : ObservableObject
             RefreshProcessRows();
         }
     }
+
+    public bool ProcessListExpanded
+    {
+        get => _processListExpanded;
+        set
+        {
+            if (!SetProperty(ref _processListExpanded, value))
+            {
+                return;
+            }
+
+            RefreshProcessRows();
+        }
+    }
+
+    public int TotalProcessCount => _totalProcessCount;
 
     public string ProcessTableTitle =>
         string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase)
@@ -1522,24 +1553,70 @@ public sealed class MetricPanelViewModel : ObservableObject
             return;
         }
 
-        IEnumerable<ProcessActivitySample> processes = _detailContext.Processes;
-        var peakMemory = Math.Max(0.1d, _detailContext.Processes.Count > 0 ? _detailContext.Processes.Max(process => process.MemoryGigabytes) : 0d);
-        processes = ProcessSortMode switch
+        var sourceProcesses = _detailContext.Processes;
+        if (sourceProcesses.Count == 0)
         {
-            ProcessSortMode.Name => processes.OrderBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            ProcessSortMode.Lowest when string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) =>
-                processes.OrderBy(process => process.MemoryGigabytes).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            ProcessSortMode.Lowest =>
-                processes.OrderBy(process => process.CpuPercent).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            _ when string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) =>
-                processes.OrderByDescending(process => process.MemoryGigabytes).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            _ =>
-                processes.OrderByDescending(process => process.CpuPercent).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-        };
+            ProcessRows = Array.Empty<ProcessListItemViewModel>();
+            return;
+        }
 
-        ProcessRows = processes
-            .Select(process => CreateProcessRow(process, peakMemory))
-            .ToArray();
+        // Manual max instead of LINQ
+        var peakMemory = 0d;
+        foreach (var p in sourceProcesses)
+        {
+            if (p.MemoryGigabytes > peakMemory)
+            {
+                peakMemory = p.MemoryGigabytes;
+            }
+        }
+        peakMemory = Math.Max(0.1d, peakMemory);
+
+        // Copy to array for in-place sort (avoids LINQ OrderBy allocations)
+        var sorted = new ProcessActivitySample[sourceProcesses.Count];
+        for (var i = 0; i < sourceProcesses.Count; i++)
+        {
+            sorted[i] = sourceProcesses[i];
+        }
+
+        var isMemoryPanel = string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
+        Array.Sort(sorted, (a, b) =>
+        {
+            int cmp;
+            switch (ProcessSortMode)
+            {
+                case ProcessSortMode.Name:
+                    return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                case ProcessSortMode.Lowest when isMemoryPanel:
+                    cmp = a.MemoryGigabytes.CompareTo(b.MemoryGigabytes);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                case ProcessSortMode.Lowest:
+                    cmp = a.CpuPercent.CompareTo(b.CpuPercent);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                default:
+                    if (isMemoryPanel)
+                    {
+                        cmp = b.MemoryGigabytes.CompareTo(a.MemoryGigabytes);
+                        return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                    }
+                    cmp = b.CpuPercent.CompareTo(a.CpuPercent);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            }
+        });
+
+        _totalProcessCount = sorted.Length;
+        // Cap visible rows — UI perf degrades with hundreds of rows
+        const int defaultVisibleRows = 30;
+        const int expandedVisibleRows = 100;
+        var visibleCount = _processListExpanded
+            ? Math.Min(sorted.Length, expandedVisibleRows)
+            : Math.Min(sorted.Length, defaultVisibleRows);
+        var rows = new ProcessListItemViewModel[visibleCount];
+        for (var i = 0; i < visibleCount; i++)
+        {
+            rows[i] = CreateProcessRow(sorted[i], peakMemory);
+        }
+
+        ProcessRows = rows;
     }
 
     private ProcessListItemViewModel CreateProcessRow(ProcessActivitySample process, double peakMemory)

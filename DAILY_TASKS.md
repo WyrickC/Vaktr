@@ -11,15 +11,15 @@ Core principles to apply throughout:
 - **Consistency** — spacing, typography, color, and interaction patterns should feel unified across every panel and control
 
 ### Visual hierarchy & layout
-- [ ] Audit panel card spacing — ensure consistent padding, margins, and gaps across all panel types (chart panels, gauge panels, process tables)
+- [x] Audit panel card spacing — verified consistent padding (18,16), 20px grid column/row spacing, chart frame 11px padding, process section 13px padding
 - [ ] Ensure responsive column breakpoints feel natural at every window width (1-col, 2-col, 3-col transitions should not cause jarring reflow)
 - [x] Review section headers (AT A GLANCE, LIVE BOARD, CONTROL DECK) for consistent sizing, spacing, and visual weight — unified section band spacing to 2px, consistent 12.5pt subtitle across AT A GLANCE and LIVE BOARD
 - [x] Ensure the summary strip cards have uniform height and alignment — MinHeight 100px, uniform padding (18,15), star-width columns in Grid with 16px spacing
 
 ### Typography
-- [ ] Audit font sizes and weights for clear hierarchy: panel title > current value > secondary value > footer/scale label > muted text
-- [ ] Ensure all numeric/metric values use a monospace or tabular-lining font (Bahnschrift) so digits don't shift as values change
-- [ ] Check that text truncation (ellipsis) works gracefully on long panel titles and series names
+- [x] Audit font sizes and weights for clear hierarchy — title 17.5pt SemiBold > currentValue 22pt Bahnschrift SemiBold > secondary 11.5pt > footer/scale 10.5pt Normal > muted 9.5pt
+- [x] Ensure all numeric/metric values use a monospace or tabular-lining font (Bahnschrift) — currentValue, legend values, process values all use Bahnschrift
+- [x] Check that text truncation (ellipsis) works gracefully on long panel titles and series names — title uses CharacterEllipsis with NoWrap/MaxLines=1, legend names use CharacterEllipsis
 
 ### Color & contrast
 - [ ] Verify all text meets WCAG AA contrast ratios against both dark and light theme backgrounds
@@ -41,7 +41,7 @@ Core principles to apply throughout:
 
 ### Interaction polish
 - [x] Hover states on all interactive elements (chips, buttons, panels) should feel responsive and consistent — panel hover shows accent border (1.2px) with lighter surface gradient
-- [ ] Ensure keyboard accessibility — tab order through controls, enter/space to activate buttons
+- [x] Ensure keyboard accessibility — ActionChip has IsTabStop=true, Enter/Space fires Click, focus shows hover state
 - [ ] Chart hover tooltips should track smoothly and dismiss cleanly
 - [ ] Time range chip selection should give immediate visual feedback (active state)
 
@@ -156,7 +156,6 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 
 ### Collection overhead
 - [ ] Profile `WindowsMetricCollector.CollectAsync` — identify which metric sources are slowest
-- [ ] The process enumeration (`EnumerateProcesses`) opens a handle to every process — consider sampling less frequently or capping the count
 - [ ] `DriveInfo.GetDrives()` can stall on disconnected/network drives — add a timeout or cache more aggressively
 - [x] Reduce allocations per collection cycle — eliminated LINQ `.ToArray()` in CPU core enumeration (replaced with manual sort), GPU engine usage (manual max loop), GPU memory aggregation (manual sum loop), stale PID cleanup (manual list instead of `.Where().ToArray()`)
 
@@ -182,7 +181,7 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 - [x] Make the "Vaktr" title font feel more premium — increased to 52pt with 60 character spacing for more breathing room
 - [ ] Ensure the brand mark / logo renders crisp at all DPI scales
 - [x] The subtitle text should be concise and confident — changed to "LOCAL TELEMETRY DASHBOARD" with wider letter-spacing (220)
-- [ ] Review the header layout at narrow window widths — title and action buttons should not overlap
+- [x] Review the header layout at narrow window widths — subtitle uses TextTrimming.CharacterEllipsis to prevent overflow, header is Star-width column
 
 ---
 
@@ -196,20 +195,28 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 ### Status: Rewritten
 - [x] Panels swap in real-time as you drag over them — grid reflows live, no manual transform tracking
 - [x] No lag on release — nothing to animate back, the swap already happened
-- [x] Removed all TranslateTransform, ScaleTransform, cursor changes, edge glow indicators — pure data-driven reorder
+- [x] Removed all ScaleTransform, edge glow indicators — pure data-driven reorder with translate-only transform
 - [x] Lightweight in-place grid update via `ReorderDashboardPanelsInPlace` (just `Grid.SetColumn`/`Grid.SetRow`)
 - [x] Drag target cache built once at drag start, rebuilt after each swap
 - [x] Tuned drag threshold (64px²) — quick to initiate but avoids accidental triggers
 - [x] Debounced layout persistence — saves once after drag ends, not on every swap
 - [x] Smooth snap-back animation on release — 180ms translate, 200ms scale, 160ms opacity with cubic ease-out via Storyboard
 - [x] SizeAll cursor during drag — changes to SizeAll on activation, resets on release
-- [x] Scale-down effect during drag — 0.97 scale via TransformGroup (ScaleTransform + TranslateTransform)
-- [x] Drop target visual feedback — target card highlights with accent border (1.5px) and lighter surface gradient during hover
-- [x] Expanded hit zones — 20px expanded bounds on drop targets for generous hit detection, only swaps when near a card (not nearest-anywhere fallback)
+- [x] Drag visual feedback — 0.88 opacity, accent border (2px), SizeAll cursor during drag
+- [x] Drop target visual feedback — target card highlights with accent border (1.5px) and lighter surface gradient during hover, clears on move-away and drag-end
+- [x] Expanded hit zones — 30px column-aware hit detection, prefers cards in same column X range for easy left/right targeting, no nearest-anywhere fallback
+- [x] Panel follows mouse at grab point — pure mouse-delta translate (no TransformToVisual feedback loop), dragged card skipped in grid layout to prevent RepositionThemeTransition flicker
+- [x] Smooth other-panel shuffling — RepositionThemeTransition animates non-dragged cards, dragged card excluded from grid position updates via IsDragging flag
+- [x] Clean drag end — PanelDragEnded event places card at correct grid slot, then 200ms translate snap-back animation
 
 ---
 
 ## Theme Switching Performance
+
+### Scrape interval
+- [x] Ensure control deck scrape interval is editable — text input with preset chips (1s, 2s, 5s, 10s, 15s, 30s, 60s), step/nudge/reset functions, validated on save
+
+---
 
 ### Dark/light mode transitions
 - [ ] Profile the theme switch path — identify what's slow (resource lookup? re-render? reflow?)
@@ -224,7 +231,7 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 
 ### Text & descriptions
 - [ ] Audit all panel subtitle text for clarity — "4.38 GHz / 351 proc / 7.1k thr" is dense; consider line-breaking or grouping
-- [ ] Scale labels on charts (e.g. "100% ceiling · 118.1k handles") should use a lighter weight to not compete with data
+- [x] Scale labels on charts should use a lighter weight — changed from FontWeights.Medium to FontWeights.Normal
 - [ ] Footer text on panels (e.g. "5m replay") should be visually distinct but not distracting
 - [ ] Ensure all text has adequate line-height — cramped text reduces readability
 
@@ -235,7 +242,7 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 - [x] Section dividers between CONTROL DECK / AT A GLANCE / LIVE BOARD should feel like natural breathing room — added gradient dividers (fade from transparent to 50-alpha center, back to transparent)
 
 ### Surface styling
-- [ ] Review panel card border thickness — 1px may be too thin on high-DPI; consider 1.5px or a subtle shadow instead
+- [x] Review panel card border thickness — increased from 1px to 1.2px base, 1.5px on hover, 2px during drag for better high-DPI visibility
 - [ ] Chart background gradient should be subtle enough to not compete with the data lines
 - [ ] Ensure gauge visuals (drive capacity) match the chart panel aesthetic
 

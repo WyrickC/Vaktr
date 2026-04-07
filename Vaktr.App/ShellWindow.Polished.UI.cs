@@ -14,6 +14,68 @@ namespace Vaktr.App;
 
 public sealed partial class ShellWindow
 {
+    private Grid BuildLoadingScreen()
+    {
+        var loadingAccent = ResolveBrush("AccentBrush", "#66E7FF");
+        var ld1 = new Ellipse { Width = 7, Height = 7, Fill = loadingAccent, Opacity = 0.5 };
+        var ld2 = new Ellipse { Width = 7, Height = 7, Fill = loadingAccent, Opacity = 0.5 };
+        var ld3 = new Ellipse { Width = 7, Height = 7, Fill = loadingAccent, Opacity = 0.5 };
+
+        var loadingPulse = new Storyboard { RepeatBehavior = RepeatBehavior.Forever };
+        foreach (var (dot, delay) in new[] { (ld1, 0), (ld2, 150), (ld3, 300) })
+        {
+            var anim = new DoubleAnimationUsingKeyFrames { BeginTime = TimeSpan.FromMilliseconds(delay) };
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.Zero), Value = 0.35 });
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(350)), Value = 1.0 });
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(700)), Value = 0.35 });
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1050)), Value = 0.35 });
+            Storyboard.SetTarget(anim, dot);
+            Storyboard.SetTargetProperty(anim, "Opacity");
+            loadingPulse.Children.Add(anim);
+        }
+
+        _loadingOverlay = new Border
+        {
+            Background = ResolveBrush("AppBackdropBrush", "#030812"),
+            Child = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Spacing = 16,
+                Children =
+                {
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Children = { ld1, ld2, ld3 },
+                    },
+                    CreateMutedText("Starting Vaktr", 13),
+                },
+            },
+        };
+        _loadingOverlay.Loaded += (_, _) => loadingPulse.Begin();
+
+        var root = new Grid
+        {
+            Background = ResolveBrush("AppBackdropBrush", "#030812"),
+        };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.Children.Add(_titleBarDragHost);
+        root.Children.Add(_loadingOverlay);
+        Grid.SetRow(_loadingOverlay, 1);
+
+        // After this screen renders, build the full UI on the next frame
+        root.Loaded += (_, _) =>
+        {
+            _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, BuildFullUi);
+        };
+
+        return root;
+    }
+
     private Grid BuildRootLayout()
     {
         StartupTrace.Write("BuildRootLayout // polished-v19");
@@ -50,6 +112,12 @@ public sealed partial class ShellWindow
         };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        // Remove from loading screen parent before re-parenting
+        if (_titleBarDragHost.Parent is Grid oldParent)
+        {
+            oldParent.Children.Remove(_titleBarDragHost);
+        }
         root.Children.Add(_titleBarDragHost);
 
         _scrollHost.Content = new Grid
@@ -113,12 +181,13 @@ public sealed partial class ShellWindow
         };
         var subtitleText = new TextBlock
         {
-            Text = "LOCAL TELEMETRY DASHBOARD",
+            Text = "SYSTEM TELEMETRY DASHBOARD",
             FontFamily = new FontFamily("Segoe UI Variable Text"),
             FontSize = 10.5,
             CharacterSpacing = 220,
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
             Margin = new Thickness(3, 0, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var titleStack = new StackPanel
         {
@@ -1177,14 +1246,18 @@ public sealed partial class ShellWindow
         LinearGradientBrush brush;
         if (isLight)
         {
+            // Use varied light gradients based on dark surface depth for visual distinction
+            var startColor = LiftToLight(startHex);
+            var endColor = LiftToLight(endHex);
+
             brush = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0),
                 EndPoint = new Windows.Foundation.Point(1, 1),
                 GradientStops = new GradientStopCollection
                 {
-                    new GradientStop { Color = ResolveColor("SurfaceBrush", "#F8FBFF"), Offset = 0d },
-                    new GradientStop { Color = ResolveColor("SurfaceElevatedBrush", "#EEF5FB"), Offset = 1d },
+                    new GradientStop { Color = startColor, Offset = 0d },
+                    new GradientStop { Color = endColor, Offset = 1d },
                 },
             };
         }
@@ -1204,6 +1277,26 @@ public sealed partial class ShellWindow
 
         _gradientCache[cacheKey] = brush;
         return brush;
+    }
+
+    private static Color LiftToLight(string darkHex)
+    {
+        // Map dark surface hex to distinct light equivalents — preserves visual depth hierarchy
+        return darkHex.TrimStart('#').ToUpperInvariant() switch
+        {
+            "0E1B2C" => ParseColor("#F8FBFF"),  // card surface start
+            "13253A" => ParseColor("#EEF5FB"),  // card surface end
+            "0F1C2D" => ParseColor("#F5F9FE"),  // process/summary surface start
+            "15283F" or "14263A" => ParseColor("#EBF3FA"), // process/summary surface end
+            "102131" or "17304A" => ParseColor("#E8F0F8"), // badge surface
+            "0E1A2B" or "13263B" => ParseColor("#F2F7FC"), // chart frame
+            "101C2D" or "132438" => ParseColor("#F0F5FB"), // legend row
+            "102031" or "15283E" => ParseColor("#ECF2FA"), // range shell
+            "0B1726" or "12243A" => ParseColor("#F4F8FD"), // chart plot
+            "102133" or "162A40" => ParseColor("#E6EFF8"), // hover surface
+            "0F1B2D" or "13243A" => ParseColor("#F0F6FC"), // control editor card
+            _ => ParseColor("#F6F9FD"),  // default light surface
+        };
     }
 
     private static bool IsLightPaletteActive()
@@ -1267,9 +1360,19 @@ public sealed partial class ShellWindow
 
     private static string GetStorageFieldCaption(string? storageDirectory)
     {
-        return string.IsNullOrWhiteSpace(storageDirectory)
-            ? "%LocalAppData%\\Vaktr\\Data"
-            : storageDirectory.Trim();
+        if (!string.IsNullOrWhiteSpace(storageDirectory))
+        {
+            return storageDirectory.Trim();
+        }
+
+        try
+        {
+            return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Vaktr", "Data");
+        }
+        catch
+        {
+            return "%LocalAppData%\\Vaktr\\Data";
+        }
     }
 
     private string GetRetentionFieldCaption()

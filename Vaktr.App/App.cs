@@ -18,6 +18,20 @@ public sealed class App : Application
     {
         StartupTrace.Write("App ctor");
         UnhandledException += OnUnhandledException;
+
+        // Catch exceptions from background threads (LibreHardwareMonitor, WMI)
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is System.Runtime.InteropServices.COMException comEx)
+            {
+                StartupTrace.WriteException("AppDomain COMException (suppressed)", comEx);
+            }
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            args.SetObserved();
+            StartupTrace.WriteException("UnobservedTaskException (suppressed)", args.Exception);
+        };
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -217,10 +231,12 @@ public sealed class App : Application
         {
             StartupTrace.WriteException("App.UnhandledException", e.Exception);
 
-            if (_startupGuardActive && e.Exception is System.Runtime.InteropServices.COMException)
+            // Always handle COMExceptions — LibreHardwareMonitor and WMI can throw
+            // on background threads that we can't catch locally
+            if (e.Exception is System.Runtime.InteropServices.COMException)
             {
                 e.Handled = true;
-                StartupTrace.Write("Startup COMException handled to preserve shell");
+                StartupTrace.Write("COMException handled to preserve shell");
             }
         }
     }

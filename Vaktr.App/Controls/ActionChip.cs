@@ -81,6 +81,11 @@ public sealed class ActionChip : UserControl
         _surface.PointerReleased += OnPointerReleased;
         _surface.Tapped += OnTapped;
 
+        IsTabStop = true;
+        KeyDown += OnKeyDown;
+        GotFocus += (_, _) => { _isHovered = true; UpdateVisualState(); };
+        LostFocus += (_, _) => { _isHovered = false; UpdateVisualState(); };
+
         UpdateVisualState();
     }
 
@@ -129,6 +134,15 @@ public sealed class ActionChip : UserControl
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
         Click?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key is Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space)
+        {
+            Click?.Invoke(this, EventArgs.Empty);
+            e.Handled = true;
+        }
     }
 
     public void RefreshThemeResources()
