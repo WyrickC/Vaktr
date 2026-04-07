@@ -68,7 +68,6 @@ public sealed class MainViewModel : ObservableObject
             new SummaryCardViewModel("GPU", "GPU", BrushFactory.CreateBrush("#E87BFF")),
             new SummaryCardViewModel("RAM", "Memory", BrushFactory.CreateBrush("#7BF7D0")),
             new SummaryCardViewModel("IO", "Disk", BrushFactory.CreateBrush("#FF9B54")),
-            new SummaryCardViewModel("WAN", "Network", BrushFactory.CreateBrush("#9A8CFF")),
         ];
 
         EnsureBaselinePanels();
@@ -644,10 +643,6 @@ public sealed class MainViewModel : ObservableObject
         SummaryCards[3].Update(
             $"{diskRead + diskWrite:0.0} MB/s",
             $"{diskRead:0.0} read / {diskWrite:0.0} write");
-
-        SummaryCards[4].Update(
-            $"{netDown:0.0} Mbps",
-            $"{netUp:0.0} up");
     }
 
     private static TimeRangePreset MapToRangePreset(int minutes) => minutes switch

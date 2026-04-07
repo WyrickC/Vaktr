@@ -1426,11 +1426,7 @@ public sealed partial class ShellWindow : Window
     private int DetermineSummaryColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        var cardCount = _viewModel.SummaryCards.Count;
-        return width >= 1320 && cardCount >= 5 ? 5
-            : width >= 1120 ? 4
-            : width >= 820 ? 2
-            : 1;
+        return width >= 1120 ? 4 : width >= 820 ? 2 : 1;
     }
 
     private async Task TryLoadHistoryAsync(VaktrConfig config)

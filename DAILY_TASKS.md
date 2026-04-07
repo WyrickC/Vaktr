@@ -171,7 +171,7 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 ### Memory
 - [ ] Verify series buffer trimming is working — buffers should never grow beyond retention window
 - [ ] Check for event handler leaks — panels subscribe to `PropertyChanged`, ensure unsubscribe on removal
-- [ ] Profile GC pressure over 30 minutes of running — target Gen0/Gen1 only, no Gen2 spikes
+- [ ] Profile GC pressure over 5 minutes of running — target Gen0/Gen1 only, no Gen2 spikes
 
 ---
 

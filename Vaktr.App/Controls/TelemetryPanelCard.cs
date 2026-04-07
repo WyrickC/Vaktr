@@ -56,6 +56,7 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private readonly TextBlock _processExpandText;
+    private bool _processSectionRevealed;
     private MetricPanelViewModel? _observedPanel;
     private bool _refreshQueued;
     private bool _isDropTarget;
@@ -845,7 +846,72 @@ public sealed class TelemetryPanelCard : UserControl
         Grid.SetColumn(_chartFrame, showGauge ? 1 : 0);
         Grid.SetColumnSpan(_chartFrame, showGauge ? 1 : 2);
         _legendScroller.Visibility = panel?.SupportsProcessTable == true ? Visibility.Collapsed : Visibility.Visible;
-        _processSection.Visibility = panel?.SupportsProcessTable == true ? Visibility.Visible : Visibility.Collapsed;
+
+        if (panel?.SupportsProcessTable == true)
+        {
+            if (!_processSectionRevealed)
+            {
+                // First reveal — animate smoothly from zero height
+                _processSectionRevealed = true;
+                _processSection.Visibility = Visibility.Visible;
+                _processSection.Opacity = 0;
+                _processSection.MaxHeight = 0;
+                _processSection.RenderTransform = new TranslateTransform();
+
+                // Defer animation to after layout measures the section
+                _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+
+                    var heightAnim = new DoubleAnimation
+                    {
+                        From = 0,
+                        To = 500,
+                        Duration = new Duration(TimeSpan.FromMilliseconds(450)),
+                        EasingFunction = ease,
+                    };
+
+                    var fadeAnim = new DoubleAnimation
+                    {
+                        From = 0,
+                        To = 1,
+                        Duration = new Duration(TimeSpan.FromMilliseconds(400)),
+                        EasingFunction = ease,
+                    };
+
+                    var slideAnim = new DoubleAnimation
+                    {
+                        From = 6,
+                        To = 0,
+                        Duration = new Duration(TimeSpan.FromMilliseconds(450)),
+                        EasingFunction = ease,
+                    };
+
+                    Storyboard.SetTarget(heightAnim, _processSection);
+                    Storyboard.SetTargetProperty(heightAnim, "MaxHeight");
+                    Storyboard.SetTarget(fadeAnim, _processSection);
+                    Storyboard.SetTargetProperty(fadeAnim, "Opacity");
+                    Storyboard.SetTarget(slideAnim, _processSection.RenderTransform);
+                    Storyboard.SetTargetProperty(slideAnim, "Y");
+
+                    var sb = new Storyboard();
+                    sb.Children.Add(heightAnim);
+                    sb.Children.Add(fadeAnim);
+                    sb.Children.Add(slideAnim);
+                    sb.Completed += (_, _) => _processSection.MaxHeight = double.PositiveInfinity;
+                    sb.Begin();
+                });
+            }
+            else
+            {
+                _processSection.Visibility = Visibility.Visible;
+            }
+        }
+        else
+        {
+            _processSection.Visibility = Visibility.Collapsed;
+            _processSectionRevealed = false;
+        }
     }
 
     private void RefreshRangeButtons(MetricPanelViewModel? panel)
@@ -1570,40 +1636,71 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void PlayEntranceAnimation()
     {
-        // Stagger delay based on grid position for cascading entrance
+        // Gentle staggered cascade — each card drifts in softly with a subtle scale
         var col = Grid.GetColumn(this);
         var row = Grid.GetRow(this);
-        var staggerMs = (row * 3 + col) * 60;
+        var staggerMs = (row * 3 + col) * 90 + 80;
+
+        var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
 
         var fadeIn = new DoubleAnimation
         {
             From = 0,
             To = 1,
-            Duration = new Duration(TimeSpan.FromMilliseconds(320)),
+            Duration = new Duration(TimeSpan.FromMilliseconds(520)),
             BeginTime = TimeSpan.FromMilliseconds(staggerMs),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            EasingFunction = ease,
         };
 
         var slideUp = new DoubleAnimation
         {
-            From = 18,
+            From = 8,
             To = 0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(380)),
+            Duration = new Duration(TimeSpan.FromMilliseconds(560)),
             BeginTime = TimeSpan.FromMilliseconds(staggerMs),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            EasingFunction = ease,
+        };
+
+        var scaleX = new DoubleAnimation
+        {
+            From = 0.985,
+            To = 1.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(560)),
+            BeginTime = TimeSpan.FromMilliseconds(staggerMs),
+            EasingFunction = ease,
+        };
+
+        var scaleY = new DoubleAnimation
+        {
+            From = 0.985,
+            To = 1.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(560)),
+            BeginTime = TimeSpan.FromMilliseconds(staggerMs),
+            EasingFunction = ease,
         };
 
         var translate = new TranslateTransform();
-        _cardBorder.RenderTransform = translate;
+        var scale = new ScaleTransform { ScaleX = 0.985, ScaleY = 0.985 };
+        var group = new TransformGroup();
+        group.Children.Add(scale);
+        group.Children.Add(translate);
+        _cardBorder.RenderTransform = group;
+        _cardBorder.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
 
         Storyboard.SetTarget(fadeIn, this);
         Storyboard.SetTargetProperty(fadeIn, "Opacity");
         Storyboard.SetTarget(slideUp, translate);
         Storyboard.SetTargetProperty(slideUp, "Y");
+        Storyboard.SetTarget(scaleX, scale);
+        Storyboard.SetTargetProperty(scaleX, "ScaleX");
+        Storyboard.SetTarget(scaleY, scale);
+        Storyboard.SetTargetProperty(scaleY, "ScaleY");
 
         var storyboard = new Storyboard();
         storyboard.Children.Add(fadeIn);
         storyboard.Children.Add(slideUp);
+        storyboard.Children.Add(scaleX);
+        storyboard.Children.Add(scaleY);
         storyboard.Begin();
     }
 }
