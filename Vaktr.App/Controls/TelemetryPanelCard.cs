@@ -78,6 +78,7 @@ public sealed class TelemetryPanelCard : UserControl
     private Windows.Foundation.Point _dragMouseStart;
     private TelemetryPanelCard? _activeDropTargetCard;
     private List<(TelemetryPanelCard Card, Windows.Foundation.Rect Bounds)>? _dragTargetCache;
+    private long _lastSwapTicks;
     private bool _isEffectivelyVisible = true;
     private bool _isRenderingSuspended;
     private bool _deferredRefreshPending;
@@ -429,10 +430,19 @@ public sealed class TelemetryPanelCard : UserControl
 
         Content = _cardBorder;
         Opacity = 0;
+        var entrancePlayed = false;
         Loaded += (_, _) =>
         {
             RefreshFromPanel();
-            PlayEntranceAnimation();
+            if (!entrancePlayed)
+            {
+                entrancePlayed = true;
+                PlayEntranceAnimation();
+            }
+            else
+            {
+                Opacity = 1;
+            }
         };
     }
 
@@ -1040,24 +1050,37 @@ public sealed class TelemetryPanelCard : UserControl
 
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.BorderThickness = new Thickness(2);
-            _cardBorder.Opacity = 0.88;
             ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
             Canvas.SetZIndex(this, 50);
             CacheDragTargets();
+
+            // Animate lift — smooth transition into drag state
+            var liftOpacity = new DoubleAnimation
+            {
+                To = 0.88,
+                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+            };
+            Storyboard.SetTarget(liftOpacity, _cardBorder);
+            Storyboard.SetTargetProperty(liftOpacity, "Opacity");
+            var liftStoryboard = new Storyboard();
+            liftStoryboard.Children.Add(liftOpacity);
+            liftStoryboard.Begin();
         }
 
         // Pure mouse delta — card moves exactly with the mouse, no feedback loops
         _dragTranslate.X = rootPoint.X - _dragMouseStart.X;
         _dragTranslate.Y = rootPoint.Y - _dragMouseStart.Y;
 
-        // When pointer enters a different panel, swap positions
+        // When pointer enters a different panel, swap positions (with cooldown to prevent chain-swaps)
         var targetCard = ResolveDropTargetCard(e);
+        var now = Environment.TickCount64;
 
         if (!ReferenceEquals(targetCard, _activeDropTargetCard))
         {
             _activeDropTargetCard?.SetDropTargetState(false);
 
-            if (targetCard is not null && Panel is not null)
+            if (targetCard is not null && Panel is not null && (now - _lastSwapTicks) > 250)
             {
                 _activeDropTargetCard = targetCard;
                 targetCard.SetDropTargetState(true);
@@ -1065,9 +1088,10 @@ public sealed class TelemetryPanelCard : UserControl
                 var targetKey = targetCard.Panel?.PanelKey;
                 if (!string.IsNullOrWhiteSpace(targetKey))
                 {
+                    _lastSwapTicks = now;
                     PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(Panel.PanelKey, targetKey));
-                    // Recache after the grid shuffles other cards
-                    _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+                    // Recache after the grid repositions
+                    _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
                     {
                         if (_isHeaderDragActive)
                         {
@@ -1168,21 +1192,49 @@ public sealed class TelemetryPanelCard : UserControl
         Panel?.ResetZoom();
     }
 
+    public void PlaySwapSettleAnimation()
+    {
+        // Quick opacity pulse — card briefly dims then returns, indicating it just moved
+        var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+        var fadeOut = new DoubleAnimation
+        {
+            From = 0.6,
+            To = 1.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+            EasingFunction = ease,
+        };
+
+        Storyboard.SetTarget(fadeOut, _cardBorder);
+        Storyboard.SetTargetProperty(fadeOut, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fadeOut);
+        sb.Begin();
+    }
+
     private void SetDropTargetState(bool isActive)
     {
         _isDropTarget = isActive;
-        if (isActive)
+        _cardBorder.BorderBrush = isActive
+            ? ResolveBrush("AccentBrush", "#66E7FF")
+            : ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _cardBorder.BorderThickness = new Thickness(isActive ? 1.5 : 1.2);
+        _cardBorder.Background = isActive
+            ? CreateSurfaceGradient("#102133", "#162A40")
+            : CreateSurfaceGradient("#0E1B2C", "#13253A");
+
+        // Animate the opacity pulse for smooth feedback
+        var targetOpacity = isActive ? 0.92 : 1.0;
+        var opAnim = new DoubleAnimation
         {
-            _cardBorder.BorderBrush = ResolveBrush("AccentBrush", "#66E7FF");
-            _cardBorder.BorderThickness = new Thickness(1.5);
-            _cardBorder.Background = CreateSurfaceGradient("#102133", "#162A40");
-        }
-        else
-        {
-            _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-            _cardBorder.BorderThickness = new Thickness(1.2);
-            _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
-        }
+            To = targetOpacity,
+            Duration = new Duration(TimeSpan.FromMilliseconds(120)),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(opAnim, _cardBorder);
+        Storyboard.SetTargetProperty(opAnim, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(opAnim);
+        sb.Begin();
     }
 
     private void CacheDragTargets()
@@ -1229,42 +1281,26 @@ public sealed class TelemetryPanelCard : UserControl
 
         var hostPoint = e.GetCurrentPoint(root).Position;
 
-        // First pass: direct hit on a card
-        foreach (var (card, bounds) in _dragTargetCache)
-        {
-            if (bounds.Contains(hostPoint))
-            {
-                return card;
-            }
-        }
-
-        // Second pass: find the nearest card that shares a column region or is close vertically
-        // This makes it easy to target left/right columns by dragging into the column's X range
+        // Direct hit — pointer must be inside or very close to a card to trigger swap
         TelemetryPanelCard? nearestCard = null;
         var nearestDistance = double.MaxValue;
 
         foreach (var (card, bounds) in _dragTargetCache)
         {
-            // Check if the mouse is within the card's column (X range with generous margins)
-            var inColumnX = hostPoint.X >= bounds.X - 30 && hostPoint.X <= bounds.X + bounds.Width + 30;
-            if (!inColumnX)
+            // Direct hit
+            if (bounds.Contains(hostPoint))
             {
-                continue;
+                return card;
             }
 
-            // Vertical distance to the card's center
-            var centerY = bounds.Y + (bounds.Height / 2d);
-            var dy = Math.Abs(centerY - hostPoint.Y);
+            // Within a small margin of the card edge (20px)
+            var dx = Math.Max(0, Math.Max(bounds.X - hostPoint.X, hostPoint.X - (bounds.X + bounds.Width)));
+            var dy = Math.Max(0, Math.Max(bounds.Y - hostPoint.Y, hostPoint.Y - (bounds.Y + bounds.Height)));
+            var dist = (dx * dx) + (dy * dy);
 
-            // Only consider cards within a reasonable vertical range (card height + gap)
-            if (dy > bounds.Height + 40)
+            if (dist <= 400 && dist < nearestDistance)
             {
-                continue;
-            }
-
-            if (dy < nearestDistance)
-            {
-                nearestDistance = dy;
+                nearestDistance = dist;
                 nearestCard = card;
             }
         }
@@ -1287,27 +1323,23 @@ public sealed class TelemetryPanelCard : UserControl
             _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
             _cardBorder.BorderThickness = new Thickness(1.2);
 
-            // Notify ShellWindow to finalize the grid position for this card
+            // Finalize grid position and clear translate instantly — no swoop
             PanelDragEnded?.Invoke(this, EventArgs.Empty);
+            _dragTranslate.X = 0;
+            _dragTranslate.Y = 0;
 
-            // Animate snap-back for smooth release
-            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            var translateXAnim = new DoubleAnimation { To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(200)), EasingFunction = ease };
-            var translateYAnim = new DoubleAnimation { To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(200)), EasingFunction = ease };
-            var opacityAnim = new DoubleAnimation { To = 1.0, Duration = new Duration(TimeSpan.FromMilliseconds(160)), EasingFunction = ease };
-
-            var storyboard = new Storyboard();
-            storyboard.Children.Add(translateXAnim);
-            storyboard.Children.Add(translateYAnim);
-            storyboard.Children.Add(opacityAnim);
-
-            Storyboard.SetTarget(translateXAnim, _dragTranslate);
-            Storyboard.SetTargetProperty(translateXAnim, "X");
-            Storyboard.SetTarget(translateYAnim, _dragTranslate);
-            Storyboard.SetTargetProperty(translateYAnim, "Y");
+            // Subtle opacity pulse to confirm placement
+            var opacityAnim = new DoubleAnimation
+            {
+                From = 0.7,
+                To = 1.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(180)),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+            };
             Storyboard.SetTarget(opacityAnim, _cardBorder);
             Storyboard.SetTargetProperty(opacityAnim, "Opacity");
-
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(opacityAnim);
             storyboard.Completed += (_, _) => Canvas.SetZIndex(this, 0);
             storyboard.Begin();
         }
@@ -1636,71 +1668,66 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void PlayEntranceAnimation()
     {
-        // Gentle staggered cascade — each card drifts in softly with a subtle scale
         var col = Grid.GetColumn(this);
         var row = Grid.GetRow(this);
-        var staggerMs = (row * 3 + col) * 90 + 80;
+        var staggerMs = (row * 3 + col) * 70 + 60;
+
+        // Slide from the direction the card is positioned:
+        // Cards on the left side of the window slide from left, right side from right
+        var slideX = 0d;
+        if (XamlRoot?.Content is UIElement root && ActualWidth > 0)
+        {
+            var cardCenter = TransformToVisual(root).TransformPoint(
+                new Windows.Foundation.Point(ActualWidth / 2d, 0)).X;
+            var windowCenter = root.ActualSize.X / 2d;
+            slideX = cardCenter < windowCenter ? 3d : -3d;
+        }
+        var slideY = 2d;
 
         var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+        var translate = new TranslateTransform { X = slideX, Y = slideY };
+        _cardBorder.RenderTransform = translate;
 
         var fadeIn = new DoubleAnimation
         {
             From = 0,
             To = 1,
-            Duration = new Duration(TimeSpan.FromMilliseconds(520)),
+            Duration = new Duration(TimeSpan.FromMilliseconds(350)),
             BeginTime = TimeSpan.FromMilliseconds(staggerMs),
             EasingFunction = ease,
         };
 
-        var slideUp = new DoubleAnimation
+        var moveX = new DoubleAnimation
         {
-            From = 8,
             To = 0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(560)),
+            Duration = new Duration(TimeSpan.FromMilliseconds(350)),
             BeginTime = TimeSpan.FromMilliseconds(staggerMs),
             EasingFunction = ease,
         };
 
-        var scaleX = new DoubleAnimation
+        var moveY = new DoubleAnimation
         {
-            From = 0.985,
-            To = 1.0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(560)),
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(350)),
             BeginTime = TimeSpan.FromMilliseconds(staggerMs),
             EasingFunction = ease,
         };
-
-        var scaleY = new DoubleAnimation
-        {
-            From = 0.985,
-            To = 1.0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(560)),
-            BeginTime = TimeSpan.FromMilliseconds(staggerMs),
-            EasingFunction = ease,
-        };
-
-        var translate = new TranslateTransform();
-        var scale = new ScaleTransform { ScaleX = 0.985, ScaleY = 0.985 };
-        var group = new TransformGroup();
-        group.Children.Add(scale);
-        group.Children.Add(translate);
-        _cardBorder.RenderTransform = group;
-        _cardBorder.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
 
         Storyboard.SetTarget(fadeIn, this);
         Storyboard.SetTargetProperty(fadeIn, "Opacity");
-        Storyboard.SetTarget(slideUp, translate);
-        Storyboard.SetTargetProperty(slideUp, "Y");
-        Storyboard.SetTarget(scaleX, scale);
-        Storyboard.SetTargetProperty(scaleX, "ScaleX");
-        Storyboard.SetTarget(scaleY, scale);
-        Storyboard.SetTargetProperty(scaleY, "ScaleY");
+        Storyboard.SetTarget(moveX, translate);
+        Storyboard.SetTargetProperty(moveX, "X");
+        Storyboard.SetTarget(moveY, translate);
+        Storyboard.SetTargetProperty(moveY, "Y");
 
         var storyboard = new Storyboard();
         storyboard.Children.Add(fadeIn);
-        storyboard.Children.Add(slideUp);
-        storyboard.Children.Add(scaleX);
-        storyboard.Children.Add(scaleY);
+        storyboard.Children.Add(moveX);
+        storyboard.Children.Add(moveY);
+        storyboard.Completed += (_, _) =>
+        {
+            _cardBorder.RenderTransform = null;
+        };
         storyboard.Begin();
     }
 }

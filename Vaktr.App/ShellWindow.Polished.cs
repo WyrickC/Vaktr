@@ -108,7 +108,6 @@ public sealed partial class ShellWindow : Window
         {
             ColumnSpacing = 20,
             RowSpacing = 20,
-            ChildrenTransitions = [new RepositionThemeTransition()],
         };
         _globalRangeButton = CreateActionChip("15m", OnToggleGlobalRangeEditor, true);
         _globalRangeButton.MinWidth = 132;
@@ -673,8 +672,7 @@ public sealed partial class ShellWindow : Window
 
     private void OnPanelDragEnded(object? sender, EventArgs e)
     {
-        // Now that the drag is done, place the card at its correct grid position
-        // (it was skipped during drag to avoid flicker)
+        // Place the dragged card at its correct grid position
         var panels = _viewModel.DashboardPanels.ToArray();
         var columns = DetermineDashboardColumns();
 
@@ -696,7 +694,12 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        // During drag, do a lightweight position update instead of full grid rebuild
+        // Play a subtle settle animation on the displaced card
+        if (_panelCards.TryGetValue(e.TargetPanelKey, out var displacedCard) && !displacedCard.IsDragging)
+        {
+            displacedCard.PlaySwapSettleAnimation();
+        }
+
         ReorderDashboardPanelsInPlace();
         DebouncePersistLayout();
     }
@@ -710,8 +713,6 @@ public sealed partial class ShellWindow : Window
         {
             if (_panelCards.TryGetValue(panels[index].PanelKey, out var card))
             {
-                // Skip the actively dragged card — it's positioned by mouse transform,
-                // grid changes would fight with the manual positioning and cause flicker
                 if (card.IsDragging)
                 {
                     continue;

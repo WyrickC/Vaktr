@@ -333,37 +333,40 @@ public sealed class MainViewModel : ObservableObject
         var orderedKeys = BuildPersistedPanelOrder().ToList();
         var movingIndex = orderedKeys.FindIndex(key => string.Equals(key, movingKey, StringComparison.OrdinalIgnoreCase));
         var targetIndex = orderedKeys.FindIndex(key => string.Equals(key, targetKey, StringComparison.OrdinalIgnoreCase));
-        if (movingIndex < 0 || targetIndex < 0)
+        if (movingIndex < 0 || targetIndex < 0 || movingIndex == targetIndex)
         {
             return false;
         }
 
-        orderedKeys.RemoveAt(movingIndex);
-        if (movingIndex < targetIndex)
-        {
-            targetIndex--;
-        }
-
-        orderedKeys.Insert(targetIndex, movingKey);
+        // Direct swap — panels exchange positions, nothing else shifts
+        (orderedKeys[movingIndex], orderedKeys[targetIndex]) = (orderedKeys[targetIndex], orderedKeys[movingIndex]);
         ApplyPanelOrder(orderedKeys);
 
-        // Reorder the ObservableCollection in-place to avoid full Clear+Add rebuild
-        var orderedPanels = _panelLookup.Values
-            .Where(panel => panel.IsDashboardPanel && panel.IsVisible)
-            .OrderBy(GetPanelOrderRank)
-            .ThenBy(panel => panel.SortBucket)
-            .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(panel => panel.SortVariant)
-            .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        // Move items in the collection to match the new order (fires minimal change events)
-        for (var i = 0; i < orderedPanels.Length && i < DashboardPanels.Count; i++)
+        // Swap in the ObservableCollection
+        var movingCollectionIndex = -1;
+        var targetCollectionIndex = -1;
+        for (var i = 0; i < DashboardPanels.Count; i++)
         {
-            var currentIndex = DashboardPanels.IndexOf(orderedPanels[i]);
-            if (currentIndex != i && currentIndex >= 0)
+            if (string.Equals(DashboardPanels[i].PanelKey, movingKey, StringComparison.OrdinalIgnoreCase))
             {
-                DashboardPanels.Move(currentIndex, i);
+                movingCollectionIndex = i;
+            }
+            else if (string.Equals(DashboardPanels[i].PanelKey, targetKey, StringComparison.OrdinalIgnoreCase))
+            {
+                targetCollectionIndex = i;
+            }
+        }
+
+        if (movingCollectionIndex >= 0 && targetCollectionIndex >= 0)
+        {
+            DashboardPanels.Move(movingCollectionIndex, targetCollectionIndex);
+            if (targetCollectionIndex < movingCollectionIndex)
+            {
+                DashboardPanels.Move(targetCollectionIndex + 1, movingCollectionIndex);
+            }
+            else
+            {
+                DashboardPanels.Move(targetCollectionIndex - 1, movingCollectionIndex);
             }
         }
 
