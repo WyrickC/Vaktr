@@ -38,3 +38,12 @@ scripts/
 
 # Python
 .pydeps/
+
+# Claude Code
+.claude/
+
+# Installer output
+installer/Output/
+
+# Publish output
+publish/
