@@ -1570,16 +1570,30 @@ public sealed partial class ShellWindow : Window
         _viewModel.StatusText = "Starting telemetry";
         UpdateStatusText();
         StartupTrace.Write("Calling CollectorService.StartAsync");
-        await _collectorService.StartAsync(config, CancellationToken.None);
-        StartupTrace.Write("CollectorService.StartAsync complete");
-
-        if (!_summaryCardsBound)
+        try
         {
-            BuildSummaryCards();
+            await _collectorService.StartAsync(config, CancellationToken.None);
+            StartupTrace.Write("CollectorService.StartAsync complete");
         }
-        _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0 ? "Streaming local telemetry" : "Waiting for first sample";
-        UpdateStatusText();
-        StartupTrace.Write($"EnsureCollectorRunningAsync complete // dashboardPanels={_viewModel.DashboardPanels.Count}");
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("CollectorService.StartAsync", ex);
+            throw;
+        }
+
+        // StartAsync uses ConfigureAwait(false) internally, so we may be on a
+        // thread-pool thread here. Dispatch back to the UI thread for any
+        // visual updates to avoid a WinUI originate error.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_summaryCardsBound)
+            {
+                BuildSummaryCards();
+            }
+            _viewModel.StatusText = _viewModel.DashboardPanels.Count > 0 ? "Streaming local telemetry" : "Waiting for first sample";
+            UpdateStatusText();
+            StartupTrace.Write($"EnsureCollectorRunningAsync complete // dashboardPanels={_viewModel.DashboardPanels.Count}");
+        });
     }
 
     private void UpdateStatusText()
