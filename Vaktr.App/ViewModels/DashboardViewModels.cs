@@ -347,10 +347,27 @@ public sealed class MainViewModel : ObservableObject
         orderedKeys.Insert(targetIndex, movingKey);
         ApplyPanelOrder(orderedKeys);
 
-        _dashboardPanelsDirty = true;
-        _panelTogglesDirty = true;
-        SyncDashboardPanels();
-        SyncPanelToggles();
+        // Reorder the ObservableCollection in-place to avoid full Clear+Add rebuild
+        var orderedPanels = _panelLookup.Values
+            .Where(panel => panel.IsDashboardPanel && panel.IsVisible)
+            .OrderBy(GetPanelOrderRank)
+            .ThenBy(panel => panel.SortBucket)
+            .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(panel => panel.SortVariant)
+            .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        // Move items in the collection to match the new order (fires minimal change events)
+        for (var i = 0; i < orderedPanels.Length && i < DashboardPanels.Count; i++)
+        {
+            var currentIndex = DashboardPanels.IndexOf(orderedPanels[i]);
+            if (currentIndex != i && currentIndex >= 0)
+            {
+                DashboardPanels.Move(currentIndex, i);
+            }
+        }
+
+        _dashboardPanelsDirty = false;
         return true;
     }
 
@@ -561,35 +578,60 @@ public sealed class MainViewModel : ObservableObject
 
     private void UpdateSummaryCards(MetricSnapshot snapshot, PanelDetailContext detailContext)
     {
-        var lookup = snapshot.Samples
-            .GroupBy(sample => $"{sample.PanelKey}:{sample.SeriesKey}", StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+        // Single-pass extraction — no GroupBy/ToDictionary/Where/Sum allocations
+        var cpuUsage = 0d;
+        var usedMemory = 0d;
+        var availableMemory = 0d;
+        var diskRead = 0d;
+        var diskWrite = 0d;
+        var netDown = 0d;
+        var netUp = 0d;
 
-        var cpuUsage = lookup.GetValueOrDefault("cpu-total:usage")?.Value ?? 0d;
-        var cpuFrequency = lookup.GetValueOrDefault("cpu-frequency:clock")?.Value ?? 0d;
+        foreach (var sample in snapshot.Samples)
+        {
+            if (string.Equals(sample.PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(sample.SeriesKey, "usage", StringComparison.OrdinalIgnoreCase))
+                cpuUsage = sample.Value;
+            else if (string.Equals(sample.PanelKey, "memory", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(sample.SeriesKey, "used-gb", StringComparison.OrdinalIgnoreCase))
+                    usedMemory = sample.Value;
+                else if (string.Equals(sample.SeriesKey, "available-gb", StringComparison.OrdinalIgnoreCase))
+                    availableMemory = sample.Value;
+            }
+            else if (sample.Category == MetricCategory.Disk)
+            {
+                if (string.Equals(sample.SeriesKey, "read", StringComparison.OrdinalIgnoreCase))
+                    diskRead += sample.Value;
+                else if (string.Equals(sample.SeriesKey, "write", StringComparison.OrdinalIgnoreCase))
+                    diskWrite += sample.Value;
+            }
+            else if (sample.Category == MetricCategory.Network)
+            {
+                if (string.Equals(sample.SeriesKey, "download", StringComparison.OrdinalIgnoreCase))
+                    netDown += sample.Value;
+                else if (string.Equals(sample.SeriesKey, "upload", StringComparison.OrdinalIgnoreCase))
+                    netUp += sample.Value;
+            }
+        }
+
         SummaryCards[0].Update(
             $"{cpuUsage:0.#}%",
             BuildSummaryCaption(
-                cpuFrequency > 0 ? $"{cpuFrequency / 1000d:0.00} GHz" : "Processor load",
+                detailContext.CpuFrequencyMhz > 0 ? $"{detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : "Processor load",
                 detailContext.ProcessCount > 0 ? $"{FormatCompactCount(detailContext.ProcessCount)} proc" : null,
                 detailContext.ThreadCount > 0 ? $"{FormatCompactCount(detailContext.ThreadCount)} thr" : null));
 
-        var usedMemory = lookup.GetValueOrDefault("memory:used-gb")?.Value ?? 0d;
-        var availableMemory = lookup.GetValueOrDefault("memory:available-gb")?.Value ?? 0d;
         var totalMemory = usedMemory + availableMemory;
         var memoryPct = totalMemory > 0 ? usedMemory / totalMemory * 100d : 0d;
         SummaryCards[1].Update(
             FormatCapacityForSummary(usedMemory),
             totalMemory > 0 ? $"{memoryPct:0.#}% of {FormatCapacityForSummary(totalMemory)}" : "Memory in play");
 
-        var diskRead = snapshot.Samples.Where(sample => sample.Category == MetricCategory.Disk && sample.SeriesKey == "read").Sum(sample => sample.Value);
-        var diskWrite = snapshot.Samples.Where(sample => sample.Category == MetricCategory.Disk && sample.SeriesKey == "write").Sum(sample => sample.Value);
         SummaryCards[2].Update(
             $"{diskRead + diskWrite:0.0} MB/s",
             $"{diskRead:0.0} read / {diskWrite:0.0} write");
 
-        var netDown = snapshot.Samples.Where(sample => sample.Category == MetricCategory.Network && sample.SeriesKey == "download").Sum(sample => sample.Value);
-        var netUp = snapshot.Samples.Where(sample => sample.Category == MetricCategory.Network && sample.SeriesKey == "upload").Sum(sample => sample.Value);
         SummaryCards[3].Update(
             $"{netDown:0.0} Mbps",
             $"{netUp:0.0} up");
@@ -777,29 +819,64 @@ internal sealed class PanelDetailContext
 
     public static PanelDetailContext FromSnapshot(MetricSnapshot snapshot)
     {
-        var lookup = snapshot.Samples
-            .GroupBy(sample => $"{sample.PanelKey}:{sample.SeriesKey}", StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.OrdinalIgnoreCase);
+        // Single-pass extraction — avoids GroupBy/ToDictionary/LINQ overhead on every 2s tick
+        var cpuFrequency = 0d;
+        var processCount = 0d;
+        var threadCount = 0d;
+        var handleCount = 0d;
+        var driveDetails = new Dictionary<string, (double UsedPercent, double UsedGb, double TotalGb)>(StringComparer.OrdinalIgnoreCase);
 
-        var driveDetails = snapshot.Samples
-            .Where(sample => sample.PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(sample => ExtractDriveSuffix(sample.PanelKey), StringComparer.OrdinalIgnoreCase)
-            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
-            .ToDictionary(
-                group => group.Key!,
-                group => new DriveDetailContext(
-                    group.LastOrDefault(sample => string.Equals(sample.SeriesKey, "used-percent", StringComparison.OrdinalIgnoreCase))?.Value ?? 0d,
-                    group.LastOrDefault(sample => string.Equals(sample.SeriesKey, "used-gb", StringComparison.OrdinalIgnoreCase))?.Value ?? 0d,
-                    group.LastOrDefault(sample => string.Equals(sample.SeriesKey, "total-gb", StringComparison.OrdinalIgnoreCase))?.Value ?? 0d),
-                StringComparer.OrdinalIgnoreCase);
+        foreach (var sample in snapshot.Samples)
+        {
+            if (string.Equals(sample.PanelKey, "cpu-frequency", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(sample.SeriesKey, "clock", StringComparison.OrdinalIgnoreCase))
+            {
+                cpuFrequency = sample.Value;
+            }
+            else if (string.Equals(sample.PanelKey, "host-activity", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(sample.SeriesKey, "processes", StringComparison.OrdinalIgnoreCase))
+                    processCount = sample.Value;
+                else if (string.Equals(sample.SeriesKey, "threads", StringComparison.OrdinalIgnoreCase))
+                    threadCount = sample.Value;
+                else if (string.Equals(sample.SeriesKey, "handles", StringComparison.OrdinalIgnoreCase))
+                    handleCount = sample.Value;
+            }
+            else if (sample.PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase))
+            {
+                var suffix = ExtractDriveSuffix(sample.PanelKey);
+                if (!string.IsNullOrWhiteSpace(suffix))
+                {
+                    if (!driveDetails.TryGetValue(suffix, out var detail))
+                    {
+                        detail = (0d, 0d, 0d);
+                    }
+
+                    if (string.Equals(sample.SeriesKey, "used-percent", StringComparison.OrdinalIgnoreCase))
+                        detail.UsedPercent = sample.Value;
+                    else if (string.Equals(sample.SeriesKey, "used-gb", StringComparison.OrdinalIgnoreCase))
+                        detail.UsedGb = sample.Value;
+                    else if (string.Equals(sample.SeriesKey, "total-gb", StringComparison.OrdinalIgnoreCase))
+                        detail.TotalGb = sample.Value;
+
+                    driveDetails[suffix] = detail;
+                }
+            }
+        }
+
+        var driveContexts = new Dictionary<string, DriveDetailContext>(driveDetails.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, detail) in driveDetails)
+        {
+            driveContexts[key] = new DriveDetailContext(detail.UsedPercent, detail.UsedGb, detail.TotalGb);
+        }
 
         return new PanelDetailContext(
-            lookup.GetValueOrDefault("cpu-frequency:clock"),
-            (int)Math.Round(lookup.GetValueOrDefault("host-activity:processes"), MidpointRounding.AwayFromZero),
-            (int)Math.Round(lookup.GetValueOrDefault("host-activity:threads"), MidpointRounding.AwayFromZero),
-            (int)Math.Round(lookup.GetValueOrDefault("host-activity:handles"), MidpointRounding.AwayFromZero),
+            cpuFrequency,
+            (int)Math.Round(processCount, MidpointRounding.AwayFromZero),
+            (int)Math.Round(threadCount, MidpointRounding.AwayFromZero),
+            (int)Math.Round(handleCount, MidpointRounding.AwayFromZero),
             snapshot.LiveDetails?.Processes ?? Array.Empty<ProcessActivitySample>(),
-            driveDetails);
+            driveContexts);
     }
 
     private static string ExtractDriveSuffix(string panelKey)
@@ -1254,12 +1331,14 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private void UpdateSummaryText()
     {
-        var latestByKey = _buffers
-            .Where(entry => entry.Value.Points.Count > 0)
-            .ToDictionary(
-                entry => entry.Key,
-                entry => entry.Value.Points[^1].Value,
-                StringComparer.OrdinalIgnoreCase);
+        var latestByKey = new Dictionary<string, double>(_buffers.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _buffers)
+        {
+            if (entry.Value.Points.Count > 0)
+            {
+                latestByKey[entry.Key] = entry.Value.Points[^1].Value;
+            }
+        }
 
         if (VisibleSeries.Count == 0)
         {
@@ -1284,10 +1363,14 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         EmptyStateText = "Waiting for samples";
 
-        var latestBySeries = VisibleSeries.ToDictionary(
-            series => series.Name,
-            series => series.Points.Last().Value,
-            StringComparer.OrdinalIgnoreCase);
+        var latestBySeries = new Dictionary<string, double>(VisibleSeries.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var series in VisibleSeries)
+        {
+            if (series.Points.Count > 0)
+            {
+                latestBySeries[series.Name] = series.Points[^1].Value;
+            }
+        }
 
         switch (Category)
         {
@@ -1467,7 +1550,7 @@ public sealed class MetricPanelViewModel : ObservableObject
                 $"{process.ProcessId}",
                 process.Name,
                 FormatCapacity(process.MemoryGigabytes),
-                $"{process.CpuPercent:0.#}% cpu / {FormatCompactCount(process.ThreadCount)} thr / {FormatCompactCount(process.HandleCount)} handles",
+                $"{process.CpuPercent:0.#}% cpu · {FormatCompactCount(process.ThreadCount)} threads",
                 Math.Clamp(process.MemoryGigabytes / peakMemory, 0d, 1d));
         }
 
@@ -1475,7 +1558,7 @@ public sealed class MetricPanelViewModel : ObservableObject
             $"{process.ProcessId}",
             process.Name,
             $"{process.CpuPercent:0.#}%",
-            $"{FormatCapacity(process.MemoryGigabytes)} ram / {FormatCompactCount(process.ThreadCount)} thr / {FormatCompactCount(process.HandleCount)} handles",
+            $"{FormatCapacity(process.MemoryGigabytes)} · {FormatCompactCount(process.ThreadCount)} threads",
             Math.Clamp(process.CpuPercent / 100d, 0d, 1d));
     }
 
@@ -1519,10 +1602,19 @@ public sealed class MetricPanelViewModel : ObservableObject
         _ => $"{value:0.##}",
     };
 
-    private static string BuildJoinedText(params string?[] parts)
+    private static string BuildJoinedText(string? a, string? b = null, string? c = null)
     {
-        var filtered = parts.Where(part => !string.IsNullOrWhiteSpace(part)).ToArray();
-        return filtered.Length == 0 ? "Live metric" : string.Join(" / ", filtered);
+        var hasA = !string.IsNullOrWhiteSpace(a);
+        var hasB = !string.IsNullOrWhiteSpace(b);
+        var hasC = !string.IsNullOrWhiteSpace(c);
+
+        if (!hasA && !hasB && !hasC) return "Live metric";
+        if (hasA && !hasB && !hasC) return a!;
+        if (hasA && hasB && !hasC) return $"{a} / {b}";
+        if (hasA && hasB && hasC) return $"{a} / {b} / {c}";
+        if (hasA && !hasB && hasC) return $"{a} / {c}";
+        if (!hasA && hasB) return hasC ? $"{b} / {c}" : b!;
+        return c!;
     }
 
     private static string FormatCompactCount(double value)
@@ -1553,7 +1645,18 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private static double ResolveDynamicCeiling(IReadOnlyList<ChartSeriesViewModel> series, double minimum)
     {
-        var peak = series.SelectMany(item => item.Points).DefaultIfEmpty(new MetricPoint(DateTimeOffset.UtcNow, minimum)).Max(point => point.Value);
+        var peak = minimum;
+        foreach (var item in series)
+        {
+            foreach (var point in item.Points)
+            {
+                if (point.Value > peak)
+                {
+                    peak = point.Value;
+                }
+            }
+        }
+
         return Math.Max(minimum, peak * 1.12d);
     }
 
@@ -1586,15 +1689,22 @@ public sealed class MetricPanelViewModel : ObservableObject
             return Array.Empty<MetricPoint>();
         }
 
-        var windowPoints = new List<MetricPoint>(Math.Min(points.Count, pointBudget));
-        for (var index = 0; index < points.Count; index++)
+        // Binary search for start index (points are sorted by timestamp)
+        var lo = 0;
+        var hi = points.Count - 1;
+        while (lo < hi)
+        {
+            var mid = lo + ((hi - lo) / 2);
+            if (points[mid].Timestamp < start)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+
+        var windowPoints = new List<MetricPoint>(Math.Min(points.Count - lo, pointBudget));
+        for (var index = lo; index < points.Count; index++)
         {
             var point = points[index];
-            if (point.Timestamp < start)
-            {
-                continue;
-            }
-
             if (point.Timestamp > end)
             {
                 break;

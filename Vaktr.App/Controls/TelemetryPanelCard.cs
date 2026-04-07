@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Linq;
 using Microsoft.UI.Dispatching;
-using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
@@ -198,7 +197,7 @@ public sealed class TelemetryPanelCard : UserControl
         _processSectionTitleText = CreateTextBlock("Segoe UI Variable Text", 11, FontWeights.Medium);
         _processRowsHost = new StackPanel
         {
-            Spacing = 6,
+            Spacing = 0,
         };
         _processScroller = new ScrollViewer
         {
@@ -642,13 +641,10 @@ public sealed class TelemetryPanelCard : UserControl
 
         foreach (var rowParts in _processRowParts.Values)
         {
-            rowParts.Row.Background = CreateSurfaceGradient("#101C2D", "#132438");
-            rowParts.Row.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
             rowParts.NameText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             rowParts.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             rowParts.CaptionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
             rowParts.MeterTrack.Background = ResolveBrush("SurfaceStrongBrush", "#162A41");
-            rowParts.MeterTrack.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         }
 
         if (Panel is { } panel)
@@ -768,7 +764,7 @@ public sealed class TelemetryPanelCard : UserControl
             rowParts.NameText.Text = item.Name;
             rowParts.ValueText.Text = item.Value;
             rowParts.CaptionText.Text = item.Caption;
-            rowParts.MeterFill.Width = 72 * Math.Clamp(item.Intensity, 0d, 1d);
+            rowParts.MeterFill.Width = 40 * Math.Clamp(item.Intensity, 0d, 1d);
             orderedRows.Add(rowParts.Row);
         }
 
@@ -868,66 +864,84 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void OnHeaderPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (Panel is null)
+        if (Panel is null || IsInteractiveHeaderElement(e.OriginalSource as DependencyObject))
         {
             return;
         }
 
-        if (IsInteractiveHeaderElement(e.OriginalSource as DependencyObject))
-        {
-            return;
-        }
-
-        if (!e.GetCurrentPoint(_headerDragHandle).Properties.IsLeftButtonPressed)
+        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed)
         {
             return;
         }
 
         _isHeaderPointerDown = true;
         _isHeaderDragActive = false;
-        _headerPointerStart = e.GetCurrentPoint(this).Position;
+
+        if (XamlRoot?.Content is UIElement root)
+        {
+            _headerPointerStart = e.GetCurrentPoint(root).Position;
+        }
+
         this.CancelDirectManipulations();
-        FindAncestor<ScrollViewer>(_headerDragHandle)?.CancelDirectManipulations();
-        _headerDragHandle?.CapturePointer(e.Pointer);
+        FindAncestor<ScrollViewer>(this)?.CancelDirectManipulations();
+        if (sender is UIElement senderElement)
+        {
+            senderElement.CapturePointer(e.Pointer);
+        }
+
         e.Handled = true;
     }
 
     private void OnHeaderPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isHeaderPointerDown)
+        if (!_isHeaderPointerDown || XamlRoot?.Content is not UIElement root)
         {
             return;
         }
 
-        var point = e.GetCurrentPoint(this).Position;
+        var rootPoint = e.GetCurrentPoint(root).Position;
+
         if (!_isHeaderDragActive)
         {
-            var deltaX = point.X - _headerPointerStart.X;
-            var deltaY = point.Y - _headerPointerStart.Y;
-            if ((deltaX * deltaX) + (deltaY * deltaY) < 16d)
+            var dx = rootPoint.X - _headerPointerStart.X;
+            var dy = rootPoint.Y - _headerPointerStart.Y;
+            if ((dx * dx) + (dy * dy) < 100d)
             {
                 return;
             }
 
             _isHeaderDragActive = true;
-            Canvas.SetZIndex(this, 100);
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
-            _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
-            _cardBorder.Opacity = 0.88;
-            _cardBorder.RenderTransform = new ScaleTransform
-            {
-                ScaleX = 0.95,
-                ScaleY = 0.95,
-                CenterX = _cardBorder.ActualWidth / 2,
-                CenterY = _cardBorder.ActualHeight / 2,
-            };
-            ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
+            _cardBorder.BorderThickness = new Thickness(2);
+            _cardBorder.Opacity = 0.8;
+            Canvas.SetZIndex(this, 50);
             CacheDragTargets();
         }
 
-        _dragTransform.X = point.X - _headerPointerStart.X;
-        _dragTransform.Y = point.Y - _headerPointerStart.Y;
-        UpdateDropTargetState(e);
+        // Card follows the mouse
+        _dragTransform.X = rootPoint.X - _headerPointerStart.X;
+        _dragTransform.Y = rootPoint.Y - _headerPointerStart.Y;
+
+        // When pointer enters a different panel, swap immediately
+        var targetCard = ResolveDropTargetCard(e);
+        if (targetCard is not null &&
+            !ReferenceEquals(targetCard, _activeDropTargetCard) &&
+            Panel is not null)
+        {
+            _activeDropTargetCard = targetCard;
+            var targetKey = targetCard.Panel?.PanelKey;
+            if (!string.IsNullOrWhiteSpace(targetKey))
+            {
+                PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(Panel.PanelKey, targetKey));
+                // After swap, the grid reflows. Reset the drag origin so the card
+                // snaps to its new grid position and continues following from there.
+                _headerPointerStart = rootPoint;
+                _dragTransform.X = 0;
+                _dragTransform.Y = 0;
+                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, CacheDragTargets);
+            }
+        }
+
         e.Handled = true;
     }
 
@@ -938,28 +952,21 @@ public sealed class TelemetryPanelCard : UserControl
             return;
         }
 
-        var wasDragging = _isHeaderDragActive;
-        var targetCard = wasDragging ? _activeDropTargetCard ?? ResolveDropTargetCard(e) : null;
-        var targetKey = targetCard?.Panel?.PanelKey;
         EndHeaderDragInteraction();
-
-        if (!wasDragging || Panel is null || string.IsNullOrWhiteSpace(targetKey))
+        if (sender is UIElement senderElement)
         {
-            return;
+            senderElement.ReleasePointerCaptures();
         }
 
-        PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(Panel.PanelKey, targetKey));
         e.Handled = true;
     }
 
     private void OnHeaderPointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isHeaderPointerDown)
+        if (_isHeaderPointerDown)
         {
-            return;
+            EndHeaderDragInteraction();
         }
-
-        EndHeaderDragInteraction();
     }
 
     private void OnRangeClick(object? sender, EventArgs e)
@@ -1016,22 +1023,6 @@ public sealed class TelemetryPanelCard : UserControl
     private void SetDropTargetState(bool isActive)
     {
         _isDropTarget = isActive;
-        if (isActive)
-        {
-            _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
-            _cardBorder.Background = CreateSurfaceGradient("#11253A", "#183149");
-            _edgeGlow.Visibility = Visibility.Visible;
-            _edgeGlow.Width = 4;
-            _edgeGlow.Opacity = 1;
-            _edgeGlow.Background = ResolveBrush("AccentStrongBrush", "#9FEFFF");
-            return;
-        }
-
-        _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
-        _edgeGlow.Visibility = Visibility.Collapsed;
-        _edgeGlow.Width = 0;
-        _edgeGlow.Opacity = 0;
     }
 
     private void CacheDragTargets()
@@ -1104,21 +1095,21 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void EndHeaderDragInteraction()
     {
-        _headerDragHandle?.ReleasePointerCaptures();
+        var wasDragging = _isHeaderDragActive;
         _isHeaderPointerDown = false;
         _isHeaderDragActive = false;
-        _activeDropTargetCard?.SetDropTargetState(false);
         _activeDropTargetCard = null;
         _dragTargetCache = null;
-        ProtectedCursor = null;
-
-        // Reset immediately — the grid will reflow panels to their new positions
-        _cardBorder.Opacity = 1.0;
-        _cardBorder.RenderTransform = null;
         _dragTransform.X = 0;
         _dragTransform.Y = 0;
-        Canvas.SetZIndex(this, 0);
-        SetDropTargetState(false);
+
+        if (wasDragging)
+        {
+            _cardBorder.Opacity = 1.0;
+            _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            _cardBorder.BorderThickness = new Thickness(1);
+            Canvas.SetZIndex(this, 0);
+        }
     }
 
     private static bool IsInteractiveHeaderElement(DependencyObject? source)
@@ -1243,19 +1234,22 @@ public sealed class TelemetryPanelCard : UserControl
     {
         var nameText = new TextBlock
         {
-            FontSize = 11.5,
-            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily("Segoe UI Variable Text"),
+            FontSize = 12,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
             Text = item.Name,
             TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
         };
 
         var captionText = new TextBlock
         {
-            FontSize = 10.5,
+            FontFamily = new FontFamily("Segoe UI Variable Text"),
+            FontSize = 10,
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
             Text = item.Caption,
             TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
         };
 
         var valueText = new TextBlock
@@ -1265,30 +1259,16 @@ public sealed class TelemetryPanelCard : UserControl
             FontWeight = FontWeights.SemiBold,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
             Text = item.Value,
+            HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 52,
+            TextAlignment = TextAlignment.Right,
         };
-
-        var rowGrid = new Grid
-        {
-            ColumnSpacing = 10,
-        };
-        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) });
-        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        rowGrid.Children.Add(new StackPanel
-        {
-            Spacing = 2,
-            Children =
-            {
-                nameText,
-                captionText,
-            },
-        });
 
         var meterFill = new Border
         {
-            Width = 72 * Math.Clamp(item.Intensity, 0d, 1d),
-            Height = 6,
+            Width = 40 * Math.Clamp(item.Intensity, 0d, 1d),
+            Height = 3,
             Background = accentBrush,
             CornerRadius = new CornerRadius(999),
             HorizontalAlignment = HorizontalAlignment.Left,
@@ -1296,45 +1276,34 @@ public sealed class TelemetryPanelCard : UserControl
         };
         var meterTrack = new Border
         {
-            Width = 72,
-            Height = 6,
+            Width = 40,
+            Height = 3,
             Background = ResolveBrush("SurfaceStrongBrush", "#162A41"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(999),
             VerticalAlignment = VerticalAlignment.Center,
             Child = meterFill,
         };
-        rowGrid.Children.Add(meterTrack);
-        Grid.SetColumn(meterTrack, 1);
 
-        var valueHost = new StackPanel
+        var rowGrid = new Grid
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                new Ellipse
-                {
-                    Width = 7,
-                    Height = 7,
-                    Fill = accentBrush,
-                    VerticalAlignment = VerticalAlignment.Center,
-                },
-                valueText,
-            },
+            ColumnSpacing = 8,
         };
-        rowGrid.Children.Add(valueHost);
-        Grid.SetColumn(valueHost, 2);
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        rowGrid.Children.Add(nameText);
+        rowGrid.Children.Add(captionText);
+        Grid.SetColumn(captionText, 1);
+        rowGrid.Children.Add(meterTrack);
+        Grid.SetColumn(meterTrack, 2);
+        rowGrid.Children.Add(valueText);
+        Grid.SetColumn(valueText, 3);
 
         return (new Border
         {
-            Background = CreateSurfaceGradient("#101C2D", "#132438"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(12, 9, 12, 9),
+            Padding = new Thickness(8, 6, 8, 6),
             Child = rowGrid,
         }, nameText, valueText, captionText, meterFill, meterTrack);
     }

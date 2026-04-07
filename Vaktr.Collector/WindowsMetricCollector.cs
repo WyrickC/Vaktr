@@ -14,8 +14,8 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private const double BitsPerMegabit = 1_000_000d;
     private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(75);
-    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(120);
-    private static readonly TimeSpan TemperatureRefreshInterval = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan TemperatureRefreshInterval = TimeSpan.FromSeconds(20);
 
     private readonly nint _query;
     private readonly nint _cpuTotalCounter;
@@ -45,6 +45,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private DateTimeOffset _lastHostActivityRefreshUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastProcessActivityRefreshUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastTemperatureRefreshUtc = DateTimeOffset.MinValue;
+    private int _processBaselineSamplesCollected;
     private int _cachedProcessCount;
     private long _cachedThreadCount;
     private long _cachedHandleCount;
@@ -86,7 +87,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
         cancellationToken.ThrowIfCancellationRequested();
 
         var timestamp = DateTimeOffset.UtcNow;
-        var samples = new List<MetricSample>();
+        var samples = new List<MetricSample>(64);
         var pdhAvailable = TryCollectPdhData();
 
         if (pdhAvailable)
@@ -384,7 +385,11 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private LiveBoardDetails? AddHostActivity(List<MetricSample> samples, DateTimeOffset timestamp)
     {
         var shouldRefresh = _cachedHostActivityValues.Count == 0 || timestamp - _lastHostActivityRefreshUtc >= HostActivityRefreshInterval;
-        var shouldRefreshProcesses = _cachedProcessActivity.Count == 0 || timestamp - _lastProcessActivityRefreshUtc >= ProcessActivityRefreshInterval;
+        // First two process scans happen quickly (6s apart) to establish CPU baselines, then every 60s
+        var processInterval = _processBaselineSamplesCollected < 2
+            ? TimeSpan.FromSeconds(6)
+            : ProcessActivityRefreshInterval;
+        var shouldRefreshProcesses = _cachedProcessActivity.Count == 0 || timestamp - _lastProcessActivityRefreshUtc >= processInterval;
         if (shouldRefresh || shouldRefreshProcesses)
         {
             _cachedHostActivityValues.Clear();
@@ -414,6 +419,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 }
 
                 _lastProcessActivityRefreshUtc = timestamp;
+                _processBaselineSamplesCollected++;
                 _cachedLiveBoardDetails = _cachedProcessActivity.Count == 0
                     ? null
                     : new LiveBoardDetails(_cachedProcessActivity.ToArray());

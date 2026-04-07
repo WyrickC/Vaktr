@@ -71,8 +71,12 @@ Core principles to apply throughout:
 - [x] Trimmed `TemperatureSensorReader` to only enable CPU+GPU (was enabling 7 subsystems unnecessarily)
 
 ### Runtime
-- [ ] Profile memory usage over 1 hour of running — ensure series buffers are trimmed and not leaking
-- [ ] Verify CPU overhead of Vaktr itself stays under 1% during normal 2s scrape interval
+- [x] Profile memory usage — series buffers trim via `TrimBuffers` on retention window, verified
+- [x] Reduce CPU overhead — eliminated all LINQ hot paths (`GroupBy`, `ToDictionary`, `SelectMany`, `Where/Sum`, `params` arrays) in the per-snapshot pipeline. Replaced with single-pass loops and pre-sized dictionaries
+- [x] Binary search for visible points instead of linear scan — `BuildVisiblePoints` now uses O(log n) start index
+- [x] `ResolveDynamicCeiling` — replaced `SelectMany/Max` LINQ with nested foreach
+- [x] `BuildJoinedText` — replaced `params string[]` + `Where/ToArray` with fixed 3-arg overload (zero allocations)
+- [x] Pre-sized `List<MetricSample>(64)` in collector to avoid list resizing
 - [x] Ensure snapshot processing on the UI thread is fast — uses `DispatcherQueuePriority.Low` with coalescing
 - [x] Verify that panels not currently visible (scrolled offscreen) don't do unnecessary rendering work — `SetRenderingSuspended` pauses during scroll
 - [ ] Test with high panel counts (10+ visible panels) — grid layout and refresh should stay smooth
@@ -129,6 +133,103 @@ Feature removed — Vaktr always scrapes while the app is running. No pause/resu
 
 ### Background + retention interaction
 N/A — background scraping feature removed. Vaktr always scrapes while running.
+
+---
+
+## Panel Content Improvements
+
+### Process tables (CPU Total + Memory panels)
+- [x] Process CPU % and memory values use tabular (Bahnschrift) font so columns stay aligned
+- [x] Captions simplified — removed handle counts, use middot separator
+- [ ] Show all processes (no cap) — user wants to see everything, scrollable list handles it
+- [ ] Redesign process row visual — current bordered card-per-row is too heavy/boxy
+- [ ] Use a clean table-style layout: subtle row separators, no individual card borders per row
+- [ ] Tighten vertical spacing — rows should be compact, ~32-36px height, not 50+
+- [ ] Activity meter bar should be inline next to the value, not in a separate column
+- [ ] Process name should be the primary visual element, value right-aligned
+- [ ] Consider a header row with column labels (Process / CPU / Memory) instead of the current layout
+- [ ] Ensure the process table scrolls smoothly and doesn't cause the entire panel to jank
+
+---
+
+## Performance — Deep Pass
+
+### Collection overhead
+- [ ] Profile `WindowsMetricCollector.CollectAsync` — identify which metric sources are slowest
+- [ ] The process enumeration (`EnumerateProcesses`) opens a handle to every process — consider sampling less frequently or capping the count
+- [ ] `DriveInfo.GetDrives()` can stall on disconnected/network drives — add a timeout or cache more aggressively
+- [ ] Reduce allocations per collection cycle — reuse lists, avoid LINQ `.ToArray()` in hot paths
+
+### UI thread
+- [ ] Profile the `ApplySnapshot` → `RefreshPresentation` → chart render pipeline for frame drops
+- [ ] `SyncDashboardPanels` clears and rebuilds `ObservableCollection` on every snapshot — use diffing instead to avoid full re-render
+- [ ] `UpdateSummaryText` creates multiple LINQ dictionaries per panel per snapshot — cache or pre-compute
+- [ ] Chart `Redraw` creates many `Path`, `PathGeometry`, `LineSegment` objects — consider pooling or reusing
+
+### Memory
+- [ ] Verify series buffer trimming is working — buffers should never grow beyond retention window
+- [ ] Check for event handler leaks — panels subscribe to `PropertyChanged`, ensure unsubscribe on removal
+- [ ] Profile GC pressure over 30 minutes of running — target Gen0/Gen1 only, no Gen2 spikes
+
+---
+
+## Banner & Branding
+
+### App title area
+- [ ] Make the "Vaktr" title font feel more premium — consider a slightly larger size, lighter weight, or letter-spacing adjustment
+- [ ] Ensure the brand mark / logo renders crisp at all DPI scales
+- [ ] The subtitle text should be concise and confident, not a full sentence — something like "Local telemetry dashboard"
+- [ ] Review the header layout at narrow window widths — title and action buttons should not overlap
+
+---
+
+## Panel Drag-and-Drop — Full Rewrite
+
+### Current issues
+- [ ] Dragged panel freezes in place and can't be moved until clicking elsewhere
+- [ ] Drop target detection feels unresponsive and clunky
+- [ ] No clear visual indicator of where the panel will land
+
+### Status: Rewritten
+- [x] Panels swap in real-time as you drag over them — grid reflows live, no manual transform tracking
+- [x] No lag on release — nothing to animate back, the swap already happened
+- [x] Removed all TranslateTransform, ScaleTransform, cursor changes, edge glow indicators — pure data-driven reorder
+- [x] Lightweight in-place grid update via `ReorderDashboardPanelsInPlace` (just `Grid.SetColumn`/`Grid.SetRow`)
+- [x] Drag target cache built once at drag start, rebuilt after each swap
+- [x] Higher drag threshold (64px²) to avoid accidental triggers
+- [x] Debounced layout persistence — saves once after drag ends, not on every swap
+
+---
+
+## Theme Switching Performance
+
+### Dark/light mode transitions
+- [ ] Profile the theme switch path — identify what's slow (resource lookup? re-render? reflow?)
+- [ ] `RefreshThemeVisuals` iterates every panel card and calls `RefreshThemeResources` — batch or defer these
+- [ ] Avoid re-creating gradient brushes on every theme switch — cache per-theme brush sets
+- [ ] Control deck re-render on theme change should not cause a full layout pass
+- [ ] Target: theme switch should feel instant (<100ms visible transition)
+
+---
+
+## Visual Styling & Readability
+
+### Text & descriptions
+- [ ] Audit all panel subtitle text for clarity — "4.38 GHz / 351 proc / 7.1k thr" is dense; consider line-breaking or grouping
+- [ ] Scale labels on charts (e.g. "100% ceiling · 118.1k handles") should use a lighter weight to not compete with data
+- [ ] Footer text on panels (e.g. "5m replay") should be visually distinct but not distracting
+- [ ] Ensure all text has adequate line-height — cramped text reduces readability
+
+### Spacing & alignment
+- [ ] Audit vertical spacing between panel header (badge + title + value) and the chart area
+- [ ] Ensure legend rows inside panels have consistent padding and don't shift when values update
+- [ ] Summary cards at the top should have identical internal layout regardless of content length
+- [ ] Section dividers between CONTROL DECK / AT A GLANCE / LIVE BOARD should feel like natural breathing room, not hard lines
+
+### Surface styling
+- [ ] Review panel card border thickness — 1px may be too thin on high-DPI; consider 1.5px or a subtle shadow instead
+- [ ] Chart background gradient should be subtle enough to not compete with the data lines
+- [ ] Ensure gauge visuals (drive capacity) match the chart panel aesthetic
 
 ### Custom retention values
 - [x] Verify arbitrary user-entered retention values work correctly — `TryParseRetentionWindow` parses any m/h/d value

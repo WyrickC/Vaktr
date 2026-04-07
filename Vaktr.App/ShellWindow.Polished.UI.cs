@@ -40,7 +40,7 @@ public sealed partial class ShellWindow
             BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(38),
-            Padding = new Thickness(28, 18, 28, 26),
+            Padding = new Thickness(28, 12, 28, 26),
             Child = BuildShellStack(),
         };
 
@@ -54,7 +54,7 @@ public sealed partial class ShellWindow
 
         _scrollHost.Content = new Grid
         {
-            Margin = new Thickness(24, 22, 24, 28),
+            Margin = new Thickness(24, 8, 24, 28),
             Children =
             {
                 shellHalo,
@@ -94,19 +94,38 @@ public sealed partial class ShellWindow
         var heroGrid = new Grid
         {
             ColumnSpacing = 18,
-            Margin = new Thickness(2, 6, 2, 0),
+            Margin = new Thickness(2, 0, 2, 0),
         };
         heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         heroGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         heroGrid.Children.Add(_brandHost);
 
+        var titleText = new TextBlock
+        {
+            Text = "Vaktr",
+            FontFamily = new FontFamily("Segoe UI Variable Display"),
+            FontSize = 48,
+            FontWeight = FontWeights.Light,
+            CharacterSpacing = 40,
+            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+        };
+        var subtitleText = new TextBlock
+        {
+            Text = "LOCAL TELEMETRY",
+            FontFamily = new FontFamily("Segoe UI Variable Text"),
+            FontSize = 11,
+            CharacterSpacing = 200,
+            Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+            Margin = new Thickness(2, 0, 0, 0),
+        };
         var titleStack = new StackPanel
         {
             Spacing = 2,
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                CreatePrimaryText("Vaktr", 54, true),
+                titleText,
+                subtitleText,
             },
         };
         heroGrid.Children.Add(titleStack);

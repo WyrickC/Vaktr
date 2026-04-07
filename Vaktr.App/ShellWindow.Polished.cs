@@ -213,17 +213,17 @@ public sealed partial class ShellWindow : Window
             }
 
             RefreshGlobalRangeControls();
-            _globalRangeButton.RefreshThemeResources();
-            _globalOneMinuteButton.RefreshThemeResources();
-            _globalFiveMinuteButton.RefreshThemeResources();
-            _globalFifteenMinuteButton.RefreshThemeResources();
-            _globalThirtyMinuteButton.RefreshThemeResources();
-            _globalOneHourButton.RefreshThemeResources();
-            _globalTwelveHourButton.RefreshThemeResources();
-            _globalTwentyFourHourButton.RefreshThemeResources();
-            _globalSevenDayButton.RefreshThemeResources();
-            _globalThirtyDayButton.RefreshThemeResources();
-            _globalResetZoomButton.RefreshThemeResources();
+            foreach (var chip in new[]
+            {
+                _globalRangeButton, _globalOneMinuteButton, _globalFiveMinuteButton,
+                _globalFifteenMinuteButton, _globalThirtyMinuteButton, _globalOneHourButton,
+                _globalTwelveHourButton, _globalTwentyFourHourButton, _globalSevenDayButton,
+                _globalThirtyDayButton, _globalResetZoomButton,
+            })
+            {
+                chip.RefreshThemeResources();
+            }
+
             RefreshWindowChrome();
         });
     }
@@ -623,8 +623,50 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        RefreshDashboardPanels();
-        _ = PersistLayoutAsync();
+        // During drag, do a lightweight position update instead of full grid rebuild
+        ReorderDashboardPanelsInPlace();
+        DebouncePersistLayout();
+    }
+
+    private void ReorderDashboardPanelsInPlace()
+    {
+        var panels = _viewModel.DashboardPanels.ToArray();
+        var columns = DetermineDashboardColumns();
+
+        for (var index = 0; index < panels.Length; index++)
+        {
+            if (_panelCards.TryGetValue(panels[index].PanelKey, out var card))
+            {
+                var targetCol = index % columns;
+                var targetRow = index / columns;
+                if (Grid.GetColumn(card) != targetCol)
+                {
+                    Grid.SetColumn(card, targetCol);
+                }
+
+                if (Grid.GetRow(card) != targetRow)
+                {
+                    Grid.SetRow(card, targetRow);
+                }
+            }
+        }
+    }
+
+    private bool _persistLayoutQueued;
+
+    private void DebouncePersistLayout()
+    {
+        if (_persistLayoutQueued)
+        {
+            return;
+        }
+
+        _persistLayoutQueued = true;
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            _persistLayoutQueued = false;
+            _ = PersistLayoutAsync();
+        });
     }
 
     private void OnResetAllZoomClick(object? sender, EventArgs e)
@@ -793,13 +835,21 @@ public sealed partial class ShellWindow : Window
 
     private void OnDashboardPanelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (_initialized)
+        if (!_initialized)
         {
-            QueueDashboardRefresh();
+            RefreshDashboardPanels();
             return;
         }
 
-        RefreshDashboardPanels();
+        // For move/reorder events, just update grid positions (fast)
+        if (e.Action == NotifyCollectionChangedAction.Move)
+        {
+            ReorderDashboardPanelsInPlace();
+            return;
+        }
+
+        // For add/remove/reset, do a full rebuild
+        QueueDashboardRefresh();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

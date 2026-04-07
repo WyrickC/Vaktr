@@ -240,6 +240,11 @@ public sealed class TelemetryChart : UserControl
         _ => 0,
     };
 
+    private IReadOnlyList<ChartSeriesViewModel>? _lastRenderedSeries;
+    private DateTimeOffset _lastRenderedStart;
+    private DateTimeOffset _lastRenderedEnd;
+    private double _lastRenderedCeiling;
+
     private void Redraw()
     {
         var width = Math.Max(0, ActualWidth);
@@ -250,6 +255,21 @@ public sealed class TelemetryChart : UserControl
         }
 
         var series = Series ?? Array.Empty<ChartSeriesViewModel>();
+
+        // Skip redraw if nothing has changed
+        if (ReferenceEquals(series, _lastRenderedSeries) &&
+            WindowStartUtc == _lastRenderedStart &&
+            WindowEndUtc == _lastRenderedEnd &&
+            CeilingValue == _lastRenderedCeiling &&
+            _canvas.Children.Count > 0)
+        {
+            return;
+        }
+
+        _lastRenderedSeries = series;
+        _lastRenderedStart = WindowStartUtc;
+        _lastRenderedEnd = WindowEndUtc;
+        _lastRenderedCeiling = CeilingValue;
         if (!TryGetPointBounds(series, out var minTimestamp, out var maxTimestamp, out var maxObservedValue))
         {
             _canvas.Children.Clear();
