@@ -142,16 +142,14 @@ public sealed partial class ShellWindow : Window
         };
         _scrollHost.ViewChanged += OnScrollHostViewChanged;
 
-        // Show loading screen immediately — lightweight content renders on first frame
+        // Show loading screen immediately — ultra-lightweight, renders on first frame
         _rootLayout = BuildLoadingScreen();
         Content = _rootLayout;
         ExtendsContentIntoTitleBar = true;
-        SetTitleBar(_titleBarDragHost);
 
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
 
-        ApplyInitialTheme(_viewModel.SelectedTheme);
         StartupTrace.Write("ShellWindow ctor complete // polished-v19");
     }
 
@@ -177,6 +175,7 @@ public sealed partial class ShellWindow : Window
                 oldParent.Children.Remove(_loadingOverlay);
             }
 
+            _loadingOverlay.Background = ResolveBrush("AppBackdropBrush", "#030812");
             fullLayout.Children.Add(_loadingOverlay);
             Grid.SetRow(_loadingOverlay, 1);
             Canvas.SetZIndex(_loadingOverlay, 100);

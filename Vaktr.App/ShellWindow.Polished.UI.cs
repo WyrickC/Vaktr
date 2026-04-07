@@ -16,19 +16,20 @@ public sealed partial class ShellWindow
 {
     private Grid BuildLoadingScreen()
     {
-        var loadingAccent = ResolveBrush("AccentBrush", "#66E7FF");
-        var ld1 = new Ellipse { Width = 7, Height = 7, Fill = loadingAccent, Opacity = 0.5 };
-        var ld2 = new Ellipse { Width = 7, Height = 7, Fill = loadingAccent, Opacity = 0.5 };
-        var ld3 = new Ellipse { Width = 7, Height = 7, Fill = loadingAccent, Opacity = 0.5 };
+        // Ultra-lightweight — no resource lookups, no helper methods, renders on first frame
+        var accentColor = BrushFactory.CreateBrush("#66E7FF");
+        var ld1 = new Ellipse { Width = 8, Height = 8, Fill = accentColor };
+        var ld2 = new Ellipse { Width = 8, Height = 8, Fill = accentColor, Opacity = 0.5 };
+        var ld3 = new Ellipse { Width = 8, Height = 8, Fill = accentColor, Opacity = 0.25 };
 
         var loadingPulse = new Storyboard { RepeatBehavior = RepeatBehavior.Forever };
-        foreach (var (dot, delay) in new[] { (ld1, 0), (ld2, 150), (ld3, 300) })
+        foreach (var (dot, delay) in new[] { (ld1, 0), (ld2, 200), (ld3, 400) })
         {
             var anim = new DoubleAnimationUsingKeyFrames { BeginTime = TimeSpan.FromMilliseconds(delay) };
-            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.Zero), Value = 0.35 });
-            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(350)), Value = 1.0 });
-            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(700)), Value = 0.35 });
-            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1050)), Value = 0.35 });
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.Zero), Value = 0.25 });
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300)), Value = 1.0 });
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(600)), Value = 0.25 });
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(900)), Value = 0.25 });
             Storyboard.SetTarget(anim, dot);
             Storyboard.SetTargetProperty(anim, "Opacity");
             loadingPulse.Children.Add(anim);
@@ -36,12 +37,11 @@ public sealed partial class ShellWindow
 
         _loadingOverlay = new Border
         {
-            Background = ResolveBrush("AppBackdropBrush", "#030812"),
             Child = new StackPanel
             {
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Spacing = 16,
+                Spacing = 14,
                 Children =
                 {
                     new StackPanel
@@ -51,7 +51,13 @@ public sealed partial class ShellWindow
                         HorizontalAlignment = HorizontalAlignment.Center,
                         Children = { ld1, ld2, ld3 },
                     },
-                    CreateMutedText("Starting Vaktr", 13),
+                    new TextBlock
+                    {
+                        Text = "Starting Vaktr",
+                        FontSize = 13,
+                        Foreground = BrushFactory.CreateBrush("#7D9AB6"),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
                 },
             },
         };
@@ -59,13 +65,9 @@ public sealed partial class ShellWindow
 
         var root = new Grid
         {
-            Background = ResolveBrush("AppBackdropBrush", "#030812"),
+            Background = BrushFactory.CreateBrush("#030812"),
         };
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        root.Children.Add(_titleBarDragHost);
         root.Children.Add(_loadingOverlay);
-        Grid.SetRow(_loadingOverlay, 1);
 
         // After this screen renders, build the full UI on the next frame
         root.Loaded += (_, _) =>
@@ -113,11 +115,6 @@ public sealed partial class ShellWindow
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        // Remove from loading screen parent before re-parenting
-        if (_titleBarDragHost.Parent is Grid oldParent)
-        {
-            oldParent.Children.Remove(_titleBarDragHost);
-        }
         root.Children.Add(_titleBarDragHost);
 
         _scrollHost.Content = new Grid
