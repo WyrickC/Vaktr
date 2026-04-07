@@ -961,7 +961,10 @@ public sealed class MetricPanelViewModel : ObservableObject
     private IReadOnlyList<ProcessListItemViewModel> _processRows = Array.Empty<ProcessListItemViewModel>();
     private ProcessSortMode _processSortMode = ProcessSortMode.Highest;
     private bool _processListExpanded;
+    private bool _perProcessChartsEnabled;
     private int _totalProcessCount;
+    private const int MaxProcessChartSeries = 5;
+    private const string ProcessSeriesPrefix = "proc:";
     private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
@@ -1142,6 +1145,37 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     public int TotalProcessCount => _totalProcessCount;
 
+    public bool PerProcessChartsEnabled
+    {
+        get => _perProcessChartsEnabled;
+        set
+        {
+            if (!SetProperty(ref _perProcessChartsEnabled, value))
+            {
+                return;
+            }
+
+            // Remove process chart series when disabled
+            if (!value)
+            {
+                var processKeys = new List<string>();
+                foreach (var key in _buffers.Keys)
+                {
+                    if (key.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal))
+                    {
+                        processKeys.Add(key);
+                    }
+                }
+                foreach (var key in processKeys)
+                {
+                    _buffers.Remove(key);
+                }
+            }
+
+            RefreshPresentation();
+        }
+    }
+
     public string ProcessTableTitle =>
         string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase)
             ? "Process memory"
@@ -1246,9 +1280,55 @@ public sealed class MetricPanelViewModel : ObservableObject
         if (processDetailsChanged && SupportsProcessTable)
         {
             RefreshProcessRows();
+            InjectPerProcessChartData(detailContext);
         }
 
         UpdateSummaryText();
+    }
+
+    private void InjectPerProcessChartData(PanelDetailContext detailContext)
+    {
+        if (!_perProcessChartsEnabled || detailContext.Processes.Count == 0)
+        {
+            return;
+        }
+
+        var timestamp = _latestPointTimestampUtc;
+        var isMemoryPanel = string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
+
+        // Find top N processes by the relevant metric
+        var sorted = new List<ProcessActivitySample>(detailContext.Processes);
+        sorted.Sort((a, b) => isMemoryPanel
+            ? b.MemoryGigabytes.CompareTo(a.MemoryGigabytes)
+            : b.CpuPercent.CompareTo(a.CpuPercent));
+
+        var count = Math.Min(sorted.Count, MaxProcessChartSeries);
+        for (var i = 0; i < count; i++)
+        {
+            var proc = sorted[i];
+            var value = isMemoryPanel ? proc.MemoryGigabytes : proc.CpuPercent;
+            if (value <= 0)
+            {
+                continue;
+            }
+
+            var seriesKey = $"{ProcessSeriesPrefix}{proc.Name}";
+            if (!_buffers.TryGetValue(seriesKey, out var buffer))
+            {
+                // Offset palette by 10 to avoid clashing with existing series colors
+                var paletteIndex = 10 + i;
+                buffer = new SeriesBuffer(
+                    seriesKey,
+                    proc.Name,
+                    [],
+                    ResolveBrush(paletteIndex),
+                    ResolveFillBrush(paletteIndex),
+                    timestamp);
+                _buffers.Add(seriesKey, buffer);
+            }
+
+            buffer.Points.Add(new MetricPoint(timestamp, value));
+        }
     }
 
     public PanelHoverInfo? BuildHoverInfo(double normalizedPosition)
@@ -1525,6 +1605,12 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private bool ShouldShowSeries(SeriesBuffer buffer)
     {
+        // Hide per-process chart series when toggle is off
+        if (buffer.Key.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal) && !_perProcessChartsEnabled)
+        {
+            return false;
+        }
+
         if (!PrefersGaugeVisual)
         {
             return true;

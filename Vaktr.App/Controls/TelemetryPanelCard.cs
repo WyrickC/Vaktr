@@ -53,6 +53,7 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly ActionChip _sortHighestButton;
     private readonly ActionChip _sortLowestButton;
     private readonly ActionChip _sortNameButton;
+    private readonly ActionChip _perProcessChartButton;
     private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private readonly TextBlock _processExpandText;
@@ -204,6 +205,8 @@ public sealed class TelemetryPanelCard : UserControl
         _sortHighestButton = CreateProcessSortButton("Highest", ProcessSortMode.Highest);
         _sortLowestButton = CreateProcessSortButton("Lowest", ProcessSortMode.Lowest);
         _sortNameButton = CreateProcessSortButton("Name", ProcessSortMode.Name);
+        _perProcessChartButton = new ActionChip { Text = "Chart", MinHeight = 26, MinWidth = 36 };
+        _perProcessChartButton.Click += OnPerProcessChartToggle;
 
         _processSectionTitleText = CreateTextBlock("Segoe UI Variable Text", 11, FontWeights.Medium);
         _processRowsHost = new StackPanel
@@ -235,6 +238,7 @@ public sealed class TelemetryPanelCard : UserControl
             Spacing = 5,
             Children =
             {
+                _perProcessChartButton,
                 _sortHighestButton,
                 _sortLowestButton,
                 _sortNameButton,
@@ -1154,6 +1158,15 @@ public sealed class TelemetryPanelCard : UserControl
         if (Panel is { } panel)
         {
             panel.ProcessListExpanded = !panel.ProcessListExpanded;
+        }
+    }
+
+    private void OnPerProcessChartToggle(object? sender, EventArgs e)
+    {
+        if (Panel is { } panel)
+        {
+            panel.PerProcessChartsEnabled = !panel.PerProcessChartsEnabled;
+            _perProcessChartButton.IsActive = panel.PerProcessChartsEnabled;
         }
     }
 

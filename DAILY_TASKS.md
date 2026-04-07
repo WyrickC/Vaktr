@@ -43,7 +43,7 @@ Core principles to apply throughout:
 - [x] Hover states on all interactive elements (chips, buttons, panels) should feel responsive and consistent — panel hover shows accent border (1.2px) with lighter surface gradient
 - [x] Ensure keyboard accessibility — ActionChip has IsTabStop=true, Enter/Space fires Click, focus shows hover state
 - [ ] Chart hover tooltips should track smoothly and dismiss cleanly
-- [ ] Time range chip selection should give immediate visual feedback (active state)
+- [x] Time range chip selection should give immediate visual feedback — active chip gets filled state + full opacity via `ApplyRangeState`
 
 ### Chart & data display
 - [x] Show gaps in chart lines when data is missing (no connecting lines across time gaps) — gaps detected via median interval × 3 threshold
@@ -149,6 +149,12 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 - [x] Process name should be the primary visual element, value right-aligned — name is Star-width column, value right-aligned Auto
 - [x] Consider a header row with column labels (Process / CPU / Memory) instead of the current layout — 4-column header (PROCESS, DETAILS, meter, VALUE)
 - [x] Ensure the process table scrolls smoothly and doesn't cause the entire panel to jank — ScrollViewer with VerticalScrollBarVisibility.Auto
+
+### Per-process resource charts
+- [x] Add "Chart" toggle button to CPU Total and Memory process sections — shows top 5 processes as chart series over time
+- [x] Chart series keyed by `proc:{name}`, hidden when toggle is off, buffers removed on disable
+- [x] Process data injected every 10s from `ApplyDetailContext` — uses existing buffer/series system
+- [x] Palette offset (index 10+) avoids color clashes with primary series
 
 ---
 
