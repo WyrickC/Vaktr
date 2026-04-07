@@ -631,17 +631,20 @@ public sealed class MainViewModel : ObservableObject
             BuildSummaryCaption(
                 detailContext.CpuFrequencyMhz > 0 ? $"{detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : "Processor load",
                 detailContext.ProcessCount > 0 ? $"{FormatCompactCount(detailContext.ProcessCount)} proc" : null,
-                detailContext.ThreadCount > 0 ? $"{FormatCompactCount(detailContext.ThreadCount)} thr" : null));
+                detailContext.ThreadCount > 0 ? $"{FormatCompactCount(detailContext.ThreadCount)} thr" : null),
+            cpuUsage);
 
         SummaryCards[1].Update(
             $"{gpuUsage:0.#}%",
-            gpuMemoryGb > 0 ? $"{gpuMemoryGb:0.0} GB VRAM" : "GPU utilization");
+            gpuMemoryGb > 0 ? $"{gpuMemoryGb:0.0} GB VRAM" : "GPU utilization",
+            gpuUsage);
 
         var totalMemory = usedMemory + availableMemory;
         var memoryPct = totalMemory > 0 ? usedMemory / totalMemory * 100d : 0d;
         SummaryCards[2].Update(
-            FormatCapacityForSummary(usedMemory),
-            totalMemory > 0 ? $"{memoryPct:0.#}% of {FormatCapacityForSummary(totalMemory)}" : "Memory in play");
+            $"{memoryPct:0.#}%",
+            $"{FormatCapacityForSummary(usedMemory)} of {FormatCapacityForSummary(totalMemory)}",
+            memoryPct);
 
         SummaryCards[3].Update(
             $"{diskRead + diskWrite:0.0} MB/s",
@@ -759,10 +762,19 @@ public sealed class SummaryCardViewModel : ObservableObject
         private set => SetProperty(ref _caption, value);
     }
 
-    public void Update(string value, string caption)
+    public double Utilization
+    {
+        get => _utilization;
+        private set => SetProperty(ref _utilization, value);
+    }
+
+    private double _utilization;
+
+    public void Update(string value, string caption, double utilization = 0d)
     {
         Value = value;
         Caption = caption;
+        Utilization = utilization;
     }
 }
 

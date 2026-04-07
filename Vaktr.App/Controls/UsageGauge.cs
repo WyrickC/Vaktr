@@ -125,7 +125,7 @@ public sealed class UsageGauge : UserControl
         _innerBorder.BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A");
         _valueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _captionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        ScheduleRedraw(DispatcherQueuePriority.High);
+        Redraw();
     }
 
     private static LinearGradientBrush CreateThemedGradient()

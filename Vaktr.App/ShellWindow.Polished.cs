@@ -312,6 +312,50 @@ public sealed partial class ShellWindow : Window
             var captionText = CreateSecondaryText(string.Empty, 11.5);
             captionText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Caption)) });
 
+            // Mini utilization bar — thin horizontal bar below the value
+            var gaugeTrack = new Border
+            {
+                Height = 3,
+                CornerRadius = new CornerRadius(2),
+                Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+                Opacity = 0.5,
+                Margin = new Thickness(0, 2, 0, 0),
+            };
+            var gaugeFill = new Border
+            {
+                Height = 3,
+                CornerRadius = new CornerRadius(2),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = card.AccentBrush,
+                Margin = new Thickness(0, 2, 0, 0),
+            };
+            var gaugeHost = new Grid
+            {
+                Children = { gaugeTrack, gaugeFill },
+            };
+
+            // Bind fill width and color to utilization
+            card.PropertyChanged += (_, args) =>
+            {
+                if (!string.Equals(args.PropertyName, nameof(SummaryCardViewModel.Utilization)))
+                {
+                    return;
+                }
+
+                var util = card.Utilization;
+                var trackWidth = gaugeTrack.ActualWidth > 0 ? gaugeTrack.ActualWidth : 120;
+                gaugeFill.Width = trackWidth * Math.Clamp(util / 100d, 0d, 1d);
+                gaugeFill.Background = util > 90 ? BrushFactory.CreateBrush("#FF8C42")
+                    : util > 75 ? BrushFactory.CreateBrush("#FFD166")
+                    : card.AccentBrush;
+            };
+            // Also update on track size change
+            gaugeTrack.SizeChanged += (_, _) =>
+            {
+                var util = card.Utilization;
+                gaugeFill.Width = gaugeTrack.ActualWidth * Math.Clamp(util / 100d, 0d, 1d);
+            };
+
             var details = new StackPanel
             {
                 Spacing = 1,
@@ -320,6 +364,7 @@ public sealed partial class ShellWindow : Window
                 {
                     titleText,
                     valueText,
+                    gaugeHost,
                     captionText,
                 },
             };
@@ -924,7 +969,7 @@ public sealed partial class ShellWindow : Window
         }
         finally
         {
-            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => SetPanelRenderingSuspended(false));
+            SetPanelRenderingSuspended(false);
         }
     }
 

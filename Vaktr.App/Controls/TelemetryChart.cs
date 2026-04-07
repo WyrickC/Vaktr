@@ -220,7 +220,9 @@ public sealed class TelemetryChart : UserControl
         _emptyStateText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _emptyStateText.Text = string.IsNullOrWhiteSpace(EmptyStateText) ? "Waiting for samples" : EmptyStateText;
         HideHover();
-        ScheduleRedraw(DispatcherQueuePriority.High);
+        // Force immediate redraw — don't defer, theme swap should feel instant
+        _lastRenderedSeries = null;
+        Redraw();
     }
 
     private void ScheduleRedraw(DispatcherQueuePriority priority = DispatcherQueuePriority.Low)
@@ -411,8 +413,8 @@ public sealed class TelemetryChart : UserControl
         {
             Width = plotWidth,
             Height = plotHeight,
-            RadiusX = 16,
-            RadiusY = 16,
+            RadiusX = 8,
+            RadiusY = 8,
             Stroke = ResolveBrush("SurfaceGridBrush", "#27425E"),
             StrokeThickness = 1,
             Fill = CreateSurfaceGradient("#0A141F", "#0F1E2E"),
@@ -423,8 +425,8 @@ public sealed class TelemetryChart : UserControl
         {
             Width = plotWidth,
             Height = plotHeight,
-            RadiusX = 16,
-            RadiusY = 16,
+            RadiusX = 8,
+            RadiusY = 8,
             Fill = ResolveBrush("AccentSoftBrush", "#10394D"),
             Opacity = 0.03,
         };

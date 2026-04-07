@@ -180,8 +180,8 @@ public sealed class TelemetryPanelCard : UserControl
             Background = CreateSurfaceGradient("#0E1A2B", "#13263B"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(19),
-            Padding = new Thickness(11, 11, 11, 10),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(4, 4, 4, 3),
             Child = _chart,
         };
 
