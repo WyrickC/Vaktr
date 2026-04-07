@@ -292,27 +292,19 @@ public sealed partial class ShellWindow
             VaktrConfig.DefaultStorageDirectory);
         storageBox.TextChanged += OnStorageInputChanged;
 
-        var storageDropSurface = new Border
+        var storageFieldStack = new StackPanel
         {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15283B"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(14),
+            Spacing = 8,
             AllowDrop = true,
-            Child = new StackPanel
+            Children =
             {
-                Spacing = 8,
-                Children =
-                {
-                    CreateFieldLabel("Storage directory"),
-                    storageBox,
-                    CreateMutedText("Leave blank for the default location.", 12),
-                },
+                CreateFieldLabel("Storage directory"),
+                storageBox,
+                CreateMutedText("Leave blank for the default location.", 12),
             },
         };
-        storageDropSurface.DragOver += OnStoragePathDragOver;
-        storageDropSurface.Drop += OnStoragePathDrop;
+        storageFieldStack.DragOver += OnStoragePathDragOver;
+        storageFieldStack.Drop += OnStoragePathDrop;
 
         var fieldGrid = new Grid
         {
@@ -395,7 +387,7 @@ public sealed partial class ShellWindow
                 Spacing = 14,
                 Children =
                 {
-                    storageDropSurface,
+                    storageFieldStack,
                     CreateChipWrapRow(
                         CreateActionChip("Browse folder", OnBrowseStorageClick, filled: true),
                         CreateActionChip("Use default", (_, _) => ResetStorageDirectory())),
