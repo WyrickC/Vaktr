@@ -13,8 +13,8 @@ Core principles to apply throughout:
 ### Visual hierarchy & layout
 - [ ] Audit panel card spacing — ensure consistent padding, margins, and gaps across all panel types (chart panels, gauge panels, process tables)
 - [ ] Ensure responsive column breakpoints feel natural at every window width (1-col, 2-col, 3-col transitions should not cause jarring reflow)
-- [ ] Review section headers (AT A GLANCE, LIVE BOARD, CONTROL DECK) for consistent sizing, spacing, and visual weight
-- [ ] Ensure the summary strip cards have uniform height and alignment regardless of content length
+- [x] Review section headers (AT A GLANCE, LIVE BOARD, CONTROL DECK) for consistent sizing, spacing, and visual weight — unified section band spacing to 2px, consistent 12.5pt subtitle across AT A GLANCE and LIVE BOARD
+- [x] Ensure the summary strip cards have uniform height and alignment — MinHeight 100px, uniform padding (18,15), star-width columns in Grid with 16px spacing
 
 ### Typography
 - [ ] Audit font sizes and weights for clear hierarchy: panel title > current value > secondary value > footer/scale label > muted text
@@ -30,14 +30,14 @@ Core principles to apply throughout:
 ### Motion & transitions
 - [x] Add subtle fade-in + slide-up when panels appear for the first time (280ms fade, 320ms translate, cubic ease-out)
 - [x] Smooth the panel drag-and-drop — 95% scale, 88% opacity, SizeAll cursor, animated snap-back on release (200ms ease-out)
-- [ ] Ensure theme switching feels smooth (no flash of unstyled content)
+- [x] Ensure theme switching feels smooth — gradient brush cache prevents redundant brush creation, cache invalidates on theme change
 - [x] Edge glow indicator on drop target cards during drag
 
 ### Content-first refinements
 - [x] Remove decorative elements that don't serve data — removed ActionChip shine line
 - [x] Ensure empty/loading states are informative and visually calm — updated temp panel empty states
 - [x] Control deck text made succinct and professional — tightened all descriptions, removed verbose filler
-- [ ] Footer text should add value or be removed — avoid filler
+- [x] Footer text should add value or be removed — verified: shows time range ("5m replay") or zoom state, concise and informative
 
 ### Interaction polish
 - [x] Hover states on all interactive elements (chips, buttons, panels) should feel responsive and consistent — panel hover shows accent border (1.2px) with lighter surface gradient
@@ -47,13 +47,13 @@ Core principles to apply throughout:
 
 ### Chart & data display
 - [x] Show gaps in chart lines when data is missing (no connecting lines across time gaps) — gaps detected via median interval × 3 threshold
-- [ ] Add subtle gridline fade at chart edges for depth
+- [x] Add subtle gridline fade at chart edges for depth — 24px gradient fade overlays at left and right edges (40 alpha)
 - [x] Improve chart axis label legibility — skip interior labels when spacing < 70px to prevent overlap at narrow widths
 - [x] Add a subtle glow or highlight on the most recent data point — 14px glow ellipse at 18% opacity behind the 5px dot
 
 ### Visual refinement
-- [ ] Add subtle background gradient shifts between sections for visual rhythm
-- [ ] Ensure all border radii are consistent (cards: 22-24px, chips: 11px, badges: 13px)
+- [x] Add subtle background gradient shifts between sections for visual rhythm — horizontal gradient dividers between summary/live board and live board/control deck sections
+- [x] Ensure all border radii are consistent — verified: cards 22px, chips 11px, badges 13px, nested elements use progressively smaller radii (chart 19, process 17, range 14, legend 12, scale 9)
 - [ ] Review shadow/glow usage — should be subtle, directional, and consistent
 - [ ] Audit all opacity values — hover/pressed states should have a clear visual hierarchy (rest → hover → pressed)
 - [ ] Ensure the app icon and brand mark render crisply at all DPI scales
@@ -179,9 +179,9 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 ## Banner & Branding
 
 ### App title area
-- [ ] Make the "Vaktr" title font feel more premium — consider a slightly larger size, lighter weight, or letter-spacing adjustment
+- [x] Make the "Vaktr" title font feel more premium — increased to 52pt with 60 character spacing for more breathing room
 - [ ] Ensure the brand mark / logo renders crisp at all DPI scales
-- [ ] The subtitle text should be concise and confident, not a full sentence — something like "Local telemetry dashboard"
+- [x] The subtitle text should be concise and confident — changed to "LOCAL TELEMETRY DASHBOARD" with wider letter-spacing (220)
 - [ ] Review the header layout at narrow window widths — title and action buttons should not overlap
 
 ---
@@ -199,11 +199,13 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 - [x] Removed all TranslateTransform, ScaleTransform, cursor changes, edge glow indicators — pure data-driven reorder
 - [x] Lightweight in-place grid update via `ReorderDashboardPanelsInPlace` (just `Grid.SetColumn`/`Grid.SetRow`)
 - [x] Drag target cache built once at drag start, rebuilt after each swap
-- [x] Higher drag threshold (64px²) to avoid accidental triggers
+- [x] Tuned drag threshold (64px²) — quick to initiate but avoids accidental triggers
 - [x] Debounced layout persistence — saves once after drag ends, not on every swap
 - [x] Smooth snap-back animation on release — 180ms translate, 200ms scale, 160ms opacity with cubic ease-out via Storyboard
 - [x] SizeAll cursor during drag — changes to SizeAll on activation, resets on release
 - [x] Scale-down effect during drag — 0.97 scale via TransformGroup (ScaleTransform + TranslateTransform)
+- [x] Drop target visual feedback — target card highlights with accent border (1.5px) and lighter surface gradient during hover
+- [x] Expanded hit zones — 20px expanded bounds on drop targets for generous hit detection, only swaps when near a card (not nearest-anywhere fallback)
 
 ---
 
@@ -211,8 +213,8 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 
 ### Dark/light mode transitions
 - [ ] Profile the theme switch path — identify what's slow (resource lookup? re-render? reflow?)
-- [ ] `RefreshThemeVisuals` iterates every panel card and calls `RefreshThemeResources` — batch or defer these
-- [ ] Avoid re-creating gradient brushes on every theme switch — cache per-theme brush sets
+- [x] `RefreshThemeVisuals` iterates every panel card and calls `RefreshThemeResources` — already wrapped in `RunWithDeferredPanelRendering` to batch updates
+- [x] Avoid re-creating gradient brushes on every theme switch — added `_gradientCache` dictionary keyed by hex pair, auto-invalidates on theme change
 - [ ] Control deck re-render on theme change should not cause a full layout pass
 - [ ] Target: theme switch should feel instant (<100ms visible transition)
 
@@ -230,7 +232,7 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 - [ ] Audit vertical spacing between panel header (badge + title + value) and the chart area
 - [ ] Ensure legend rows inside panels have consistent padding and don't shift when values update
 - [ ] Summary cards at the top should have identical internal layout regardless of content length
-- [ ] Section dividers between CONTROL DECK / AT A GLANCE / LIVE BOARD should feel like natural breathing room, not hard lines
+- [x] Section dividers between CONTROL DECK / AT A GLANCE / LIVE BOARD should feel like natural breathing room — added gradient dividers (fade from transparent to 50-alpha center, back to transparent)
 
 ### Surface styling
 - [ ] Review panel card border thickness — 1px may be too thin on high-DPI; consider 1.5px or a subtle shadow instead

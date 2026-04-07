@@ -928,7 +928,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             var dx = rootPoint.X - _headerPointerStart.X;
             var dy = rootPoint.Y - _headerPointerStart.Y;
-            if ((dx * dx) + (dy * dy) < 100d)
+            if ((dx * dx) + (dy * dy) < 64d)
             {
                 return;
             }
@@ -957,29 +957,40 @@ public sealed class TelemetryPanelCard : UserControl
 
         // When pointer enters a different panel, swap positions
         var targetCard = ResolveDropTargetCard(e);
-        if (targetCard is not null &&
-            !ReferenceEquals(targetCard, _activeDropTargetCard) &&
-            Panel is not null)
-        {
-            _activeDropTargetCard = targetCard;
-            var targetKey = targetCard.Panel?.PanelKey;
-            if (!string.IsNullOrWhiteSpace(targetKey))
-            {
-                PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(Panel.PanelKey, targetKey));
-                // After swap, recalculate center from the new grid position
-                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
-                {
-                    if (!_isHeaderDragActive || XamlRoot?.Content is not UIElement postSwapRoot)
-                    {
-                        return;
-                    }
 
-                    var newBounds = TransformToVisual(postSwapRoot).TransformPoint(default);
-                    _headerPointerStart = new Windows.Foundation.Point(
-                        newBounds.X + (ActualWidth / 2d) + _dragTranslate.X,
-                        newBounds.Y + (ActualHeight / 2d) + _dragTranslate.Y);
-                    CacheDragTargets();
-                });
+        // Update drop target visual feedback
+        if (!ReferenceEquals(targetCard, _activeDropTargetCard))
+        {
+            _activeDropTargetCard?.SetDropTargetState(false);
+
+            if (targetCard is not null && Panel is not null)
+            {
+                _activeDropTargetCard = targetCard;
+                targetCard.SetDropTargetState(true);
+
+                var targetKey = targetCard.Panel?.PanelKey;
+                if (!string.IsNullOrWhiteSpace(targetKey))
+                {
+                    PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(Panel.PanelKey, targetKey));
+                    // After swap, recalculate center from the new grid position
+                    _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+                    {
+                        if (!_isHeaderDragActive || XamlRoot?.Content is not UIElement postSwapRoot)
+                        {
+                            return;
+                        }
+
+                        var newBounds = TransformToVisual(postSwapRoot).TransformPoint(default);
+                        _headerPointerStart = new Windows.Foundation.Point(
+                            newBounds.X + (ActualWidth / 2d) + _dragTranslate.X,
+                            newBounds.Y + (ActualHeight / 2d) + _dragTranslate.Y);
+                        CacheDragTargets();
+                    });
+                }
+            }
+            else
+            {
+                _activeDropTargetCard = null;
             }
         }
 
@@ -1064,6 +1075,18 @@ public sealed class TelemetryPanelCard : UserControl
     private void SetDropTargetState(bool isActive)
     {
         _isDropTarget = isActive;
+        if (isActive)
+        {
+            _cardBorder.BorderBrush = ResolveBrush("AccentBrush", "#66E7FF");
+            _cardBorder.BorderThickness = new Thickness(1.5);
+            _cardBorder.Background = CreateSurfaceGradient("#102133", "#162A40");
+        }
+        else
+        {
+            _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            _cardBorder.BorderThickness = new Thickness(1);
+            _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
+        }
     }
 
     private void CacheDragTargets()
@@ -1119,15 +1142,22 @@ public sealed class TelemetryPanelCard : UserControl
                 return card;
             }
 
-            var centerX = bounds.X + (bounds.Width / 2d);
-            var centerY = bounds.Y + (bounds.Height / 2d);
-            var dx = centerX - hostPoint.X;
-            var dy = centerY - hostPoint.Y;
-            var dist = (dx * dx) + (dy * dy);
-            if (dist < nearestDistance)
+            // Expand bounds by 20px for a generous hit zone
+            var expanded = new Windows.Foundation.Rect(
+                bounds.X - 20, bounds.Y - 20,
+                bounds.Width + 40, bounds.Height + 40);
+            if (expanded.Contains(hostPoint))
             {
-                nearestDistance = dist;
-                nearestCard = card;
+                var centerX = bounds.X + (bounds.Width / 2d);
+                var centerY = bounds.Y + (bounds.Height / 2d);
+                var dx = centerX - hostPoint.X;
+                var dy = centerY - hostPoint.Y;
+                var dist = (dx * dx) + (dy * dy);
+                if (dist < nearestDistance)
+                {
+                    nearestDistance = dist;
+                    nearestCard = card;
+                }
             }
         }
 
@@ -1139,6 +1169,7 @@ public sealed class TelemetryPanelCard : UserControl
         var wasDragging = _isHeaderDragActive;
         _isHeaderPointerDown = false;
         _isHeaderDragActive = false;
+        _activeDropTargetCard?.SetDropTargetState(false);
         _activeDropTargetCard = null;
         _dragTargetCache = null;
 

@@ -5,6 +5,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media;
 using System.Linq;
 using System.Text;
+using Windows.UI;
 
 namespace Vaktr.App.Controls;
 
@@ -417,6 +418,49 @@ public sealed class TelemetryChart : UserControl
         Canvas.SetLeft(tint, LeftPadding);
         Canvas.SetTop(tint, TopPadding);
         _canvas.Children.Add(tint);
+
+        // Subtle edge fade for depth at left and right edges
+        var edgeFadeWidth = Math.Min(24d, plotWidth * 0.06);
+        var plotBg = BrushFactory.ParseColor("#0B1726");
+        var leftFade = new Rectangle
+        {
+            Width = edgeFadeWidth,
+            Height = plotHeight,
+            Fill = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 0),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = Color.FromArgb(40, plotBg.R, plotBg.G, plotBg.B), Offset = 0 },
+                    new GradientStop { Color = Color.FromArgb(0, plotBg.R, plotBg.G, plotBg.B), Offset = 1 },
+                },
+            },
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(leftFade, LeftPadding);
+        Canvas.SetTop(leftFade, TopPadding);
+        _canvas.Children.Add(leftFade);
+
+        var rightFade = new Rectangle
+        {
+            Width = edgeFadeWidth,
+            Height = plotHeight,
+            Fill = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 0),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = Color.FromArgb(0, plotBg.R, plotBg.G, plotBg.B), Offset = 0 },
+                    new GradientStop { Color = Color.FromArgb(40, plotBg.R, plotBg.G, plotBg.B), Offset = 1 },
+                },
+            },
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(rightFade, LeftPadding + plotWidth - edgeFadeWidth);
+        Canvas.SetTop(rightFade, TopPadding);
+        _canvas.Children.Add(rightFade);
     }
 
     private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue, bool includeLabels = true)

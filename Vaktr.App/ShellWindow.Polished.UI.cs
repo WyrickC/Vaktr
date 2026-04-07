@@ -81,8 +81,10 @@ public sealed partial class ShellWindow
                 BuildHeader(),
                 CreateSectionBand("AT A GLANCE", "Current node snapshot."),
                 BuildSummarySurface(),
+                CreateSectionDivider(),
                 BuildBoardSectionBand(),
                 _dashboardGrid,
+                CreateSectionDivider(),
                 BuildControlsSurface(),
             },
         };
@@ -104,19 +106,19 @@ public sealed partial class ShellWindow
         {
             Text = "Vaktr",
             FontFamily = new FontFamily("Segoe UI Variable Display"),
-            FontSize = 48,
+            FontSize = 52,
             FontWeight = FontWeights.Light,
-            CharacterSpacing = 40,
+            CharacterSpacing = 60,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
         };
         var subtitleText = new TextBlock
         {
-            Text = "LOCAL TELEMETRY",
+            Text = "LOCAL TELEMETRY DASHBOARD",
             FontFamily = new FontFamily("Segoe UI Variable Text"),
-            FontSize = 11,
-            CharacterSpacing = 200,
+            FontSize = 10.5,
+            CharacterSpacing = 220,
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
-            Margin = new Thickness(2, 0, 0, 0),
+            Margin = new Thickness(3, 0, 0, 0),
         };
         var titleStack = new StackPanel
         {
@@ -887,11 +889,11 @@ public sealed partial class ShellWindow
 
         grid.Children.Add(new StackPanel
         {
-            Spacing = 4,
+            Spacing = 2,
             Children =
             {
                 CreateAccentText("LIVE BOARD", 11, 85),
-                CreateSecondaryText("Real-time telemetry panels.", 13),
+                CreateSecondaryText("Real-time telemetry panels.", 12.5),
             },
         });
 
@@ -912,6 +914,25 @@ public sealed partial class ShellWindow
             },
         };
     }
+
+    private static Border CreateSectionDivider() =>
+        new()
+        {
+            Height = 1,
+            Margin = new Thickness(20, 4, 20, 4),
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 0),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = Color.FromArgb(0, 39, 66, 94), Offset = 0 },
+                    new GradientStop { Color = Color.FromArgb(50, 39, 66, 94), Offset = 0.5 },
+                    new GradientStop { Color = Color.FromArgb(0, 39, 66, 94), Offset = 1 },
+                },
+            },
+            IsHitTestVisible = false,
+        };
 
     private static Grid CreateSectionBand(string eyebrow, string text)
     {
@@ -1133,11 +1154,30 @@ public sealed partial class ShellWindow
         return BrushFactory.CreateBrush(fallbackHex);
     }
 
+    private static readonly Dictionary<string, LinearGradientBrush> _gradientCache = new(StringComparer.Ordinal);
+    private static bool _lastCachedLightMode;
+
     private static Brush CreateSurfaceGradient(string startHex, string endHex)
     {
-        if (IsLightPaletteActive())
+        var isLight = IsLightPaletteActive();
+
+        // Invalidate cache on theme change
+        if (isLight != _lastCachedLightMode)
         {
-            return new LinearGradientBrush
+            _gradientCache.Clear();
+            _lastCachedLightMode = isLight;
+        }
+
+        var cacheKey = string.Concat(startHex, "|", endHex);
+        if (_gradientCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        LinearGradientBrush brush;
+        if (isLight)
+        {
+            brush = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0),
                 EndPoint = new Windows.Foundation.Point(1, 1),
@@ -1148,17 +1188,22 @@ public sealed partial class ShellWindow
                 },
             };
         }
-
-        return new LinearGradientBrush
+        else
         {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1),
-            GradientStops = new GradientStopCollection
+            brush = new LinearGradientBrush
             {
-                new GradientStop { Color = ParseColor(startHex), Offset = 0d },
-                new GradientStop { Color = ParseColor(endHex), Offset = 1d },
-            },
-        };
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = ParseColor(startHex), Offset = 0d },
+                    new GradientStop { Color = ParseColor(endHex), Offset = 1d },
+                },
+            };
+        }
+
+        _gradientCache[cacheKey] = brush;
+        return brush;
     }
 
     private static bool IsLightPaletteActive()
