@@ -153,6 +153,7 @@ public sealed partial class ShellWindow : Window
         Activated += OnWindowActivated;
 
         ApplyInitialTheme(_viewModel.SelectedTheme);
+        TryApplyWindowIcon();
         TryLoadBrandImage();
         SyncControlDeckDraftsFromViewModel();
         RenderControlDeckSummary();
@@ -1206,8 +1207,12 @@ public sealed partial class ShellWindow : Window
 
         try
         {
-            var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Vaktr.ico");
-            if (File.Exists(iconPath))
+            // Try ico first, then fall back to png
+            var icoPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Vaktr.ico");
+            var pngPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "vaktr.png");
+            var iconPath = File.Exists(icoPath) ? icoPath : File.Exists(pngPath) ? pngPath : null;
+
+            if (iconPath is not null)
             {
                 AppWindow.SetIcon(iconPath);
                 var windowHandle = WindowNative.GetWindowHandle(this);
@@ -1223,10 +1228,11 @@ public sealed partial class ShellWindow : Window
                     if (_windowIconHandle != 0)
                     {
                         NativeWindowMethods.ApplyWindowIcon(windowHandle, _windowIconHandle);
-                        _windowIconApplied = true;
-                        StartupTrace.Write("Window icon applied // polished-v19");
                     }
                 }
+
+                _windowIconApplied = true;
+                StartupTrace.Write($"Window icon applied from {System.IO.Path.GetFileName(iconPath)}");
             }
         }
         catch (Exception ex)
