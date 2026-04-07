@@ -236,6 +236,9 @@ public sealed partial class ShellWindow : Window
 
     private void RefreshThemeVisuals()
     {
+        // Force-clear gradient cache before any surface gradient is rebuilt
+        _gradientCache.Clear();
+
         RunWithDeferredPanelRendering(() =>
         {
             if (_controlDeckEditableActive)

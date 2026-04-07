@@ -676,6 +676,7 @@ public sealed class TelemetryPanelCard : UserControl
         _sortHighestButton.RefreshThemeResources();
         _sortLowestButton.RefreshThemeResources();
         _sortNameButton.RefreshThemeResources();
+        _perProcessChartButton.RefreshThemeResources();
 
         foreach (var rowParts in _legendRows.Values)
         {
@@ -954,9 +955,23 @@ public sealed class TelemetryPanelCard : UserControl
         _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _scaleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
         _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-        _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _secondaryValueText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
         _processSectionTitleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+
+        // Color-code current value based on utilization thresholds
+        var util = panel.UtilizationPercent;
+        if (util > 90)
+        {
+            _currentValueText.Foreground = BrushFactory.CreateBrush("#FF8C42"); // orange — critical
+        }
+        else if (util > 75)
+        {
+            _currentValueText.Foreground = BrushFactory.CreateBrush("#FFD166"); // yellow — elevated
+        }
+        else
+        {
+            _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"); // default
+        }
     }
 
     private void SetHoverState(bool isHovered)

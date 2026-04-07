@@ -43,12 +43,8 @@ public sealed class InlineTextEntry : UserControl
 
         _shine = new Border
         {
-            Height = 1,
-            CornerRadius = new CornerRadius(1),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(1, 1, 1, 0),
-            Opacity = 0.1,
+            Height = 0,
+            Visibility = Visibility.Collapsed,
             IsHitTestVisible = false,
         };
 

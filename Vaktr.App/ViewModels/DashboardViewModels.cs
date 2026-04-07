@@ -1098,6 +1098,8 @@ public sealed class MetricPanelViewModel : ObservableObject
         private set => SetProperty(ref _emptyStateText, value);
     }
 
+    public double UtilizationPercent { get; private set; }
+
     public double ChartCeilingValue
     {
         get => _chartCeilingValue;
@@ -1484,7 +1486,9 @@ public sealed class MetricPanelViewModel : ObservableObject
         switch (Category)
         {
             case MetricCategory.Cpu when string.Equals(PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase):
-                CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
+                var cpuUsage = latestBySeries.GetValueOrDefault("Usage");
+                UtilizationPercent = cpuUsage;
+                CurrentValue = $"{cpuUsage:0.#}%";
                 SecondaryValue = BuildJoinedText(
                     _detailContext.CpuFrequencyMhz > 0 ? $"{_detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : "Total processor load",
                     _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} processes" : null,
@@ -1530,9 +1534,13 @@ public sealed class MetricPanelViewModel : ObservableObject
                 break;
             case MetricCategory.Memory:
                 var used = latestBySeries.GetValueOrDefault("Used");
-                var available = latestBySeries.GetValueOrDefault("Available");
+                // Read available from buffers directly since available-gb series is hidden from chart
+                var available = _buffers.TryGetValue("available-gb", out var availBuf) && availBuf.Points.Count > 0
+                    ? availBuf.Points[^1].Value
+                    : 0d;
                 var total = used + available;
                 var percent = total > 0 ? used / total * 100d : 0d;
+                UtilizationPercent = percent;
                 CurrentValue = $"{FormatCapacity(used)} used";
                 SecondaryValue = BuildJoinedText(
                     $"{percent:0.#}% of {FormatCapacity(total)}",
@@ -1556,12 +1564,14 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ScaleLabel = $"Max {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Gpu:
+                UtilizationPercent = latestBySeries.GetValueOrDefault("Usage");
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
                 SecondaryValue = "GPU usage";
                 ChartCeilingValue = 100d;
                 ScaleLabel = "100% ceiling";
                 break;
             case MetricCategory.Disk when PrefersGaugeVisual:
+                UtilizationPercent = latestBySeries.GetValueOrDefault("Used");
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Used"):0.#}% used";
                 var totalGb = latestByKey.GetValueOrDefault("total-gb");
                 var usedGb = latestByKey.GetValueOrDefault("used-gb");
