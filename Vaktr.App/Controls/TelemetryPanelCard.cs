@@ -207,7 +207,14 @@ public sealed class TelemetryPanelCard : UserControl
         {
             if (sender is ScrollViewer sv && sv.ScrollableHeight > 0)
             {
-                e.Handled = true;
+                var delta = e.GetCurrentPoint(sv).Properties.MouseWheelDelta;
+                // Only capture if there's room to scroll in the wheel direction
+                var atTop = sv.VerticalOffset <= 0;
+                var atBottom = sv.VerticalOffset >= sv.ScrollableHeight;
+                if ((delta > 0 && !atTop) || (delta < 0 && !atBottom))
+                {
+                    e.Handled = true;
+                }
             }
         };
 
@@ -287,12 +294,18 @@ public sealed class TelemetryPanelCard : UserControl
         processColumns.Children.Add(_valueLabelText);
         Grid.SetColumn(_valueLabelText, 3);
 
-        // Capture scroll events — prevent them from bubbling to the main shell scroll
+        // Capture scroll events — prevent bubbling to main shell scroll, but let through at edges
         _processScroller.PointerWheelChanged += (sender, e) =>
         {
             if (sender is ScrollViewer sv && sv.ScrollableHeight > 0)
             {
-                e.Handled = true;
+                var delta = e.GetCurrentPoint(sv).Properties.MouseWheelDelta;
+                var atTop = sv.VerticalOffset <= 0;
+                var atBottom = sv.VerticalOffset >= sv.ScrollableHeight;
+                if ((delta > 0 && !atTop) || (delta < 0 && !atBottom))
+                {
+                    e.Handled = true;
+                }
             }
         };
 
@@ -696,6 +709,8 @@ public sealed class TelemetryPanelCard : UserControl
         _processLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _activityLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _valueLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+
+        _badgeBorder.Background = CreateSurfaceGradient("#102131", "#17304A");
 
         _oneMinuteButton.RefreshThemeResources();
         _fiveMinuteButton.RefreshThemeResources();

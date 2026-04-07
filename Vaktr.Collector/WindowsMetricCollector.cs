@@ -903,44 +903,56 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 var processName = NormalizeProcessName(entry.szExeFile, processId);
 
                 var shouldOpenProcess = shouldRefreshProcesses || shouldRefreshHandleCounts;
-                var processHandle = shouldOpenProcess
-                    ? ProcessNative.OpenProcess(
+                if (shouldOpenProcess)
+                {
+                    // Try full access first (CPU times + memory), fall back to limited (CPU times only)
+                    var processHandle = ProcessNative.OpenProcess(
                         ProcessNative.ProcessQueryLimitedInformation | ProcessNative.ProcessVmRead,
                         false,
-                        processId)
-                    : nint.Zero;
-                if (ProcessNative.IsValidHandle(processHandle))
-                {
-                    try
+                        processId);
+
+                    // If full access denied (anti-cheat, protected processes), try limited access
+                    if (!ProcessNative.IsValidHandle(processHandle))
                     {
-                        if (shouldRefreshHandleCounts && ProcessNative.GetProcessHandleCount(processHandle, out var handleValue))
-                        {
-                            processHandles = unchecked((int)handleValue);
-                            handleCount += processHandles;
-                        }
+                        processHandle = ProcessNative.OpenProcess(
+                            ProcessNative.ProcessQueryLimitedInformation,
+                            false,
+                            processId);
+                    }
 
-                        if (shouldRefreshProcesses)
+                    if (ProcessNative.IsValidHandle(processHandle))
+                    {
+                        try
                         {
-                            activePids.Add(processId);
-                            TryGetProcessCpuUsage(processHandle, processId, timestamp, out cpuPercent);
-
-                            if (ProcessNative.GetProcessMemoryInfo(
-                                    processHandle,
-                                    out var memoryCounters,
-                                    (uint)Marshal.SizeOf<ProcessNative.ProcessMemoryCounters>()))
+                            if (shouldRefreshHandleCounts && ProcessNative.GetProcessHandleCount(processHandle, out var handleValue))
                             {
-                                workingSetGb = Math.Max(0d, (double)memoryCounters.WorkingSetSize / 1024d / 1024d / 1024d);
+                                processHandles = unchecked((int)handleValue);
+                                handleCount += processHandles;
+                            }
+
+                            if (shouldRefreshProcesses)
+                            {
+                                activePids.Add(processId);
+                                TryGetProcessCpuUsage(processHandle, processId, timestamp, out cpuPercent);
+
+                                if (ProcessNative.GetProcessMemoryInfo(
+                                        processHandle,
+                                        out var memoryCounters,
+                                        (uint)Marshal.SizeOf<ProcessNative.ProcessMemoryCounters>()))
+                                {
+                                    workingSetGb = Math.Max(0d, (double)memoryCounters.WorkingSetSize / 1024d / 1024d / 1024d);
+                                }
                             }
                         }
+                        finally
+                        {
+                            ProcessNative.CloseHandle(processHandle);
+                        }
                     }
-                    finally
+                    else if (shouldRefreshProcesses)
                     {
-                        ProcessNative.CloseHandle(processHandle);
+                        activePids.Add(processId);
                     }
-                }
-                else if (shouldRefreshProcesses)
-                {
-                    activePids.Add(processId);
                 }
 
                 if (shouldRefreshProcesses)
