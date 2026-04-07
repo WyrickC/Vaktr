@@ -65,9 +65,9 @@ public sealed class MainViewModel : ObservableObject
         SummaryCards =
         [
             new SummaryCardViewModel("CPU", "CPU", BrushFactory.CreateBrush("#5DE6FF")),
+            new SummaryCardViewModel("GPU", "GPU", BrushFactory.CreateBrush("#E87BFF")),
             new SummaryCardViewModel("RAM", "Memory", BrushFactory.CreateBrush("#7BF7D0")),
-            new SummaryCardViewModel("IO", "Disk", BrushFactory.CreateBrush("#FF9B54")),
-            new SummaryCardViewModel("WAN", "Network", BrushFactory.CreateBrush("#9A8CFF")),
+            new SummaryCardViewModel("Drive", "Drives", BrushFactory.CreateBrush("#FF9B54")),
         ];
 
         EnsureBaselinePanels();
@@ -333,37 +333,40 @@ public sealed class MainViewModel : ObservableObject
         var orderedKeys = BuildPersistedPanelOrder().ToList();
         var movingIndex = orderedKeys.FindIndex(key => string.Equals(key, movingKey, StringComparison.OrdinalIgnoreCase));
         var targetIndex = orderedKeys.FindIndex(key => string.Equals(key, targetKey, StringComparison.OrdinalIgnoreCase));
-        if (movingIndex < 0 || targetIndex < 0)
+        if (movingIndex < 0 || targetIndex < 0 || movingIndex == targetIndex)
         {
             return false;
         }
 
-        orderedKeys.RemoveAt(movingIndex);
-        if (movingIndex < targetIndex)
-        {
-            targetIndex--;
-        }
-
-        orderedKeys.Insert(targetIndex, movingKey);
+        // Direct swap — panels exchange positions, nothing else shifts
+        (orderedKeys[movingIndex], orderedKeys[targetIndex]) = (orderedKeys[targetIndex], orderedKeys[movingIndex]);
         ApplyPanelOrder(orderedKeys);
 
-        // Reorder the ObservableCollection in-place to avoid full Clear+Add rebuild
-        var orderedPanels = _panelLookup.Values
-            .Where(panel => panel.IsDashboardPanel && panel.IsVisible)
-            .OrderBy(GetPanelOrderRank)
-            .ThenBy(panel => panel.SortBucket)
-            .ThenBy(panel => panel.SortGroupKey, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(panel => panel.SortVariant)
-            .ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        // Move items in the collection to match the new order (fires minimal change events)
-        for (var i = 0; i < orderedPanels.Length && i < DashboardPanels.Count; i++)
+        // Swap in the ObservableCollection
+        var movingCollectionIndex = -1;
+        var targetCollectionIndex = -1;
+        for (var i = 0; i < DashboardPanels.Count; i++)
         {
-            var currentIndex = DashboardPanels.IndexOf(orderedPanels[i]);
-            if (currentIndex != i && currentIndex >= 0)
+            if (string.Equals(DashboardPanels[i].PanelKey, movingKey, StringComparison.OrdinalIgnoreCase))
             {
-                DashboardPanels.Move(currentIndex, i);
+                movingCollectionIndex = i;
+            }
+            else if (string.Equals(DashboardPanels[i].PanelKey, targetKey, StringComparison.OrdinalIgnoreCase))
+            {
+                targetCollectionIndex = i;
+            }
+        }
+
+        if (movingCollectionIndex >= 0 && targetCollectionIndex >= 0)
+        {
+            DashboardPanels.Move(movingCollectionIndex, targetCollectionIndex);
+            if (targetCollectionIndex < movingCollectionIndex)
+            {
+                DashboardPanels.Move(targetCollectionIndex + 1, movingCollectionIndex);
+            }
+            else
+            {
+                DashboardPanels.Move(targetCollectionIndex - 1, movingCollectionIndex);
             }
         }
 
@@ -580,18 +583,23 @@ public sealed class MainViewModel : ObservableObject
     {
         // Single-pass extraction — no GroupBy/ToDictionary/Where/Sum allocations
         var cpuUsage = 0d;
+        var gpuUsage = 0d;
+        var gpuMemoryGb = 0d;
         var usedMemory = 0d;
         var availableMemory = 0d;
-        var diskRead = 0d;
-        var diskWrite = 0d;
-        var netDown = 0d;
-        var netUp = 0d;
+        var driveUsages = new List<(string Label, double UsedPct)>();
 
         foreach (var sample in snapshot.Samples)
         {
             if (string.Equals(sample.PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(sample.SeriesKey, "usage", StringComparison.OrdinalIgnoreCase))
                 cpuUsage = sample.Value;
+            else if (string.Equals(sample.PanelKey, "gpu-total", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(sample.SeriesKey, "usage", StringComparison.OrdinalIgnoreCase))
+                gpuUsage = sample.Value;
+            else if (string.Equals(sample.PanelKey, "gpu-memory", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(sample.SeriesKey, "dedicated-gb", StringComparison.OrdinalIgnoreCase))
+                gpuMemoryGb = sample.Value;
             else if (string.Equals(sample.PanelKey, "memory", StringComparison.OrdinalIgnoreCase))
             {
                 if (string.Equals(sample.SeriesKey, "used-gb", StringComparison.OrdinalIgnoreCase))
@@ -599,19 +607,12 @@ public sealed class MainViewModel : ObservableObject
                 else if (string.Equals(sample.SeriesKey, "available-gb", StringComparison.OrdinalIgnoreCase))
                     availableMemory = sample.Value;
             }
-            else if (sample.Category == MetricCategory.Disk)
+            else if (sample.Category == MetricCategory.Disk &&
+                     sample.PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(sample.SeriesKey, "used-percent", StringComparison.OrdinalIgnoreCase))
             {
-                if (string.Equals(sample.SeriesKey, "read", StringComparison.OrdinalIgnoreCase))
-                    diskRead += sample.Value;
-                else if (string.Equals(sample.SeriesKey, "write", StringComparison.OrdinalIgnoreCase))
-                    diskWrite += sample.Value;
-            }
-            else if (sample.Category == MetricCategory.Network)
-            {
-                if (string.Equals(sample.SeriesKey, "download", StringComparison.OrdinalIgnoreCase))
-                    netDown += sample.Value;
-                else if (string.Equals(sample.SeriesKey, "upload", StringComparison.OrdinalIgnoreCase))
-                    netUp += sample.Value;
+                var driveLabel = sample.PanelTitle.Replace("Drive ", "").Replace(" Capacity", "");
+                driveUsages.Add((driveLabel, sample.Value));
             }
         }
 
@@ -620,21 +621,35 @@ public sealed class MainViewModel : ObservableObject
             BuildSummaryCaption(
                 detailContext.CpuFrequencyMhz > 0 ? $"{detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : "Processor load",
                 detailContext.ProcessCount > 0 ? $"{FormatCompactCount(detailContext.ProcessCount)} proc" : null,
-                detailContext.ThreadCount > 0 ? $"{FormatCompactCount(detailContext.ThreadCount)} thr" : null));
+                detailContext.ThreadCount > 0 ? $"{FormatCompactCount(detailContext.ThreadCount)} thr" : null),
+            cpuUsage);
+
+        SummaryCards[1].Update(
+            $"{gpuUsage:0.#}%",
+            gpuMemoryGb > 0 ? $"{gpuMemoryGb:0.0} GB VRAM" : "GPU utilization",
+            gpuUsage);
 
         var totalMemory = usedMemory + availableMemory;
         var memoryPct = totalMemory > 0 ? usedMemory / totalMemory * 100d : 0d;
-        SummaryCards[1].Update(
-            FormatCapacityForSummary(usedMemory),
-            totalMemory > 0 ? $"{memoryPct:0.#}% of {FormatCapacityForSummary(totalMemory)}" : "Memory in play");
-
         SummaryCards[2].Update(
-            $"{diskRead + diskWrite:0.0} MB/s",
-            $"{diskRead:0.0} read / {diskWrite:0.0} write");
+            $"{memoryPct:0.#}%",
+            $"{FormatCapacityForSummary(usedMemory)} of {FormatCapacityForSummary(totalMemory)}",
+            memoryPct);
 
-        SummaryCards[3].Update(
-            $"{netDown:0.0} Mbps",
-            $"{netUp:0.0} up");
+        // Disk card: show highest drive usage, caption lists all drives
+        if (driveUsages.Count > 0)
+        {
+            driveUsages.Sort((a, b) => b.UsedPct.CompareTo(a.UsedPct));
+            var highestPct = driveUsages[0].UsedPct;
+            var caption = driveUsages.Count == 1
+                ? $"{driveUsages[0].Label} drive"
+                : string.Join(" · ", driveUsages.ConvertAll(d => $"{d.Label} {d.UsedPct:0.#}%"));
+            SummaryCards[3].Update($"{highestPct:0.#}%", caption, highestPct);
+        }
+        else
+        {
+            SummaryCards[3].Update("--", "Waiting for drive data");
+        }
     }
 
     private static TimeRangePreset MapToRangePreset(int minutes) => minutes switch
@@ -748,10 +763,19 @@ public sealed class SummaryCardViewModel : ObservableObject
         private set => SetProperty(ref _caption, value);
     }
 
-    public void Update(string value, string caption)
+    public double Utilization
+    {
+        get => _utilization;
+        private set => SetProperty(ref _utilization, value);
+    }
+
+    private double _utilization;
+
+    public void Update(string value, string caption, double utilization = 0d)
     {
         Value = value;
         Caption = caption;
+        Utilization = utilization;
     }
 }
 
@@ -949,6 +973,11 @@ public sealed class MetricPanelViewModel : ObservableObject
     private PanelDetailContext _detailContext = PanelDetailContext.Empty;
     private IReadOnlyList<ProcessListItemViewModel> _processRows = Array.Empty<ProcessListItemViewModel>();
     private ProcessSortMode _processSortMode = ProcessSortMode.Highest;
+    private bool _processListExpanded;
+    private bool _perProcessChartsEnabled;
+    private int _totalProcessCount;
+    private const int MaxProcessChartSeries = 5;
+    private const string ProcessSeriesPrefix = "proc:";
     private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
@@ -1082,6 +1111,8 @@ public sealed class MetricPanelViewModel : ObservableObject
         private set => SetProperty(ref _emptyStateText, value);
     }
 
+    public double UtilizationPercent { get; private set; }
+
     public double ChartCeilingValue
     {
         get => _chartCeilingValue;
@@ -1110,6 +1141,53 @@ public sealed class MetricPanelViewModel : ObservableObject
             }
 
             RefreshProcessRows();
+        }
+    }
+
+    public bool ProcessListExpanded
+    {
+        get => _processListExpanded;
+        set
+        {
+            if (!SetProperty(ref _processListExpanded, value))
+            {
+                return;
+            }
+
+            RefreshProcessRows();
+        }
+    }
+
+    public int TotalProcessCount => _totalProcessCount;
+
+    public bool PerProcessChartsEnabled
+    {
+        get => _perProcessChartsEnabled;
+        set
+        {
+            if (!SetProperty(ref _perProcessChartsEnabled, value))
+            {
+                return;
+            }
+
+            // Remove process chart series when disabled
+            if (!value)
+            {
+                var processKeys = new List<string>();
+                foreach (var key in _buffers.Keys)
+                {
+                    if (key.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal))
+                    {
+                        processKeys.Add(key);
+                    }
+                }
+                foreach (var key in processKeys)
+                {
+                    _buffers.Remove(key);
+                }
+            }
+
+            RefreshPresentation();
         }
     }
 
@@ -1217,9 +1295,55 @@ public sealed class MetricPanelViewModel : ObservableObject
         if (processDetailsChanged && SupportsProcessTable)
         {
             RefreshProcessRows();
+            InjectPerProcessChartData(detailContext);
         }
 
         UpdateSummaryText();
+    }
+
+    private void InjectPerProcessChartData(PanelDetailContext detailContext)
+    {
+        if (!_perProcessChartsEnabled || detailContext.Processes.Count == 0)
+        {
+            return;
+        }
+
+        var timestamp = _latestPointTimestampUtc;
+        var isMemoryPanel = string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
+
+        // Find top N processes by the relevant metric
+        var sorted = new List<ProcessActivitySample>(detailContext.Processes);
+        sorted.Sort((a, b) => isMemoryPanel
+            ? b.MemoryGigabytes.CompareTo(a.MemoryGigabytes)
+            : b.CpuPercent.CompareTo(a.CpuPercent));
+
+        var count = Math.Min(sorted.Count, MaxProcessChartSeries);
+        for (var i = 0; i < count; i++)
+        {
+            var proc = sorted[i];
+            var value = isMemoryPanel ? proc.MemoryGigabytes : proc.CpuPercent;
+            if (value <= 0)
+            {
+                continue;
+            }
+
+            var seriesKey = $"{ProcessSeriesPrefix}{proc.Name}";
+            if (!_buffers.TryGetValue(seriesKey, out var buffer))
+            {
+                // Offset palette by 10 to avoid clashing with existing series colors
+                var paletteIndex = 10 + i;
+                buffer = new SeriesBuffer(
+                    seriesKey,
+                    proc.Name,
+                    [],
+                    ResolveBrush(paletteIndex),
+                    ResolveFillBrush(paletteIndex),
+                    timestamp);
+                _buffers.Add(seriesKey, buffer);
+            }
+
+            buffer.Points.Add(new MetricPoint(timestamp, value));
+        }
     }
 
     public PanelHoverInfo? BuildHoverInfo(double normalizedPosition)
@@ -1375,11 +1499,13 @@ public sealed class MetricPanelViewModel : ObservableObject
         switch (Category)
         {
             case MetricCategory.Cpu when string.Equals(PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase):
-                CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
+                var cpuUsage = latestBySeries.GetValueOrDefault("Usage");
+                UtilizationPercent = cpuUsage;
+                CurrentValue = $"{cpuUsage:0.#}%";
                 SecondaryValue = BuildJoinedText(
                     _detailContext.CpuFrequencyMhz > 0 ? $"{_detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : "Total processor load",
-                    _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} proc" : null,
-                    _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} thr" : null);
+                    _detailContext.ProcessCount > 0 ? $"{FormatCompactCount(_detailContext.ProcessCount)} processes" : null,
+                    _detailContext.ThreadCount > 0 ? $"{FormatCompactCount(_detailContext.ThreadCount)} threads" : null);
                 ScaleLabel = _detailContext.HandleCount > 0
                     ? $"100% ceiling · {FormatCompactCount(_detailContext.HandleCount)} handles"
                     : "100% ceiling";
@@ -1421,9 +1547,13 @@ public sealed class MetricPanelViewModel : ObservableObject
                 break;
             case MetricCategory.Memory:
                 var used = latestBySeries.GetValueOrDefault("Used");
-                var available = latestBySeries.GetValueOrDefault("Available");
+                // Read available from buffers directly since available-gb series is hidden from chart
+                var available = _buffers.TryGetValue("available-gb", out var availBuf) && availBuf.Points.Count > 0
+                    ? availBuf.Points[^1].Value
+                    : 0d;
                 var total = used + available;
                 var percent = total > 0 ? used / total * 100d : 0d;
+                UtilizationPercent = percent;
                 CurrentValue = $"{FormatCapacity(used)} used";
                 SecondaryValue = BuildJoinedText(
                     $"{percent:0.#}% of {FormatCapacity(total)}",
@@ -1434,10 +1564,11 @@ public sealed class MetricPanelViewModel : ObservableObject
                 break;
             case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-memory", StringComparison.OrdinalIgnoreCase):
                 var dedicated = latestBySeries.GetValueOrDefault("Dedicated");
-                CurrentValue = $"{FormatCapacity(dedicated)} used";
-                SecondaryValue = "Dedicated graphics memory";
-                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, Math.Max(1d, dedicated));
-                ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
+                var peakVram = ResolveDynamicCeiling(VisibleSeries, Math.Max(1d, dedicated));
+                CurrentValue = $"{FormatCapacity(dedicated)}";
+                SecondaryValue = $"Dedicated VRAM · peak {FormatCapacity(peakVram)}";
+                ChartCeilingValue = peakVram;
+                ScaleLabel = $"{FormatCapacity(peakVram)} peak";
                 break;
             case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase):
                 var gpuTemp = latestBySeries.GetValueOrDefault("Temperature");
@@ -1447,12 +1578,14 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ScaleLabel = $"Max {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Gpu:
+                UtilizationPercent = latestBySeries.GetValueOrDefault("Usage");
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
                 SecondaryValue = "GPU usage";
                 ChartCeilingValue = 100d;
                 ScaleLabel = "100% ceiling";
                 break;
             case MetricCategory.Disk when PrefersGaugeVisual:
+                UtilizationPercent = latestBySeries.GetValueOrDefault("Used");
                 CurrentValue = $"{latestBySeries.GetValueOrDefault("Used"):0.#}% used";
                 var totalGb = latestByKey.GetValueOrDefault("total-gb");
                 var usedGb = latestByKey.GetValueOrDefault("used-gb");
@@ -1496,6 +1629,19 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private bool ShouldShowSeries(SeriesBuffer buffer)
     {
+        // Hide per-process chart series when toggle is off
+        if (buffer.Key.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal) && !_perProcessChartsEnabled)
+        {
+            return false;
+        }
+
+        // Memory panel: only show used-gb (hide available-gb to keep chart clean)
+        if (string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(buffer.Key, "available-gb", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         if (!PrefersGaugeVisual)
         {
             return true;
@@ -1522,24 +1668,70 @@ public sealed class MetricPanelViewModel : ObservableObject
             return;
         }
 
-        IEnumerable<ProcessActivitySample> processes = _detailContext.Processes;
-        var peakMemory = Math.Max(0.1d, _detailContext.Processes.Count > 0 ? _detailContext.Processes.Max(process => process.MemoryGigabytes) : 0d);
-        processes = ProcessSortMode switch
+        var sourceProcesses = _detailContext.Processes;
+        if (sourceProcesses.Count == 0)
         {
-            ProcessSortMode.Name => processes.OrderBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            ProcessSortMode.Lowest when string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) =>
-                processes.OrderBy(process => process.MemoryGigabytes).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            ProcessSortMode.Lowest =>
-                processes.OrderBy(process => process.CpuPercent).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            _ when string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) =>
-                processes.OrderByDescending(process => process.MemoryGigabytes).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-            _ =>
-                processes.OrderByDescending(process => process.CpuPercent).ThenBy(process => process.Name, StringComparer.OrdinalIgnoreCase),
-        };
+            ProcessRows = Array.Empty<ProcessListItemViewModel>();
+            return;
+        }
 
-        ProcessRows = processes
-            .Select(process => CreateProcessRow(process, peakMemory))
-            .ToArray();
+        // Manual max instead of LINQ
+        var peakMemory = 0d;
+        foreach (var p in sourceProcesses)
+        {
+            if (p.MemoryGigabytes > peakMemory)
+            {
+                peakMemory = p.MemoryGigabytes;
+            }
+        }
+        peakMemory = Math.Max(0.1d, peakMemory);
+
+        // Copy to array for in-place sort (avoids LINQ OrderBy allocations)
+        var sorted = new ProcessActivitySample[sourceProcesses.Count];
+        for (var i = 0; i < sourceProcesses.Count; i++)
+        {
+            sorted[i] = sourceProcesses[i];
+        }
+
+        var isMemoryPanel = string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
+        Array.Sort(sorted, (a, b) =>
+        {
+            int cmp;
+            switch (ProcessSortMode)
+            {
+                case ProcessSortMode.Name:
+                    return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                case ProcessSortMode.Lowest when isMemoryPanel:
+                    cmp = a.MemoryGigabytes.CompareTo(b.MemoryGigabytes);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                case ProcessSortMode.Lowest:
+                    cmp = a.CpuPercent.CompareTo(b.CpuPercent);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                default:
+                    if (isMemoryPanel)
+                    {
+                        cmp = b.MemoryGigabytes.CompareTo(a.MemoryGigabytes);
+                        return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                    }
+                    cmp = b.CpuPercent.CompareTo(a.CpuPercent);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            }
+        });
+
+        _totalProcessCount = sorted.Length;
+        // Cap visible rows — UI perf degrades with hundreds of rows
+        const int defaultVisibleRows = 30;
+        const int expandedVisibleRows = 100;
+        var visibleCount = _processListExpanded
+            ? Math.Min(sorted.Length, expandedVisibleRows)
+            : Math.Min(sorted.Length, defaultVisibleRows);
+        var rows = new ProcessListItemViewModel[visibleCount];
+        for (var i = 0; i < visibleCount; i++)
+        {
+            rows[i] = CreateProcessRow(sorted[i], peakMemory);
+        }
+
+        ProcessRows = rows;
     }
 
     private ProcessListItemViewModel CreateProcessRow(ProcessActivitySample process, double peakMemory)
@@ -1610,10 +1802,10 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         if (!hasA && !hasB && !hasC) return "Live metric";
         if (hasA && !hasB && !hasC) return a!;
-        if (hasA && hasB && !hasC) return $"{a} / {b}";
-        if (hasA && hasB && hasC) return $"{a} / {b} / {c}";
-        if (hasA && !hasB && hasC) return $"{a} / {c}";
-        if (!hasA && hasB) return hasC ? $"{b} / {c}" : b!;
+        if (hasA && hasB && !hasC) return $"{a} · {b}";
+        if (hasA && hasB && hasC) return $"{a} · {b} · {c}";
+        if (hasA && !hasB && hasC) return $"{a} · {c}";
+        if (!hasA && hasB) return hasC ? $"{b} · {c}" : b!;
         return c!;
     }
 

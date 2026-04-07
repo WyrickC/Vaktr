@@ -37,9 +37,10 @@ public sealed partial class ShellWindow : Window
     private readonly Dictionary<string, TelemetryPanelCard> _panelCards = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SummaryCardVisual> _summaryCardVisuals = [];
 
-    private readonly Grid _rootLayout;
+    private Grid _rootLayout;
     private readonly Grid _titleBarDragHost;
     private readonly ScrollViewer _scrollHost;
+    private Border? _loadingOverlay;
     private readonly Border _controlsBodyHost;
     private readonly Grid _brandHost;
     private readonly Grid _summaryHost;
@@ -107,7 +108,6 @@ public sealed partial class ShellWindow : Window
         {
             ColumnSpacing = 20,
             RowSpacing = 20,
-            ChildrenTransitions = [new RepositionThemeTransition()],
         };
         _globalRangeButton = CreateActionChip("15m", OnToggleGlobalRangeEditor, true);
         _globalRangeButton.MinWidth = 132;
@@ -141,27 +141,71 @@ public sealed partial class ShellWindow : Window
         };
         _scrollHost.ViewChanged += OnScrollHostViewChanged;
 
-        _rootLayout = BuildRootLayout();
+        // Show loading screen immediately — ultra-lightweight, renders on first frame
+        _rootLayout = BuildLoadingScreen();
         Content = _rootLayout;
         ExtendsContentIntoTitleBar = true;
+
+        Closed += OnWindowClosed;
+        Activated += OnWindowActivated;
+
+        StartupTrace.Write("ShellWindow ctor complete // polished-v19");
+    }
+
+    private bool _fullUiBuilt;
+
+    private void BuildFullUi()
+    {
+        if (_fullUiBuilt)
+        {
+            return;
+        }
+
+        _fullUiBuilt = true;
+        StartupTrace.Write("BuildFullUi start");
+
+        var fullLayout = BuildRootLayout();
+
+        // Transfer loading overlay to the full layout
+        if (_loadingOverlay is not null)
+        {
+            if (_loadingOverlay.Parent is Grid oldParent)
+            {
+                oldParent.Children.Remove(_loadingOverlay);
+            }
+
+            _loadingOverlay.Background = ResolveBrush("AppBackdropBrush", "#030812");
+            fullLayout.Children.Add(_loadingOverlay);
+            Grid.SetRow(_loadingOverlay, 1);
+            Canvas.SetZIndex(_loadingOverlay, 100);
+        }
+
+        _rootLayout = fullLayout;
+        Content = _rootLayout;
         SetTitleBar(_titleBarDragHost);
+        ApplyInitialTheme(_viewModel.SelectedTheme);
 
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.DashboardPanels.CollectionChanged += OnDashboardPanelsChanged;
         _viewModel.PanelToggles.CollectionChanged += OnPanelTogglesChanged;
-        Closed += OnWindowClosed;
-        Activated += OnWindowActivated;
 
-        ApplyInitialTheme(_viewModel.SelectedTheme);
-        TryApplyWindowIcon();
-        TryLoadBrandImage();
-        SyncControlDeckDraftsFromViewModel();
-        RenderControlDeckSummary();
-        BuildSummaryCards();
-        RefreshDashboardPanels();
-        RefreshGlobalRangeControls();
-        UpdateStatusText();
-        StartupTrace.Write("ShellWindow ctor complete // polished-v19");
+        try
+        {
+            TryApplyWindowIcon();
+            TryLoadBrandImage();
+            SyncControlDeckDraftsFromViewModel();
+            RenderControlDeckSummary();
+            BuildSummaryCards();
+            RefreshDashboardPanels();
+            RefreshGlobalRangeControls();
+            UpdateStatusText();
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.WriteException("BuildFullUi", ex);
+        }
+
+        StartupTrace.Write("BuildFullUi complete");
     }
 
     public void ApplyInitialTheme(ThemeMode mode)
@@ -192,6 +236,9 @@ public sealed partial class ShellWindow : Window
 
     private void RefreshThemeVisuals()
     {
+        // Force-clear gradient cache before any surface gradient is rebuilt
+        _gradientCache.Clear();
+
         RunWithDeferredPanelRendering(() =>
         {
             if (_controlDeckEditableActive)
@@ -265,6 +312,50 @@ public sealed partial class ShellWindow : Window
             var captionText = CreateSecondaryText(string.Empty, 11.5);
             captionText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Caption)) });
 
+            // Mini utilization bar — thin horizontal bar below the value
+            var gaugeTrack = new Border
+            {
+                Height = 3,
+                CornerRadius = new CornerRadius(2),
+                Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+                Opacity = 0.5,
+                Margin = new Thickness(0, 4, 0, 5),
+            };
+            var gaugeFill = new Border
+            {
+                Height = 3,
+                CornerRadius = new CornerRadius(2),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = card.AccentBrush,
+                Margin = new Thickness(0, 4, 0, 5),
+            };
+            var gaugeHost = new Grid
+            {
+                Children = { gaugeTrack, gaugeFill },
+            };
+
+            // Bind fill width and color to utilization
+            card.PropertyChanged += (_, args) =>
+            {
+                if (!string.Equals(args.PropertyName, nameof(SummaryCardViewModel.Utilization)))
+                {
+                    return;
+                }
+
+                var util = card.Utilization;
+                var trackWidth = gaugeTrack.ActualWidth > 0 ? gaugeTrack.ActualWidth : 120;
+                gaugeFill.Width = trackWidth * Math.Clamp(util / 100d, 0d, 1d);
+                gaugeFill.Background = util > 90 ? BrushFactory.CreateBrush("#FF8C42")
+                    : util > 75 ? BrushFactory.CreateBrush("#FFD166")
+                    : card.AccentBrush;
+            };
+            // Also update on track size change
+            gaugeTrack.SizeChanged += (_, _) =>
+            {
+                var util = card.Utilization;
+                gaugeFill.Width = gaugeTrack.ActualWidth * Math.Clamp(util / 100d, 0d, 1d);
+            };
+
             var details = new StackPanel
             {
                 Spacing = 1,
@@ -273,6 +364,7 @@ public sealed partial class ShellWindow : Window
                 {
                     titleText,
                     valueText,
+                    gaugeHost,
                     captionText,
                 },
             };
@@ -320,14 +412,29 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        foreach (var visual in _summaryCardVisuals)
+        for (var i = 0; i < _summaryCardVisuals.Count; i++)
         {
+            var visual = _summaryCardVisuals[i];
             visual.Surface.Background = CreateSurfaceGradient("#0F1C2D", "#15283F");
             visual.Surface.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
             visual.TitleText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
             visual.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             visual.CaptionText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
-            visual.BadgeHost.Child = IconFactory.CreateTile(visual.ViewModel.Title, visual.ViewModel.AccentBrush, 48, 16);
+
+            // Replace the entire badge tile — the outer Border has themed background/border
+            var newTile = (Border)IconFactory.CreateTile(visual.ViewModel.Title, visual.ViewModel.AccentBrush, 48, 16);
+            newTile.VerticalAlignment = VerticalAlignment.Center;
+            if (visual.BadgeHost.Parent is Grid parentGrid)
+            {
+                var idx = parentGrid.Children.IndexOf(visual.BadgeHost);
+                if (idx >= 0)
+                {
+                    parentGrid.Children.RemoveAt(idx);
+                    parentGrid.Children.Insert(idx, newTile);
+                }
+            }
+
+            _summaryCardVisuals[i] = visual with { BadgeHost = newTile };
         }
     }
 
@@ -348,6 +455,7 @@ public sealed partial class ShellWindow : Window
                 staleCard.PanelZoomSelectionRequested -= OnPanelZoomSelectionRequested;
                 staleCard.PanelZoomResetRequested -= OnPanelZoomResetRequested;
                 staleCard.PanelReorderRequested -= OnPanelReorderRequested;
+                staleCard.PanelDragEnded -= OnPanelDragEnded;
             }
 
             _panelCards.Remove(staleKey);
@@ -362,6 +470,7 @@ public sealed partial class ShellWindow : Window
                 card.PanelZoomSelectionRequested += OnPanelZoomSelectionRequested;
                 card.PanelZoomResetRequested += OnPanelZoomResetRequested;
                 card.PanelReorderRequested += OnPanelReorderRequested;
+                card.PanelDragEnded += OnPanelDragEnded;
                 _panelCards.Add(panel.PanelKey, card);
             }
             else
@@ -407,7 +516,18 @@ public sealed partial class ShellWindow : Window
     private int DetermineDashboardColumns()
     {
         var width = _rootLayout.ActualWidth > 0 ? _rootLayout.ActualWidth : 1280;
-        return width >= 1260 ? 3 : width >= 900 ? 2 : 1;
+
+        // Hysteresis: use slightly different thresholds for expanding vs contracting
+        // to prevent flickering at boundary widths
+        var columns = _lastDashboardColumnCount switch
+        {
+            3 => width >= 1180 ? 3 : width >= 840 ? 2 : 1,  // shrinking: hold 3-col longer
+            1 => width >= 960 ? (width >= 1300 ? 3 : 2) : 1, // growing: require more width
+            _ => width >= 1260 ? 3 : width >= 900 ? 2 : 1,
+        };
+
+        _lastDashboardColumnCount = columns;
+        return columns;
     }
 
     private void OnRootLoaded(object sender, RoutedEventArgs e)
@@ -481,15 +601,16 @@ public sealed partial class ShellWindow : Window
             _collectorService = null;
             collectorService.SnapshotCollected -= OnSnapshotCollected;
             collectorService.CollectionFailed -= OnCollectionFailed;
+            // Fire-and-forget disposal — window closes immediately, cleanup runs in background
             _ = Task.Run(async () =>
             {
                 try
                 {
                     await collectorService.DisposeAsync();
                 }
-                catch (Exception ex)
+                catch
                 {
-                    StartupTrace.WriteException("Collector disposal", ex);
+                    // Best-effort cleanup — process is exiting
                 }
             });
         }
@@ -497,6 +618,11 @@ public sealed partial class ShellWindow : Window
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
+        if (!_fullUiBuilt)
+        {
+            return;
+        }
+
         RefreshWindowChrome();
 
         if (_windowIconApplied)
@@ -618,6 +744,23 @@ public sealed partial class ShellWindow : Window
         OnResetAllZoomClick(sender, e);
     }
 
+    private void OnPanelDragEnded(object? sender, EventArgs e)
+    {
+        // Place the dragged card at its correct grid position
+        var panels = _viewModel.DashboardPanels.ToArray();
+        var columns = DetermineDashboardColumns();
+
+        for (var index = 0; index < panels.Length; index++)
+        {
+            if (_panelCards.TryGetValue(panels[index].PanelKey, out var card) && ReferenceEquals(card, sender))
+            {
+                Grid.SetColumn(card, index % columns);
+                Grid.SetRow(card, index / columns);
+                break;
+            }
+        }
+    }
+
     private void OnPanelReorderRequested(object? sender, PanelReorderRequestedEventArgs e)
     {
         if (!_viewModel.MovePanel(e.SourcePanelKey, e.TargetPanelKey))
@@ -625,7 +768,12 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        // During drag, do a lightweight position update instead of full grid rebuild
+        // Play a subtle settle animation on the displaced card
+        if (_panelCards.TryGetValue(e.TargetPanelKey, out var displacedCard) && !displacedCard.IsDragging)
+        {
+            displacedCard.PlaySwapSettleAnimation();
+        }
+
         ReorderDashboardPanelsInPlace();
         DebouncePersistLayout();
     }
@@ -639,6 +787,11 @@ public sealed partial class ShellWindow : Window
         {
             if (_panelCards.TryGetValue(panels[index].PanelKey, out var card))
             {
+                if (card.IsDragging)
+                {
+                    continue;
+                }
+
                 var targetCol = index % columns;
                 var targetRow = index / columns;
                 if (Grid.GetColumn(card) != targetCol)
@@ -723,6 +876,10 @@ public sealed partial class ShellWindow : Window
         {
             _hasReceivedFirstSnapshot = true;
             StartupTrace.Write($"First snapshot collected // samples={snapshot.Samples.Count}");
+            if (_loadingOverlay is not null)
+            {
+                DismissLoadingOverlay();
+            }
         }
 
         _viewModel.ApplySnapshot(snapshot);
@@ -741,6 +898,37 @@ public sealed partial class ShellWindow : Window
             _snapshotApplyQueued = true;
             _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, ApplyQueuedSnapshot);
         }
+    }
+
+    private void DismissLoadingOverlay()
+    {
+        if (_loadingOverlay is null)
+        {
+            return;
+        }
+
+        var overlay = _loadingOverlay;
+        _loadingOverlay = null;
+
+        var fadeOut = new DoubleAnimation
+        {
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(300)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(fadeOut);
+        Storyboard.SetTarget(fadeOut, overlay);
+        Storyboard.SetTargetProperty(fadeOut, "Opacity");
+        storyboard.Completed += (_, _) =>
+        {
+            if (overlay.Parent is Grid parentGrid)
+            {
+                parentGrid.Children.Remove(overlay);
+            }
+        };
+        storyboard.Begin();
     }
 
     private async Task PersistLayoutAsync()
@@ -796,7 +984,7 @@ public sealed partial class ShellWindow : Window
         }
         finally
         {
-            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => SetPanelRenderingSuspended(false));
+            SetPanelRenderingSuspended(false);
         }
     }
 

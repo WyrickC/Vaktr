@@ -18,6 +18,20 @@ public sealed class App : Application
     {
         StartupTrace.Write("App ctor");
         UnhandledException += OnUnhandledException;
+
+        // Catch exceptions from background threads (LibreHardwareMonitor, WMI)
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is System.Runtime.InteropServices.COMException comEx)
+            {
+                StartupTrace.WriteException("AppDomain COMException (suppressed)", comEx);
+            }
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            args.SetObserved();
+            StartupTrace.WriteException("UnobservedTaskException (suppressed)", args.Exception);
+        };
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -83,22 +97,22 @@ public sealed class App : Application
             ? new ThemePalette(
                 "#EEF5FB",
                 "#F8FBFF",
-                "#D1DEEC",
+                "#C4D2E2",
                 "#FFFFFF",
-                "#F4F8FC",
-                "#EDF4FB",
-                "#C3D4E6",
-                "#EAF2FB",
-                "#D7E5F2",
-                "#0F2030",
-                "#4A6078",
-                "#6F8399",
-                "#0E84B9",
-                "#0C6C98",
-                "#D9F1FF",
+                "#F0F5FB",
+                "#E4EDF6",
+                "#B8C9DC",
+                "#E6EFF8",
+                "#C8D8E8",
+                "#0A1824",
+                "#3A5068",
+                "#576F85",
+                "#0975A8",
+                "#065A82",
+                "#C8E8F8",
                 "#1C7EA229",
                 "#19D2A04A",
-                "#8EE7EFF5")
+                "#90E0EBF5")
             : new ThemePalette(
                 "#030812",
                 "#07101B",
@@ -217,10 +231,12 @@ public sealed class App : Application
         {
             StartupTrace.WriteException("App.UnhandledException", e.Exception);
 
-            if (_startupGuardActive && e.Exception is System.Runtime.InteropServices.COMException)
+            // Always handle COMExceptions — LibreHardwareMonitor and WMI can throw
+            // on background threads that we can't catch locally
+            if (e.Exception is System.Runtime.InteropServices.COMException)
             {
                 e.Handled = true;
-                StartupTrace.Write("Startup COMException handled to preserve shell");
+                StartupTrace.Write("COMException handled to preserve shell");
             }
         }
     }

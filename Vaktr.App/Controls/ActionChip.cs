@@ -81,6 +81,11 @@ public sealed class ActionChip : UserControl
         _surface.PointerReleased += OnPointerReleased;
         _surface.Tapped += OnTapped;
 
+        IsTabStop = true;
+        KeyDown += OnKeyDown;
+        GotFocus += (_, _) => { _isHovered = true; UpdateVisualState(); };
+        LostFocus += (_, _) => { _isHovered = false; UpdateVisualState(); };
+
         UpdateVisualState();
     }
 
@@ -131,6 +136,15 @@ public sealed class ActionChip : UserControl
         Click?.Invoke(this, EventArgs.Empty);
     }
 
+    private void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key is Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space)
+        {
+            Click?.Invoke(this, EventArgs.Empty);
+            e.Handled = true;
+        }
+    }
+
     public void RefreshThemeResources()
     {
         UpdateVisualState();
@@ -164,22 +178,31 @@ public sealed class ActionChip : UserControl
     private void UpdateVisualState()
     {
         var useAccent = _isActive || _isFilled;
-        _surface.Background = useAccent
-            ? CreateSurfaceGradient("#18344B", "#122437")
-            : CreateSurfaceGradient(_isHovered ? "#132232" : "#101A28", _isHovered ? "#17293D" : "#122031");
+        var isLight = IsLightPaletteActive();
 
-        _surface.BorderBrush = useAccent
-            ? ResolveBrush("AccentStrongBrush", "#9EEFFF")
-            : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#2C4866" : "#243D55");
+        if (isLight)
+        {
+            _surface.Background = useAccent
+                ? ResolveBrush("AccentSoftBrush", "#C8E8F8")
+                : ResolveBrush(_isHovered ? "SurfaceStrongBrush" : "SurfaceElevatedBrush", _isHovered ? "#E0EAF4" : "#F0F5FB");
+            _surface.BorderBrush = useAccent
+                ? ResolveBrush("AccentStrongBrush", "#065A82")
+                : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#B0C4D8" : "#C4D2E2");
+        }
+        else
+        {
+            _surface.Background = useAccent
+                ? CreateSurfaceGradient("#18344B", "#122437")
+                : CreateSurfaceGradient(_isHovered ? "#132232" : "#101A28", _isHovered ? "#17293D" : "#122031");
+            _surface.BorderBrush = useAccent
+                ? ResolveBrush("AccentStrongBrush", "#9EEFFF")
+                : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#2C4866" : "#243D55");
+        }
 
-        Opacity = _isPressed ? 0.94 : 1.0;
-        _label.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-        _glow.Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF");
-        _glow.Opacity = useAccent ? 0.045 : _isHovered ? 0.015 : 0;
-        _shine.Background = useAccent
-            ? ResolveBrush("AccentStrongBrush", "#D7FBFF")
-            : ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-        _shine.Opacity = useAccent ? 0.16 : _isHovered ? 0.08 : 0.04;
+        Opacity = _isPressed ? 0.82 : _isHovered ? 0.95 : 1.0;
+        _label.Foreground = ResolveBrush("TextPrimaryBrush", isLight ? "#0A1824" : "#F2F8FF");
+        _glow.Opacity = 0;
+        _shine.Opacity = 0;
     }
 
     private static Brush ResolveBrush(string key, string fallbackHex)

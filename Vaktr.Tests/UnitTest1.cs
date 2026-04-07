@@ -8,14 +8,14 @@ public sealed class VaktrConfigTests
         var config = new VaktrConfig
         {
             ScrapeIntervalSeconds = 0,
-            GraphWindowMinutes = 999,
+            GraphWindowMinutes = -1,
             StorageDirectory = string.Empty,
         };
 
         config.Normalize();
 
         Assert.Equal(2, config.ScrapeIntervalSeconds);
-        Assert.Equal(15, config.GraphWindowMinutes);
+        Assert.Equal(VaktrConfig.DefaultGraphWindowMinutes, config.GraphWindowMinutes);
         Assert.False(string.IsNullOrWhiteSpace(config.StorageDirectory));
     }
 }

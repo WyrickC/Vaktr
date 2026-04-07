@@ -1,0 +1,90 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+  schedule:
+    # Run weekly on Monday at 8am UTC
+    - cron: '0 8 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore Vaktr.sln
+
+      - name: Check for vulnerable packages
+        run: dotnet list Vaktr.sln package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
+
+      - name: Fail on critical vulnerabilities
+        shell: pwsh
+        run: |
+          $report = Get-Content vulnerability-report.txt -Raw
+          if ($report -match "Critical|High") {
+            Write-Error "Critical or High severity vulnerabilities found. See report above."
+            exit 1
+          }
+          Write-Host "No critical or high vulnerabilities found."
+
+      - name: Upload vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-report
+          path: vulnerability-report.txt
+
+  secrets-scan:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
+
+  code-quality:
+    name: Code Quality
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore Vaktr.sln
+
+      - name: Build with analysis
+        run: dotnet build Vaktr.sln -c Release -p:Platform=x64 -p:TreatWarningsAsErrors=false --no-restore
+
+      - name: Check for outdated packages
+        run: dotnet list Vaktr.sln package --outdated
+        continue-on-error: true
