@@ -13,13 +13,30 @@ internal static class IconFactory
     public static FrameworkElement CreateTile(string key, Brush accentBrush, double size = 44, double iconSize = 18)
     {
         var corner = Math.Max(12, size * 0.28);
+        var isLight = IsLightPaletteActive();
+
+        if (isLight && accentBrush is SolidColorBrush lightSolid)
+        {
+            var c = lightSolid.Color;
+            var darkC = DarkenColor(c, 0.5);
+            return new Border
+            {
+                Width = size,
+                Height = size,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, darkC.R, darkC.G, darkC.B)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, darkC.R, darkC.G, darkC.B)),
+                BorderThickness = new Thickness(1.2),
+                CornerRadius = new CornerRadius(corner),
+                Child = CreateIcon(key, accentBrush, iconSize),
+            };
+        }
 
         return new Border
         {
             Width = size,
             Height = size,
             Background = CreateSurfaceGradient("#102031", "#15273D"),
-            BorderBrush = CreateOpacityBrush(accentBrush, 0.34),
+            BorderBrush = CreateOpacityBrush(accentBrush, 0.4),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(corner),
             Child = new Grid
@@ -34,24 +51,6 @@ internal static class IconFactory
                         Opacity = 0.16,
                         IsHitTestVisible = false,
                     },
-                    new Border
-                    {
-                        Height = 1,
-                        Margin = new Thickness(1, 1, 1, 0),
-                        CornerRadius = new CornerRadius(1),
-                        Background = CreateOpacityBrush(accentBrush, 0.18),
-                        VerticalAlignment = VerticalAlignment.Top,
-                        IsHitTestVisible = false,
-                    },
-                    new Border
-                    {
-                        Margin = new Thickness(5),
-                        CornerRadius = new CornerRadius(Math.Max(8, corner - 5)),
-                        BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                        BorderThickness = new Thickness(1),
-                        Opacity = 0.35,
-                        IsHitTestVisible = false,
-                    },
                     CreateIcon(key, accentBrush, iconSize),
                 },
             },
@@ -61,39 +60,32 @@ internal static class IconFactory
     public static FrameworkElement CreateIcon(string key, Brush accentBrush, double size = 18)
     {
         var glyph = ResolveGlyph(Normalize(key));
-        var glowBrush = CreateOpacityBrush(accentBrush, 0.18);
+        var isLight = IsLightPaletteActive();
 
-        return new Grid
+        // In light mode, darken the icon for strong contrast on light backgrounds
+        var iconBrush = isLight && accentBrush is SolidColorBrush solid
+            ? new SolidColorBrush(DarkenColor(solid.Color, 0.5))
+            : accentBrush;
+
+        return new FontIcon
         {
-            Width = size + 8,
-            Height = size + 8,
+            Glyph = glyph,
+            FontFamily = FluentIconFont,
+            FontSize = size,
+            Foreground = iconBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             IsHitTestVisible = false,
-            Children =
-            {
-                new Ellipse
-                {
-                    Width = size + 2,
-                    Height = size + 2,
-                    Fill = glowBrush,
-                    Opacity = 0.28,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    IsHitTestVisible = false,
-                },
-                new FontIcon
-                {
-                    Glyph = glyph,
-                    FontFamily = FluentIconFont,
-                    FontSize = size,
-                    Foreground = accentBrush,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    IsHitTestVisible = false,
-                },
-            },
         };
+    }
+
+    private static Windows.UI.Color DarkenColor(Windows.UI.Color color, double factor)
+    {
+        return Windows.UI.Color.FromArgb(
+            color.A,
+            (byte)(color.R * factor),
+            (byte)(color.G * factor),
+            (byte)(color.B * factor));
     }
 
     private static string ResolveGlyph(string key)

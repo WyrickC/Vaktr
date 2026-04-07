@@ -6,12 +6,20 @@ namespace Vaktr.Collector;
 
 internal sealed class TemperatureSensorReader : IDisposable
 {
-    private readonly Computer? _hardwareMonitor;
+    private Computer? _hardwareMonitor;
     private readonly UpdateVisitor _updateVisitor = new();
     private static bool _wmiFailed;
+    private bool _initialized;
+    private bool _initFailed;
 
-    public TemperatureSensorReader()
+    private void EnsureInitialized()
     {
+        if (_initialized)
+        {
+            return;
+        }
+
+        _initialized = true;
         try
         {
             _hardwareMonitor = new Computer
@@ -24,16 +32,19 @@ internal sealed class TemperatureSensorReader : IDisposable
         catch
         {
             _hardwareMonitor = null;
+            _initFailed = true;
         }
     }
 
     public TemperatureReading Read()
     {
+        EnsureInitialized();
+
         var cpuTemperatures = new List<double>();
         var gpuTemperatures = new List<double>();
         var discoveredSensors = new List<string>();
 
-        if (_hardwareMonitor is not null)
+        if (_hardwareMonitor is not null && !_initFailed)
         {
             try
             {
@@ -63,13 +74,24 @@ internal sealed class TemperatureSensorReader : IDisposable
 
     public void Dispose()
     {
-        try
+        var monitor = _hardwareMonitor;
+        _hardwareMonitor = null;
+        if (monitor is null)
         {
-            _hardwareMonitor?.Close();
+            return;
         }
-        catch
+
+        // Close on a background thread — LibreHardwareMonitor.Close() can be slow
+        Task.Run(() =>
         {
-        }
+            try
+            {
+                monitor.Close();
+            }
+            catch
+            {
+            }
+        });
     }
 
     private static void CollectTemperatures(
