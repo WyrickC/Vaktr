@@ -1046,6 +1046,26 @@ public sealed partial class ShellWindow
         headerGrid.Children.Add(labelStack);
         Grid.SetColumn(labelStack, 1);
 
+        var contentStack = new Grid();
+        contentStack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        contentStack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        contentStack.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        contentStack.Children.Add(headerGrid);
+        var captionText = CreateSecondaryText(caption, 11);
+        captionText.Margin = new Thickness(0, 12, 0, 0);
+        contentStack.Children.Add(captionText);
+        Grid.SetRow(captionText, 1);
+
+        var bodyContainer = new Border
+        {
+            Margin = new Thickness(0, 12, 0, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = body,
+        };
+        contentStack.Children.Add(bodyContainer);
+        Grid.SetRow(bodyContainer, 2);
+
         return new Border
         {
             Background = CreateSurfaceGradient("#0F1B2D", "#13243A"),
@@ -1053,17 +1073,8 @@ public sealed partial class ShellWindow
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(22),
             Padding = new Thickness(17, 15, 17, 15),
-            MinHeight = 214,
-            Child = new StackPanel
-            {
-                Spacing = 12,
-                Children =
-                {
-                    headerGrid,
-                    CreateSecondaryText(caption, 11),
-                    body,
-                },
-            },
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Child = contentStack,
         };
     }
 

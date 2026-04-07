@@ -56,7 +56,7 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly ActionChip _perProcessChartButton;
     private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly TextBlock _processExpandText;
+    private bool _processScrollLoadQueued;
     private bool _processSectionRevealed;
     private MetricPanelViewModel? _observedPanel;
     private bool _refreshQueued;
@@ -203,6 +203,13 @@ public sealed class TelemetryPanelCard : UserControl
             ZoomMode = ZoomMode.Disabled,
             Content = _legendHost,
         };
+        _legendScroller.PointerWheelChanged += (sender, e) =>
+        {
+            if (sender is ScrollViewer sv && sv.ScrollableHeight > 0)
+            {
+                e.Handled = true;
+            }
+        };
 
         _sortHighestButton = CreateProcessSortButton("Highest", ProcessSortMode.Highest);
         _sortLowestButton = CreateProcessSortButton("Lowest", ProcessSortMode.Lowest);
@@ -280,21 +287,43 @@ public sealed class TelemetryPanelCard : UserControl
         processColumns.Children.Add(_valueLabelText);
         Grid.SetColumn(_valueLabelText, 3);
 
-        _processExpandText = new TextBlock
+        // Capture scroll events — prevent them from bubbling to the main shell scroll
+        _processScroller.PointerWheelChanged += (sender, e) =>
         {
-            FontFamily = new FontFamily("Segoe UI Variable Text"),
-            FontSize = 10.5,
-            Foreground = ResolveBrush("AccentBrush", "#66E7FF"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Padding = new Thickness(0, 6, 0, 2),
-            Visibility = Visibility.Collapsed,
+            if (sender is ScrollViewer sv && sv.ScrollableHeight > 0)
+            {
+                e.Handled = true;
+            }
         };
-        var processExpandButton = new Border
+
+        // Load more processes when user scrolls near the bottom
+        _processScroller.ViewChanged += (_, _) =>
         {
-            Child = _processExpandText,
-            IsHitTestVisible = true,
+            if (_processScrollLoadQueued || Panel is null)
+            {
+                return;
+            }
+
+            var scrollableHeight = _processScroller.ScrollableHeight;
+            if (scrollableHeight <= 0)
+            {
+                return;
+            }
+
+            // When within 20px of the bottom, load more
+            if (_processScroller.VerticalOffset >= scrollableHeight - 20)
+            {
+                _processScrollLoadQueued = true;
+                _ = DispatcherQueue.TryEnqueue(() =>
+                {
+                    _processScrollLoadQueued = false;
+                    if (Panel is { } panel && !panel.ProcessListExpanded)
+                    {
+                        panel.ProcessListExpanded = true;
+                    }
+                });
+            }
         };
-        processExpandButton.Tapped += OnProcessExpandToggle;
 
         _processSection = new Border
         {
@@ -312,7 +341,6 @@ public sealed class TelemetryPanelCard : UserControl
                     processHeader,
                     processColumns,
                     _processScroller,
-                    processExpandButton,
                 },
             },
         };
@@ -774,7 +802,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             _processRowsHost.Children.Clear();
             _processRowParts.Clear();
-            _processExpandText.Visibility = Visibility.Collapsed;
+
             return;
         }
 
@@ -784,7 +812,7 @@ public sealed class TelemetryPanelCard : UserControl
             _processRowParts.Clear();
             _processRowsHost.Children.Clear();
             _processRowsHost.Children.Add(CreateEmptyText("Process table warming up"));
-            _processExpandText.Visibility = Visibility.Collapsed;
+
             return;
         }
 
@@ -816,7 +844,6 @@ public sealed class TelemetryPanelCard : UserControl
                     rp.MeterFill.Width = 32 * Math.Clamp(item.Intensity, 0d, 1d);
                 }
 
-                UpdateProcessExpandButton(panel);
                 return;
             }
         }
@@ -833,27 +860,6 @@ public sealed class TelemetryPanelCard : UserControl
             _processRowsHost.Children.Add(rowParts.Row);
         }
 
-        UpdateProcessExpandButton(panel);
-    }
-
-    private void UpdateProcessExpandButton(MetricPanelViewModel panel)
-    {
-        var total = panel.TotalProcessCount;
-        var showing = panel.ProcessRows.Count;
-        if (total > showing)
-        {
-            _processExpandText.Text = $"Show all {total} processes";
-            _processExpandText.Visibility = Visibility.Visible;
-        }
-        else if (panel.ProcessListExpanded && total > 30)
-        {
-            _processExpandText.Text = "Show fewer";
-            _processExpandText.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            _processExpandText.Visibility = Visibility.Collapsed;
-        }
     }
 
     private void RefreshVisualMode(MetricPanelViewModel? panel)
@@ -1168,14 +1174,6 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         Panel?.ApplyRangePreset(preset);
-    }
-
-    private void OnProcessExpandToggle(object sender, TappedRoutedEventArgs e)
-    {
-        if (Panel is { } panel)
-        {
-            panel.ProcessListExpanded = !panel.ProcessListExpanded;
-        }
     }
 
     private void OnPerProcessChartToggle(object? sender, EventArgs e)

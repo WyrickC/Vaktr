@@ -319,7 +319,7 @@ public sealed partial class ShellWindow : Window
                 CornerRadius = new CornerRadius(2),
                 Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
                 Opacity = 0.5,
-                Margin = new Thickness(0, 2, 0, 0),
+                Margin = new Thickness(0, 4, 0, 5),
             };
             var gaugeFill = new Border
             {
@@ -327,7 +327,7 @@ public sealed partial class ShellWindow : Window
                 CornerRadius = new CornerRadius(2),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Background = card.AccentBrush,
-                Margin = new Thickness(0, 2, 0, 0),
+                Margin = new Thickness(0, 4, 0, 5),
             };
             var gaugeHost = new Grid
             {
@@ -412,14 +412,29 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        foreach (var visual in _summaryCardVisuals)
+        for (var i = 0; i < _summaryCardVisuals.Count; i++)
         {
+            var visual = _summaryCardVisuals[i];
             visual.Surface.Background = CreateSurfaceGradient("#0F1C2D", "#15283F");
             visual.Surface.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
             visual.TitleText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
             visual.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             visual.CaptionText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
-            visual.BadgeHost.Child = IconFactory.CreateTile(visual.ViewModel.Title, visual.ViewModel.AccentBrush, 48, 16);
+
+            // Replace the entire badge tile — the outer Border has themed background/border
+            var newTile = (Border)IconFactory.CreateTile(visual.ViewModel.Title, visual.ViewModel.AccentBrush, 48, 16);
+            newTile.VerticalAlignment = VerticalAlignment.Center;
+            if (visual.BadgeHost.Parent is Grid parentGrid)
+            {
+                var idx = parentGrid.Children.IndexOf(visual.BadgeHost);
+                if (idx >= 0)
+                {
+                    parentGrid.Children.RemoveAt(idx);
+                    parentGrid.Children.Insert(idx, newTile);
+                }
+            }
+
+            _summaryCardVisuals[i] = visual with { BadgeHost = newTile };
         }
     }
 

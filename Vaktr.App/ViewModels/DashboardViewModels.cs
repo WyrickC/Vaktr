@@ -67,7 +67,7 @@ public sealed class MainViewModel : ObservableObject
             new SummaryCardViewModel("CPU", "CPU", BrushFactory.CreateBrush("#5DE6FF")),
             new SummaryCardViewModel("GPU", "GPU", BrushFactory.CreateBrush("#E87BFF")),
             new SummaryCardViewModel("RAM", "Memory", BrushFactory.CreateBrush("#7BF7D0")),
-            new SummaryCardViewModel("IO", "Disk", BrushFactory.CreateBrush("#FF9B54")),
+            new SummaryCardViewModel("Drive", "Drives", BrushFactory.CreateBrush("#FF9B54")),
         ];
 
         EnsureBaselinePanels();
@@ -587,10 +587,7 @@ public sealed class MainViewModel : ObservableObject
         var gpuMemoryGb = 0d;
         var usedMemory = 0d;
         var availableMemory = 0d;
-        var diskRead = 0d;
-        var diskWrite = 0d;
-        var netDown = 0d;
-        var netUp = 0d;
+        var driveUsages = new List<(string Label, double UsedPct)>();
 
         foreach (var sample in snapshot.Samples)
         {
@@ -610,19 +607,12 @@ public sealed class MainViewModel : ObservableObject
                 else if (string.Equals(sample.SeriesKey, "available-gb", StringComparison.OrdinalIgnoreCase))
                     availableMemory = sample.Value;
             }
-            else if (sample.Category == MetricCategory.Disk)
+            else if (sample.Category == MetricCategory.Disk &&
+                     sample.PanelKey.StartsWith("volume-", StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(sample.SeriesKey, "used-percent", StringComparison.OrdinalIgnoreCase))
             {
-                if (string.Equals(sample.SeriesKey, "read", StringComparison.OrdinalIgnoreCase))
-                    diskRead += sample.Value;
-                else if (string.Equals(sample.SeriesKey, "write", StringComparison.OrdinalIgnoreCase))
-                    diskWrite += sample.Value;
-            }
-            else if (sample.Category == MetricCategory.Network)
-            {
-                if (string.Equals(sample.SeriesKey, "download", StringComparison.OrdinalIgnoreCase))
-                    netDown += sample.Value;
-                else if (string.Equals(sample.SeriesKey, "upload", StringComparison.OrdinalIgnoreCase))
-                    netUp += sample.Value;
+                var driveLabel = sample.PanelTitle.Replace("Drive ", "").Replace(" Capacity", "");
+                driveUsages.Add((driveLabel, sample.Value));
             }
         }
 
@@ -646,9 +636,20 @@ public sealed class MainViewModel : ObservableObject
             $"{FormatCapacityForSummary(usedMemory)} of {FormatCapacityForSummary(totalMemory)}",
             memoryPct);
 
-        SummaryCards[3].Update(
-            $"{diskRead + diskWrite:0.0} MB/s",
-            $"{diskRead:0.0} read / {diskWrite:0.0} write");
+        // Disk card: show highest drive usage, caption lists all drives
+        if (driveUsages.Count > 0)
+        {
+            driveUsages.Sort((a, b) => b.UsedPct.CompareTo(a.UsedPct));
+            var highestPct = driveUsages[0].UsedPct;
+            var caption = driveUsages.Count == 1
+                ? $"{driveUsages[0].Label} drive"
+                : string.Join(" · ", driveUsages.ConvertAll(d => $"{d.Label} {d.UsedPct:0.#}%"));
+            SummaryCards[3].Update($"{highestPct:0.#}%", caption, highestPct);
+        }
+        else
+        {
+            SummaryCards[3].Update("--", "Waiting for drive data");
+        }
     }
 
     private static TimeRangePreset MapToRangePreset(int minutes) => minutes switch
@@ -1563,10 +1564,11 @@ public sealed class MetricPanelViewModel : ObservableObject
                 break;
             case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-memory", StringComparison.OrdinalIgnoreCase):
                 var dedicated = latestBySeries.GetValueOrDefault("Dedicated");
-                CurrentValue = $"{FormatCapacity(dedicated)} used";
-                SecondaryValue = "Dedicated graphics memory";
-                ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, Math.Max(1d, dedicated));
-                ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
+                var peakVram = ResolveDynamicCeiling(VisibleSeries, Math.Max(1d, dedicated));
+                CurrentValue = $"{FormatCapacity(dedicated)}";
+                SecondaryValue = $"Dedicated VRAM · peak {FormatCapacity(peakVram)}";
+                ChartCeilingValue = peakVram;
+                ScaleLabel = $"{FormatCapacity(peakVram)} peak";
                 break;
             case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase):
                 var gpuTemp = latestBySeries.GetValueOrDefault("Temperature");
