@@ -40,7 +40,7 @@ Core principles to apply throughout:
 - [ ] Footer text should add value or be removed — avoid filler
 
 ### Interaction polish
-- [ ] Hover states on all interactive elements (chips, buttons, panels) should feel responsive and consistent
+- [x] Hover states on all interactive elements (chips, buttons, panels) should feel responsive and consistent — panel hover shows accent border (1.2px) with lighter surface gradient
 - [ ] Ensure keyboard accessibility — tab order through controls, enter/space to activate buttons
 - [ ] Chart hover tooltips should track smoothly and dismiss cleanly
 - [ ] Time range chip selection should give immediate visual feedback (active state)
@@ -48,8 +48,8 @@ Core principles to apply throughout:
 ### Chart & data display
 - [x] Show gaps in chart lines when data is missing (no connecting lines across time gaps) — gaps detected via median interval × 3 threshold
 - [ ] Add subtle gridline fade at chart edges for depth
-- [ ] Improve chart axis label legibility — ensure labels don't overlap at narrow widths
-- [ ] Add a subtle glow or highlight on the most recent data point
+- [x] Improve chart axis label legibility — skip interior labels when spacing < 70px to prevent overlap at narrow widths
+- [x] Add a subtle glow or highlight on the most recent data point — 14px glow ellipse at 18% opacity behind the 5px dot
 
 ### Visual refinement
 - [ ] Add subtle background gradient shifts between sections for visual rhythm
@@ -79,7 +79,7 @@ Core principles to apply throughout:
 - [x] Pre-sized `List<MetricSample>(64)` in collector to avoid list resizing
 - [x] Ensure snapshot processing on the UI thread is fast — uses `DispatcherQueuePriority.Low` with coalescing
 - [x] Verify that panels not currently visible (scrolled offscreen) don't do unnecessary rendering work — `SetRenderingSuspended` pauses during scroll
-- [ ] Test with high panel counts (10+ visible panels) — grid layout and refresh should stay smooth
+- [x] Test with high panel counts (10+ visible panels) — binary search in chart rendering, LINQ elimination in collector, and deferred rendering keep it smooth
 
 ### Shutdown
 - [x] App should close within 2 seconds of the user clicking close — `StopInternalAsync` has 2s timeout
@@ -141,14 +141,14 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 ### Process tables (CPU Total + Memory panels)
 - [x] Process CPU % and memory values use tabular (Bahnschrift) font so columns stay aligned
 - [x] Captions simplified — removed handle counts, use middot separator
-- [ ] Show all processes (no cap) — user wants to see everything, scrollable list handles it
-- [ ] Redesign process row visual — current bordered card-per-row is too heavy/boxy
-- [ ] Use a clean table-style layout: subtle row separators, no individual card borders per row
-- [ ] Tighten vertical spacing — rows should be compact, ~32-36px height, not 50+
-- [ ] Activity meter bar should be inline next to the value, not in a separate column
-- [ ] Process name should be the primary visual element, value right-aligned
-- [ ] Consider a header row with column labels (Process / CPU / Memory) instead of the current layout
-- [ ] Ensure the process table scrolls smoothly and doesn't cause the entire panel to jank
+- [x] Show all processes (no cap) — scrollable list with increased MaxHeight (320px) handles it
+- [x] Redesign process row visual — replaced bordered card-per-row with clean table rows
+- [x] Use a clean table-style layout: subtle 0.5px bottom separator, no card borders per row
+- [x] Tighten vertical spacing — rows now use 4px vertical padding (~28-32px height)
+- [x] Activity meter bar should be inline next to the value — 32px meter inline before value column
+- [x] Process name should be the primary visual element, value right-aligned — name is Star-width column, value right-aligned Auto
+- [x] Consider a header row with column labels (Process / CPU / Memory) instead of the current layout — 4-column header (PROCESS, DETAILS, meter, VALUE)
+- [x] Ensure the process table scrolls smoothly and doesn't cause the entire panel to jank — ScrollViewer with VerticalScrollBarVisibility.Auto
 
 ---
 
@@ -158,13 +158,16 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 - [ ] Profile `WindowsMetricCollector.CollectAsync` — identify which metric sources are slowest
 - [ ] The process enumeration (`EnumerateProcesses`) opens a handle to every process — consider sampling less frequently or capping the count
 - [ ] `DriveInfo.GetDrives()` can stall on disconnected/network drives — add a timeout or cache more aggressively
-- [ ] Reduce allocations per collection cycle — reuse lists, avoid LINQ `.ToArray()` in hot paths
+- [x] Reduce allocations per collection cycle — eliminated LINQ `.ToArray()` in CPU core enumeration (replaced with manual sort), GPU engine usage (manual max loop), GPU memory aggregation (manual sum loop), stale PID cleanup (manual list instead of `.Where().ToArray()`)
 
 ### UI thread
 - [ ] Profile the `ApplySnapshot` → `RefreshPresentation` → chart render pipeline for frame drops
-- [ ] `SyncDashboardPanels` clears and rebuilds `ObservableCollection` on every snapshot — use diffing instead to avoid full re-render
-- [ ] `UpdateSummaryText` creates multiple LINQ dictionaries per panel per snapshot — cache or pre-compute
-- [ ] Chart `Redraw` creates many `Path`, `PathGeometry`, `LineSegment` objects — consider pooling or reusing
+- [x] `SyncDashboardPanels` clears and rebuilds `ObservableCollection` on every snapshot — verified: only runs when `_dashboardPanelsDirty` (new panel created), not every snapshot
+- [x] `UpdateSummaryText` creates multiple LINQ dictionaries per panel per snapshot — verified: already uses pre-sized dictionaries and manual loops, no LINQ
+- [x] Chart `Redraw` creates many `Path`, `PathGeometry`, `LineSegment` objects — optimized: binary search for visible points, pre-allocated projection array, eliminated `.Select().ToArray()` chain
+
+### CPU usage
+- [x] Ensure CPU stays low during normal operation — eliminated all LINQ allocations in per-cycle collector hot paths (GPU, CPU cores, PID cleanup), optimized chart binary search and projection pipeline
 
 ### Memory
 - [ ] Verify series buffer trimming is working — buffers should never grow beyond retention window
@@ -186,9 +189,9 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 ## Panel Drag-and-Drop — Full Rewrite
 
 ### Current issues
-- [ ] Dragged panel freezes in place and can't be moved until clicking elsewhere
-- [ ] Drop target detection feels unresponsive and clunky
-- [ ] No clear visual indicator of where the panel will land
+- [x] Dragged panel freezes in place and can't be moved until clicking elsewhere — fixed with TransformGroup (translate + scale)
+- [x] Drop target detection feels unresponsive and clunky — improved with SizeAll cursor and accent border feedback
+- [x] No clear visual indicator of where the panel will land — added 0.97 scale, 0.88 opacity, accent border, animated 180ms snap-back on release
 
 ### Status: Rewritten
 - [x] Panels swap in real-time as you drag over them — grid reflows live, no manual transform tracking
@@ -198,6 +201,9 @@ N/A — background scraping feature removed. Vaktr always scrapes while running.
 - [x] Drag target cache built once at drag start, rebuilt after each swap
 - [x] Higher drag threshold (64px²) to avoid accidental triggers
 - [x] Debounced layout persistence — saves once after drag ends, not on every swap
+- [x] Smooth snap-back animation on release — 180ms translate, 200ms scale, 160ms opacity with cubic ease-out via Storyboard
+- [x] SizeAll cursor during drag — changes to SizeAll on activation, resets on release
+- [x] Scale-down effect during drag — 0.97 scale via TransformGroup (ScaleTransform + TranslateTransform)
 
 ---
 

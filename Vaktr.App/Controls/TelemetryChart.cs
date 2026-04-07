@@ -324,9 +324,12 @@ public sealed class TelemetryChart : UserControl
 
             foreach (var segment in segments)
             {
-                var projected = NormalizeProjectedPoints(
-                        segment.Select(point => Project(point, LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue)))
-                    .ToArray();
+                var rawProjected = new Windows.Foundation.Point[segment.Count];
+                for (var pi = 0; pi < segment.Count; pi++)
+                {
+                    rawProjected[pi] = Project(segment[pi], LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue);
+                }
+                var projected = NormalizeProjectedPoints(rawProjected);
                 var strokeProjected = ResolveStrokePoints(projected);
 
                 if (strokeProjected.Count == 0)
@@ -368,6 +371,17 @@ public sealed class TelemetryChart : UserControl
             if (drawPointMarkers && renderablePoints.Count > 0)
             {
                 var lastPoint = Project(renderablePoints[^1], LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue);
+                // Subtle glow behind the most recent point
+                var glow = new Ellipse
+                {
+                    Width = 14,
+                    Height = 14,
+                    Fill = item.StrokeBrush,
+                    Opacity = 0.18,
+                };
+                Canvas.SetLeft(glow, lastPoint.X - 7);
+                Canvas.SetTop(glow, lastPoint.Y - 7);
+                _canvas.Children.Add(glow);
                 DrawPoint(lastPoint, item.StrokeBrush, 5);
             }
         }
@@ -461,6 +475,13 @@ public sealed class TelemetryChart : UserControl
             }
 
             if (!includeLabels)
+            {
+                continue;
+            }
+
+            // Skip interior labels at narrow widths to prevent overlap
+            var labelSpacing = plotWidth / divisions;
+            if (labelSpacing < 70 && index != 0 && index != divisions)
             {
                 continue;
             }
@@ -589,35 +610,52 @@ public sealed class TelemetryChart : UserControl
             return Array.Empty<MetricPoint>();
         }
 
-        var filtered = new List<MetricPoint>(points.Count);
-
-        for (var index = 0; index < points.Count; index++)
+        // Binary search for start index
+        var lo = 0;
+        var hi = points.Count - 1;
+        while (lo < hi)
         {
-            var point = points[index];
-            if (point.Timestamp >= start && point.Timestamp <= end)
+            var mid = lo + ((hi - lo) >> 1);
+            if (points[mid].Timestamp < start)
             {
-                filtered.Add(point);
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
             }
         }
 
-        if (filtered.Count > 0)
+        if (lo >= points.Count || points[lo].Timestamp > end)
         {
-            return filtered;
+            var nearest = FindNearestPoint(points, start);
+            return nearest is null
+                ? Array.Empty<MetricPoint>()
+                :
+                [
+                    new MetricPoint(start, nearest.Value),
+                    new MetricPoint(end, nearest.Value),
+                ];
         }
 
-        var nearest = FindNearestPoint(points, start);
-        return nearest is null
-            ? Array.Empty<MetricPoint>()
-            :
-            [
-                new MetricPoint(start, nearest.Value),
-                new MetricPoint(end, nearest.Value),
-            ];
+        // Count first to pre-size accurately
+        var count = 0;
+        for (var i = lo; i < points.Count && points[i].Timestamp <= end; i++)
+        {
+            count++;
+        }
+
+        var filtered = new List<MetricPoint>(count);
+        for (var i = lo; i < points.Count && points[i].Timestamp <= end; i++)
+        {
+            filtered.Add(points[i]);
+        }
+
+        return filtered;
     }
 
-    private static IReadOnlyList<Windows.Foundation.Point> NormalizeProjectedPoints(IEnumerable<Windows.Foundation.Point> points)
+    private static IReadOnlyList<Windows.Foundation.Point> NormalizeProjectedPoints(Windows.Foundation.Point[] source)
     {
-        var source = points as Windows.Foundation.Point[] ?? points.ToArray();
         if (source.Length == 0)
         {
             return source;

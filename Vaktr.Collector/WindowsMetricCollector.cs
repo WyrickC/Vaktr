@@ -151,17 +151,24 @@ public sealed class WindowsMetricCollector : IMetricCollector
             AddCpuUsageFallback(samples, timestamp);
         }
 
-        var cores = TryGetArrayValues(_cpuPerCoreCounter)
-            .Where(entry => int.TryParse(entry.Key, out _))
-            .OrderBy(entry => int.Parse(entry.Key, System.Globalization.CultureInfo.InvariantCulture));
+        var coreValues = TryGetArrayValues(_cpuPerCoreCounter);
+        var coreList = new List<(int Index, double Value)>(coreValues.Count);
+        foreach (var (key, val) in coreValues)
+        {
+            if (int.TryParse(key, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var coreIndex))
+            {
+                coreList.Add((coreIndex, val));
+            }
+        }
+        coreList.Sort((a, b) => a.Index.CompareTo(b.Index));
 
-        foreach (var (instance, value) in cores)
+        foreach (var (coreIdx, value) in coreList)
         {
             samples.Add(new MetricSample(
                 "cpu-cores",
                 "CPU Cores",
-                $"core-{instance}",
-                $"Core {instance}",
+                $"core-{coreIdx}",
+                $"Core {coreIdx}",
                 MetricCategory.Cpu,
                 MetricUnit.Percent,
                 Math.Clamp(value, 0d, 100d),
@@ -413,9 +420,17 @@ public sealed class WindowsMetricCollector : IMetricCollector
 
             if (shouldRefreshProcesses)
             {
-                foreach (var stalePid in _processCpuBaselines.Keys.Where(pid => !activePids.Contains(pid)).ToArray())
+                var stalePids = new List<int>();
+                foreach (var pid in _processCpuBaselines.Keys)
                 {
-                    _processCpuBaselines.Remove(stalePid);
+                    if (!activePids.Contains(pid))
+                    {
+                        stalePids.Add(pid);
+                    }
+                }
+                foreach (var pid in stalePids)
+                {
+                    _processCpuBaselines.Remove(pid);
                 }
 
                 _lastProcessActivityRefreshUtc = timestamp;
@@ -523,15 +538,24 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private void AddGpu(List<MetricSample> samples, DateTimeOffset timestamp)
     {
         var usageValues = TryGetArrayValues(_gpuEngineCounter);
-        var engineUsage = usageValues
-            .Where(entry =>
-                !string.IsNullOrWhiteSpace(entry.Key) &&
-                !entry.Key.Equals("_Total", StringComparison.OrdinalIgnoreCase) &&
-                !entry.Key.Contains("engtype_copy", StringComparison.OrdinalIgnoreCase))
-            .Select(entry => Math.Max(0d, entry.Value))
-            .ToArray();
+        var maxEngineUsage = -1d;
+        foreach (var (key, val) in usageValues)
+        {
+            if (string.IsNullOrWhiteSpace(key) ||
+                key.Equals("_Total", StringComparison.OrdinalIgnoreCase) ||
+                key.Contains("engtype_copy", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
 
-        if (engineUsage.Length > 0)
+            var clamped = Math.Max(0d, val);
+            if (clamped > maxEngineUsage)
+            {
+                maxEngineUsage = clamped;
+            }
+        }
+
+        if (maxEngineUsage >= 0d)
         {
             samples.Add(new MetricSample(
                 "gpu-total",
@@ -540,14 +564,19 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 "Usage",
                 MetricCategory.Gpu,
                 MetricUnit.Percent,
-                Math.Clamp(engineUsage.Max(), 0d, 100d),
+                Math.Clamp(maxEngineUsage, 0d, 100d),
                 timestamp));
         }
 
         var memoryValues = TryGetArrayValues(_gpuMemoryCounter);
-        var dedicatedBytes = memoryValues
-            .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && !entry.Key.Equals("_Total", StringComparison.OrdinalIgnoreCase))
-            .Sum(entry => Math.Max(0d, entry.Value));
+        var dedicatedBytes = 0d;
+        foreach (var (key, val) in memoryValues)
+        {
+            if (!string.IsNullOrWhiteSpace(key) && !key.Equals("_Total", StringComparison.OrdinalIgnoreCase))
+            {
+                dedicatedBytes += Math.Max(0d, val);
+            }
+        }
 
         if (dedicatedBytes > 0d)
         {
