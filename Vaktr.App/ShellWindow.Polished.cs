@@ -41,7 +41,7 @@ public sealed partial class ShellWindow : Window
     private readonly Grid _titleBarDragHost;
     private readonly ScrollViewer _scrollHost;
     private readonly Border _controlsBodyHost;
-    private readonly Border _brandHost;
+    private readonly Grid _brandHost;
     private readonly Grid _summaryHost;
     private readonly Grid _dashboardGrid;
     private readonly TextBlock _statusText;
@@ -107,6 +107,7 @@ public sealed partial class ShellWindow : Window
         {
             ColumnSpacing = 20,
             RowSpacing = 20,
+            ChildrenTransitions = [new RepositionThemeTransition()],
         };
         _globalRangeButton = CreateActionChip("15m", OnToggleGlobalRangeEditor, true);
         _globalRangeButton.MinWidth = 132;
@@ -1253,17 +1254,14 @@ public sealed partial class ShellWindow : Window
                 s_brandBitmapPath = imagePath;
             }
 
-            _brandHost.Width = 142;
-            _brandHost.Height = 142;
-            _brandHost.CornerRadius = new CornerRadius(0);
-            _brandHost.Background = null;
-            _brandHost.BorderThickness = new Thickness(0);
-            _brandHost.Padding = new Thickness(0);
-            _brandHost.Child = new Microsoft.UI.Xaml.Controls.Image
+            _brandHost.Width = 96;
+            _brandHost.Height = 96;
+            _brandHost.Children.Clear();
+            _brandHost.Children.Add(new Microsoft.UI.Xaml.Controls.Image
             {
                 Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
                 Source = s_brandBitmap,
-            };
+            });
             StartupTrace.Write("TryLoadBrandImage complete // polished-v19");
         }
         catch (Exception ex)

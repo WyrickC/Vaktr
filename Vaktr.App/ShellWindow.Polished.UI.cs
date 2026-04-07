@@ -836,24 +836,11 @@ public sealed partial class ShellWindow
             TextWrapping = TextWrapping.WrapWholeWords,
         };
 
-    private static Border CreateBrandPlaceholder() =>
+    private static Grid CreateBrandPlaceholder() =>
         new()
         {
-            Width = 142,
-            Height = 142,
-            Background = null,
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(0),
-            Child = new TextBlock
-            {
-                Text = "V",
-                FontFamily = new FontFamily("Segoe UI Variable Display"),
-                FontSize = 48,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = ResolveBrush("AccentBrush", "#66E7FF"),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
+            Width = 96,
+            Height = 96,
         };
 
     private static Border CreatePlaceholderCard(string title, string text) =>

@@ -911,6 +911,13 @@ public sealed class TelemetryPanelCard : UserControl
             }
 
             _isHeaderDragActive = true;
+
+            // Recalculate start so the card centers on the mouse
+            var cardBounds = TransformToVisual(root).TransformPoint(default);
+            _headerPointerStart = new Windows.Foundation.Point(
+                cardBounds.X + (ActualWidth / 2d),
+                cardBounds.Y + (ActualHeight / 2d));
+
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.BorderThickness = new Thickness(2);
             _cardBorder.Opacity = 0.8;
@@ -918,11 +925,11 @@ public sealed class TelemetryPanelCard : UserControl
             CacheDragTargets();
         }
 
-        // Card follows the mouse
+        // Card follows the mouse, centered
         _dragTransform.X = rootPoint.X - _headerPointerStart.X;
         _dragTransform.Y = rootPoint.Y - _headerPointerStart.Y;
 
-        // When pointer enters a different panel, swap immediately
+        // When pointer enters a different panel, swap positions
         var targetCard = ResolveDropTargetCard(e);
         if (targetCard is not null &&
             !ReferenceEquals(targetCard, _activeDropTargetCard) &&
@@ -933,12 +940,20 @@ public sealed class TelemetryPanelCard : UserControl
             if (!string.IsNullOrWhiteSpace(targetKey))
             {
                 PanelReorderRequested?.Invoke(this, new PanelReorderRequestedEventArgs(Panel.PanelKey, targetKey));
-                // After swap, the grid reflows. Reset the drag origin so the card
-                // snaps to its new grid position and continues following from there.
-                _headerPointerStart = rootPoint;
-                _dragTransform.X = 0;
-                _dragTransform.Y = 0;
-                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, CacheDragTargets);
+                // After swap, recalculate center from the new grid position
+                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+                {
+                    if (!_isHeaderDragActive || XamlRoot?.Content is not UIElement postSwapRoot)
+                    {
+                        return;
+                    }
+
+                    var newBounds = TransformToVisual(postSwapRoot).TransformPoint(default);
+                    _headerPointerStart = new Windows.Foundation.Point(
+                        newBounds.X + (ActualWidth / 2d) + _dragTransform.X,
+                        newBounds.Y + (ActualHeight / 2d) + _dragTransform.Y);
+                    CacheDragTargets();
+                });
             }
         }
 

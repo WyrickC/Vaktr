@@ -1558,7 +1558,7 @@ public sealed class MetricPanelViewModel : ObservableObject
             $"{process.ProcessId}",
             process.Name,
             $"{process.CpuPercent:0.#}%",
-            $"{FormatCapacity(process.MemoryGigabytes)} · {FormatCompactCount(process.ThreadCount)} threads",
+            $"{FormatCompactCount(process.ThreadCount)} threads · PID {process.ProcessId}",
             Math.Clamp(process.CpuPercent / 100d, 0d, 1d));
     }
 
