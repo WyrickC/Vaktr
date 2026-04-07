@@ -1,32 +1,53 @@
 # Vaktr Roadmap
 
+## Current Version: v1
+
 ## Planned
 
 ### CPU Temperature Monitoring
 CPU temperature sensors on AMD and Intel require kernel-level access (PCI config space / MSR registers) that Windows restricts to signed kernel drivers. Every monitoring app that shows CPU temps (HWiNFO, Core Temp, MSI Afterburner) ships a signed driver for this.
 
-LibreHardwareMonitor supports CPU temps through the [PawnIO](https://pawnio.eu/) kernel driver. The plan is to bundle PawnIO into a Vaktr installer so CPU temperatures work out of the box with no extra setup.
+LibreHardwareMonitor supports CPU temps through the [PawnIO](https://pawnio.eu/) kernel driver. The plan is to bundle PawnIO into the Vaktr installer so CPU temperatures work out of the box with no extra setup.
 
-**Dependencies:**
-- Build a proper installer (MSI or MSIX) for Vaktr distribution
-- Bundle PawnIO driver install into the Vaktr installer
-- CPU temp panel already exists in the UI — just needs live data
+**Status:** GPU temps work today. CPU temp panel exists in the UI — just needs the driver bundled.
 
-**Why not now:** Vaktr doesn't have an installer yet. Bundling a kernel driver requires a proper install/uninstall flow. GPU temps, CPU usage, memory, disk, network, and all other metrics work without a driver.
+### Panel Resizing
+Allow users to resize panels between standard (1x1), wide (2x1), and tall (1x2) sizes. Panel sizes would persist across sessions just like panel positions do today.
 
-### Vaktr Installer
-Build an MSI or MSIX installer for clean distribution. This is a prerequisite for bundling PawnIO and for features like auto-update.
+**Status:** Architecture designed, implementation deferred to a future release.
+
+### Notifications & Alerts
+Toast notifications when metrics cross configurable thresholds — e.g., CPU > 90%, memory > 85%, drive > 95% full. Gives you passive monitoring without keeping the window open.
+
+**Status:** Planned.
+
+### Data Export
+Export historical metric data as CSV or JSON for analysis in external tools. Useful for post-incident investigation, capacity planning, or just curiosity.
+
+**Status:** Planned.
+
+### Prometheus Metrics Endpoint
+Expose Vaktr's collected metrics via a local HTTP endpoint in Prometheus exposition format. This lets advanced users scrape Vaktr from a Prometheus instance for long-term storage, alerting, or multi-machine dashboards — bridging the gap between Vaktr's simplicity and Prometheus/Grafana's power.
+
+**Status:** Planned.
 
 ## Shipped
 
-### v0 — Local Telemetry Dashboard
+### v1 — Polished Local Telemetry Dashboard
 - Live time-series panels for CPU, GPU, memory, disk, network, system activity
+- At-a-glance summary cards with live utilization gauges and color-coded thresholds
 - GPU temperature monitoring (AMD and Nvidia, no driver needed)
-- Per-process CPU and memory breakdown
-- Drag-reorderable panels with per-panel and global time range controls
+- Per-process CPU and memory breakdown with chart toggle for top processes
+- Drag-and-drop panel reordering with direct swap and position persistence
 - Chart zoom (click-drag selection and preset ranges from 1m to 30d)
 - SQLite persistence with rolling retention and 1-minute rollups
-- Dark and light themes
-- Configurable scrape interval, retention, and storage path
-- Launch on startup / minimize to tray
-- Drive capacity gauges
+- Dark and light themes with instant switching
+- Configurable scrape interval (1–60s), retention (30m–90d), and storage path
+- Loading screen with animated startup sequence
+- Responsive 1/2/3 column layout with hysteresis breakpoints
+- WCAG AA compliant contrast ratios in both themes
+- Keyboard accessible controls
+- Instant shutdown with background cleanup
+- CI/CD pipeline with automated installer builds via Inno Setup
+- Basic telemetry collection and chart rendering
+- SQLite storage with retention
