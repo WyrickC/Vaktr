@@ -601,18 +601,17 @@ public sealed partial class ShellWindow : Window
             _collectorService = null;
             collectorService.SnapshotCollected -= OnSnapshotCollected;
             collectorService.CollectionFailed -= OnCollectionFailed;
-            // Fire-and-forget disposal — window closes immediately, cleanup runs in background
-            _ = Task.Run(async () =>
+            // Wait for disposal to complete so SQLite connections are properly closed
+            // and WAL is checkpointed before the process exits
+            try
             {
-                try
-                {
-                    await collectorService.DisposeAsync();
-                }
-                catch
-                {
-                    // Best-effort cleanup — process is exiting
-                }
-            });
+                Task.Run(async () => await collectorService.DisposeAsync())
+                    .GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Best-effort cleanup — process is exiting
+            }
         }
     }
 
@@ -1531,6 +1530,7 @@ public sealed partial class ShellWindow : Window
     {
         StartupTrace.Write("EnsureCollectorRunningAsync start");
         _collectorService ??= new CollectorService(new WindowsMetricCollector(), _metricStore);
+        StartupTrace.Write("CollectorService created");
         _collectorService.SnapshotCollected -= OnSnapshotCollected;
         _collectorService.CollectionFailed -= OnCollectionFailed;
         _collectorService.SnapshotCollected += OnSnapshotCollected;
@@ -1538,7 +1538,9 @@ public sealed partial class ShellWindow : Window
 
         _viewModel.StatusText = "Starting telemetry";
         UpdateStatusText();
+        StartupTrace.Write("Calling CollectorService.StartAsync");
         await _collectorService.StartAsync(config, CancellationToken.None);
+        StartupTrace.Write("CollectorService.StartAsync complete");
 
         if (!_summaryCardsBound)
         {
