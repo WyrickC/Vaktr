@@ -60,6 +60,7 @@ public sealed partial class ShellWindow : Window
     private readonly ActionChip _globalResetZoomButton;
 
     private CollectorService? _collectorService;
+    private Task? _pendingHistoryLoad;
     private nint _windowIconHandle;
     private bool _controlDeckEditableActive;
     private bool _dashboardRefreshQueued;
@@ -567,7 +568,7 @@ public sealed partial class ShellWindow : Window
         try
         {
             await EnsureCollectorRunningAsync(config);
-            _ = TryLoadHistoryAsync(config);
+            _pendingHistoryLoad = TryLoadHistoryAsync(config);
             StartupTrace.Write("Background startup complete // polished-v19");
         }
         catch (Exception ex)
@@ -595,6 +596,22 @@ public sealed partial class ShellWindow : Window
             _windowIconHandle = 0;
         }
 
+        // Wait for any in-flight history load to complete so its SQLite
+        // read connection is closed before the process exits
+        if (_pendingHistoryLoad is not null)
+        {
+            try
+            {
+                _pendingHistoryLoad.GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Best-effort — history load may have failed
+            }
+
+            _pendingHistoryLoad = null;
+        }
+
         if (_collectorService is not null)
         {
             var collectorService = _collectorService;
@@ -606,6 +623,20 @@ public sealed partial class ShellWindow : Window
             try
             {
                 Task.Run(async () => await collectorService.DisposeAsync())
+                    .GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Best-effort cleanup — process is exiting
+            }
+        }
+
+        // Ensure the metric store is fully disposed and WAL is checkpointed
+        if (_metricStore is IAsyncDisposable disposableStore)
+        {
+            try
+            {
+                Task.Run(async () => await disposableStore.DisposeAsync())
                     .GetAwaiter().GetResult();
             }
             catch
