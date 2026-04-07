@@ -90,6 +90,7 @@ public sealed class TelemetryPanelCard : UserControl
 
     public event EventHandler? PanelZoomResetRequested;
 
+
     public event EventHandler<PanelReorderRequestedEventArgs>? PanelReorderRequested;
 
     public event EventHandler? PanelDragEnded;
