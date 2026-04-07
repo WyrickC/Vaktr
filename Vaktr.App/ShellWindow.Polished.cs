@@ -1572,7 +1572,9 @@ public sealed partial class ShellWindow : Window
         StartupTrace.Write("Calling CollectorService.StartAsync");
         try
         {
-            await _collectorService.StartAsync(config, CancellationToken.None);
+            // Run entirely on a thread-pool thread so that ConfigureAwait(false)
+            // continuations inside StartAsync never resume on the UI thread
+            await Task.Run(() => _collectorService.StartAsync(config, CancellationToken.None));
             StartupTrace.Write("CollectorService.StartAsync complete");
         }
         catch (Exception ex)
