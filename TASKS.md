@@ -251,16 +251,42 @@ General polish pass on panels to improve readability and design quality.
 
 ## 4. UI/UX - New Features
 
-### 4.1 - Add 2d and 5d quick range presets
+### 4.1 - Add 2d, 5d, 30d, 90d, and 1y quick range presets
 **Priority:** High
 **Area:** `Vaktr.Core/Models/Enums.cs`, `Vaktr.App/ShellWindow.Polished.cs`, `Vaktr.App/Controls/TelemetryPanelCard.cs`, `Vaktr.App/ViewModels/DashboardViewModels.cs`
 
-Add 2-day and 5-day options to the quick range preset buttons for further drill-down into historical data.
+Add additional time range options to the quick range preset buttons for full historical drill-down.
+
+**New presets to add:**
+| Preset | Minutes | Button Label |
+|---|---|---|
+| TwoDays | 2,880 | 2d |
+| FiveDays | 7,200 | 5d |
+| ThirtyDays | 43,200 | 30d |
+| NinetyDays | 129,600 | 90d |
+| OneYear | 525,600 | 1y |
 
 **Implementation:**
-- Add `TwoDays = 2880` and `FiveDays = 7200` to `TimeRangePreset` enum
-- Add "2d" and "5d" buttons to the global range editor and per-panel range buttons
+- Add the new values to the `TimeRangePreset` enum (note: `ThirtyDays = 43200` already exists, verify no conflict)
+- Add buttons to the global range editor and per-panel range buttons
+- The global range editor may need a layout adjustment to fit additional buttons without crowding
 - Ensure `LoadHistoryAsync` and chart rendering handle these ranges efficiently (see performance tasks)
+- Longer ranges (30d, 90d, 1y) will likely require aggressive downsampling - verify the chart `Downsample()` point budget scales appropriately
+- Consider whether the retention setting should warn the user if they select a range longer than their configured retention
+
+### 4.1b - Fix time range presets not showing expected data
+**Priority:** High
+**Area:** `Vaktr.App/ViewModels/DashboardViewModels.cs`, `Vaktr.Store/Persistence/SqliteMetricStore.cs`, `Vaktr.App/Controls/TelemetryChart.cs`
+
+Time range presets don't always display the data they should. For example, selecting "30d" does not show the last 2 days of data even though that data exists in the database.
+
+**Investigation areas:**
+- `LoadHistoryAsync` query: verify the `$fromTimestamp` parameter is computed correctly from the selected range (`DateTimeOffset.UtcNow - TimeSpan.FromMinutes(selectedWindowMinutes)`)
+- Check if `LoadHistoryAsync` is only called once at startup and not re-called when the range changes - if so, the in-memory series buffers may not contain data for the full requested range
+- `MetricPanelViewModel.WindowStartUtc` / `WindowEndUtc` - verify these are set correctly when a range preset is applied
+- The chart may be rendering the correct time window but the backing data was never loaded from the database for that range
+- `ApplyRangePreset()` / `ApplyGlobalWindowRange()` - trace whether these trigger a fresh database query or just refilter in-memory data
+- If only in-memory data is used: the fix is to trigger `LoadHistoryAsync` with the appropriate `fromUtc` whenever the range changes to a window larger than what's currently in memory
 
 ### 4.2 - Allow selecting individual series for focused drill-down
 **Priority:** Medium
@@ -339,19 +365,21 @@ Review the security pipeline for coverage gaps.
 - [ ] Consider adding dependency license compliance checking
 - [ ] CODEOWNERS file for security-sensitive paths
 
-### 5.3 - Support installers for all CPU architectures
+### 5.3 - Support x64 + ARM64 installers, drop x86
 **Priority:** Medium
-**Area:** `.github/workflows/release.yml`, `installer/vaktr-setup.iss`
+**Area:** `.github/workflows/release.yml`, `installer/vaktr-setup.iss`, `Vaktr.App/Vaktr.App.csproj`
 
-The app supports x64, ARM64, and x86 architectures, but the release workflow and installer only build for x64.
+The release workflow and installer only build for x64. ARM64 should be added as a native target for Windows on ARM devices (Surface Pro X, Copilot+ PCs, Snapdragon X Elite/Plus). x86 (32-bit) should be dropped — Windows 11 doesn't support 32-bit, and 32-bit Windows 10 installs are negligible. Running x64 via emulation on ARM wastes CPU/battery, which is especially bad for an always-running monitoring tool.
 
 **Implementation:**
-- Add a build matrix to `release.yml` for win-x64, win-arm64 (and optionally win-x86)
-- Create separate publish outputs per architecture
-- Either create per-architecture installer exes or a single installer that detects architecture
-- Update the Inno Setup script to handle multiple architecture outputs
-- Update the GitHub Release to attach all architecture variants
-- Consider whether x86 support is worth maintaining (Windows 10+ on 32-bit is rare)
+- Remove `win-x86` from `RuntimeIdentifiers` in `Vaktr.App.csproj`
+- Remove x86 platform configurations from `Vaktr.sln`
+- Add a build matrix to `release.yml` for `[win-x64, win-arm64]`
+- Create separate publish outputs per architecture (`publish/x64`, `publish/arm64`)
+- Build two installer exes: `VaktrSetup-x64.exe` and `VaktrSetup-arm64.exe`
+- Update the Inno Setup script to accept an architecture parameter or create a second `.iss` variant
+- Update the GitHub Release to attach both installer variants
+- Update the `ci.yml` to also build ARM64 in the matrix for CI coverage
 
 ---
 
