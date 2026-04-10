@@ -331,7 +331,7 @@ Review the security pipeline for coverage gaps.
 
 **Checklist:**
 - [ ] `dotnet list --vulnerable` checks transitive dependencies - verify it catches all severity levels
-- [ ] Gitleaks scan uses `continue-on-error: true` - should this fail the pipeline?
+- [ ] Gitleaks scan uses `continue-on-error: true` - should this fail the pipeline? Yes.
 - [ ] Code quality job uses `TreatWarningsAsErrors=false` - consider enabling for security-relevant analyzers
 - [ ] Consider adding SAST (static application security testing) beyond the built-in Roslyn analyzers
 - [ ] Consider adding binary scanning of the published output
@@ -465,11 +465,5 @@ Add keyboard shortcuts for common actions:
 - `T` to toggle theme
 - `S` to open settings
 
-### 9.8 - Export visible chart data
-Allow exporting the currently visible chart data (after downsampling) as CSV for external analysis. This is on the ROADMAP.md already but could be a lightweight addition in v1.0.1.
-
-### 9.9 - Tray icon with quick stats
-The app supports `MinimizeToTray` but may not show a tray icon with current stats (CPU%, RAM%). A tray icon tooltip showing headline metrics would be useful for background monitoring.
-
-### 9.10 - Database size monitoring
+### 9.8 - Database size monitoring
 Show the current database file size somewhere in the Control Deck or status bar. Users with long retention windows should be aware of storage impact. Consider a warning when the database exceeds a threshold (e.g., 500 MB, 1 GB).
