@@ -153,23 +153,18 @@ public sealed class UsageGauge : UserControl
         return false;
     }
 
-    private CancellationTokenSource? _sizeChangedCts;
+    private bool _renderingSuspended;
 
     private void OnGaugeSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        _sizeChangedCts?.Cancel();
-        _sizeChangedCts = new CancellationTokenSource();
-        var token = _sizeChangedCts.Token;
-        _ = System.Threading.Tasks.Task.Delay(80, token).ContinueWith(_ =>
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (!token.IsCancellationRequested)
-                {
-                    ScheduleRedraw();
-                }
-            });
-        }, TaskScheduler.Default);
+        if (_renderingSuspended) return;
+        ScheduleRedraw();
+    }
+
+    public void SetRenderingSuspended(bool suspended)
+    {
+        _renderingSuspended = suspended;
+        if (!suspended) ScheduleRedraw();
     }
 
     private void ScheduleRedraw(DispatcherQueuePriority priority = DispatcherQueuePriority.Low)

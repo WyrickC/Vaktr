@@ -57,7 +57,7 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly ActionChip _sortNameButton;
     private readonly ActionChip _perProcessChartButton;
     private readonly Dictionary<string, (ClickableBorder Row, Border InnerBorder, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack, Ellipse? ChartDot)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private bool _processScrollLoadQueued;
     private bool _processSectionRevealed;
     private MetricPanelViewModel? _observedPanel;
@@ -278,22 +278,25 @@ public sealed class TelemetryPanelCard : UserControl
         processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        _processLabelText = CreateTextBlock(fontSize: 9.5);
+        _processLabelText = CreateTextBlock(fontSize: 9);
         _processLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _processLabelText.CharacterSpacing = 60;
+        _processLabelText.CharacterSpacing = 100;
+        _processLabelText.Opacity = 0.7;
         _processLabelText.Text = "PROCESS";
         processColumns.Children.Add(_processLabelText);
 
-        _activityLabelText = CreateTextBlock(fontSize: 9.5);
+        _activityLabelText = CreateTextBlock(fontSize: 9);
         _activityLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _activityLabelText.CharacterSpacing = 60;
+        _activityLabelText.CharacterSpacing = 100;
+        _activityLabelText.Opacity = 0.7;
         _activityLabelText.Text = "DETAILS";
         processColumns.Children.Add(_activityLabelText);
         Grid.SetColumn(_activityLabelText, 1);
 
-        _valueLabelText = CreateTextBlock(fontSize: 9.5);
+        _valueLabelText = CreateTextBlock(fontSize: 9);
         _valueLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _valueLabelText.CharacterSpacing = 60;
+        _valueLabelText.CharacterSpacing = 100;
+        _valueLabelText.Opacity = 0.7;
         _valueLabelText.Text = "VALUE";
         _valueLabelText.HorizontalAlignment = HorizontalAlignment.Right;
         processColumns.Children.Add(_valueLabelText);
@@ -468,7 +471,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             Background = CreateSurfaceGradient("#0E1B2C", "#13253A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1.2),
+            BorderThickness = new Thickness(0.8),
             CornerRadius = new CornerRadius(22),
             Padding = new Thickness(18, 16, 18, 16),
             Child = new Grid
@@ -605,6 +608,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         UpdateBadgeIcon(panel);
         _footerText.Text = panel.IsZoomed ? $"\u23F8 {panel.FooterText}" : panel.FooterText;
+        _footerText.FontStyle = panel.IsZoomed ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal;
         _footerText.Foreground = panel.IsZoomed
             ? ResolveBrush("AccentBrush", "#66E7FF")
             : ResolveBrush("TextMutedBrush", "#7D9AB6");
@@ -707,6 +711,23 @@ public sealed class TelemetryPanelCard : UserControl
         }
     }
 
+    /// <summary>Optimizes the panel for window resize — collapses heavy elements and flattens corners.</summary>
+    public void SetResizeMode(bool resizing)
+    {
+        _cardBorder.CornerRadius = new CornerRadius(resizing ? 4 : 22);
+        _chartFrame.CornerRadius = new CornerRadius(resizing ? 2 : 8);
+
+        // Suspend chart/gauge rendering only during resize
+        _chart.SetRenderingSuspended(resizing);
+
+        // Collapse charts and legends during resize so WinUI's layout engine
+        // skips measuring them entirely — this is the biggest layout cost saver
+        _chart.Visibility = resizing ? Visibility.Collapsed : Visibility.Visible;
+        _legendScroller.Visibility = resizing ? Visibility.Collapsed : Visibility.Visible;
+        _processSection.Visibility = resizing ? Visibility.Collapsed
+            : Panel?.SupportsProcessTable == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private static bool IsPriorityPanelProperty(string? propertyName)
     {
         return string.Equals(propertyName, nameof(MetricPanelViewModel.CurrentValue), StringComparison.Ordinal) ||
@@ -721,7 +742,7 @@ public sealed class TelemetryPanelCard : UserControl
         _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         _rangeShell.Background = CreateSurfaceGradient("#102031", "#15283E");
         _rangeShell.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _scalePill.Background = ResolveBrush("PanelOverlayBrush", "#112132");
+        _scalePill.Background = CreateSurfaceGradient("#101D2E", "#152840");
         _scalePill.BorderBrush = ResolveBrush("SurfaceStrongBrush", "#20364C");
         _chartFrame.Background = CreateSurfaceGradient("#0E1A2B", "#13263B");
         _chartFrame.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
@@ -913,6 +934,10 @@ public sealed class TelemetryPanelCard : UserControl
             var rowParts = CreateProcessRow(item, panel.AccentBrush);
             _processRowParts.Add(item.Key, rowParts);
             _processRowsHost.Children.Add(rowParts.Row);
+
+            // Click a process row to pin/unpin it to the chart
+            var capturedName = item.Name;
+            rowParts.Row.Tapped += (_, _) => Panel?.ToggleProcessPin(capturedName);
         }
 
     }
@@ -1078,7 +1103,7 @@ public sealed class TelemetryPanelCard : UserControl
         _cardBorder.BorderBrush = isHovered
             ? ResolveBrush("AccentBrush", "#66E7FF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _cardBorder.BorderThickness = new Thickness(isHovered ? 1.5 : 1.2);
+        _cardBorder.BorderThickness = new Thickness(isHovered ? 1.4 : 0.8);
 
         // Smooth opacity transition on hover for a polished feel
         var targetOpacity = isHovered ? 1.0 : 0.92;
@@ -1562,9 +1587,9 @@ public sealed class TelemetryPanelCard : UserControl
 
         var dot = new Ellipse
         {
-            Width = 7,
-            Height = 7,
-            Margin = new Thickness(0, 3, 9, 0),
+            Width = 8,
+            Height = 8,
+            Margin = new Thickness(0, 2, 8, 0),
             Fill = strokeBrush,
         };
         row.Children.Add(dot);
@@ -1612,9 +1637,11 @@ public sealed class TelemetryPanelCard : UserControl
         return (wrapper, border, nameText, valueText, dot);
     }
 
-    private static (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
+    private static (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack, Ellipse? ChartDot) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
     {
-        var nameText = new TextBlock
+        // Small color dot showing the process chart line color (if charted)
+        Ellipse? chartDot = null;
+        var nameContent = (FrameworkElement)new TextBlock
         {
             FontFamily = new FontFamily("Segoe UI Variable Text"),
             FontSize = 11.5,
@@ -1623,6 +1650,25 @@ public sealed class TelemetryPanelCard : UserControl
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        var nameText = (TextBlock)nameContent;
+
+        if (item.ChartColor is not null)
+        {
+            chartDot = new Ellipse
+            {
+                Width = 6,
+                Height = 6,
+                Fill = item.ChartColor,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+            };
+            var nameStack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children = { chartDot, nameText },
+            };
+            nameContent = nameStack;
+        }
 
         var captionText = new TextBlock
         {
@@ -1678,7 +1724,7 @@ public sealed class TelemetryPanelCard : UserControl
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        rowGrid.Children.Add(nameText);
+        rowGrid.Children.Add(nameContent);
         rowGrid.Children.Add(captionText);
         Grid.SetColumn(captionText, 1);
         rowGrid.Children.Add(meterTrack);
@@ -1693,7 +1739,7 @@ public sealed class TelemetryPanelCard : UserControl
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(0, 0, 0, 0.5),
             Child = rowGrid,
-        }, nameText, valueText, captionText, meterFill, meterTrack);
+        }, nameText, valueText, captionText, meterFill, meterTrack, chartDot);
     }
 
     private void UpdateBadgeIcon(MetricPanelViewModel? panel)

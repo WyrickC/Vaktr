@@ -941,13 +941,15 @@ public enum ProcessSortMode
 
 public sealed class ProcessListItemViewModel
 {
-    public ProcessListItemViewModel(string key, string name, string value, string caption, double intensity)
+    public ProcessListItemViewModel(string key, string name, string value, string caption, double intensity, bool isPinned = false, Brush? chartColor = null)
     {
         Key = key;
         Name = name;
         Value = value;
         Caption = caption;
         Intensity = intensity;
+        IsPinned = isPinned;
+        ChartColor = chartColor;
     }
 
     public string Key { get; }
@@ -959,6 +961,12 @@ public sealed class ProcessListItemViewModel
     public string Caption { get; }
 
     public double Intensity { get; }
+
+    /// <summary>Whether this process is pinned to the chart.</summary>
+    public bool IsPinned { get; }
+
+    /// <summary>The chart line color for this process (null if not charted).</summary>
+    public Brush? ChartColor { get; }
 }
 
 public sealed class MetricPanelViewModel : ObservableObject
@@ -988,8 +996,9 @@ public sealed class MetricPanelViewModel : ObservableObject
     private bool _perProcessChartsEnabled;
     private int _totalProcessCount;
     private string? _focusedSeriesKey;
-    private const int MaxProcessChartSeries = 5;
+    private const int MaxProcessChartSeries = 8;
     private const string ProcessSeriesPrefix = "proc:";
+    private readonly HashSet<string> _pinnedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
@@ -1212,6 +1221,33 @@ public sealed class MetricPanelViewModel : ObservableObject
             : "Process load";
 
     /// <summary>
+    /// Toggles whether a specific process is pinned to the chart.
+    /// Pinned processes always appear as chart series regardless of the top-N ranking.
+    /// </summary>
+    public void ToggleProcessPin(string processName)
+    {
+        if (string.IsNullOrWhiteSpace(processName)) return;
+
+        if (!_pinnedProcesses.Remove(processName))
+        {
+            _pinnedProcesses.Add(processName);
+        }
+
+        // Enable per-process charts automatically when a process is pinned
+        if (_pinnedProcesses.Count > 0 && !_perProcessChartsEnabled)
+        {
+            _perProcessChartsEnabled = true;
+            RaisePropertyChanged(nameof(PerProcessChartsEnabled));
+        }
+
+        RefreshPresentation();
+    }
+
+    /// <summary>Whether a specific process is pinned to the chart.</summary>
+    public bool IsProcessPinned(string processName) =>
+        _pinnedProcesses.Contains(processName);
+
+    /// <summary>
     /// When set, only this series is shown at full opacity; others are hidden.
     /// Set to null to show all series.
     /// </summary>
@@ -1359,27 +1395,42 @@ public sealed class MetricPanelViewModel : ObservableObject
         var timestamp = _latestPointTimestampUtc;
         var isMemoryPanel = string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
 
-        // Find top N processes by the relevant metric
+        // Build the set of processes to chart: pinned processes + top N by metric
         var sorted = new List<ProcessActivitySample>(detailContext.Processes);
         sorted.Sort((a, b) => isMemoryPanel
             ? b.MemoryGigabytes.CompareTo(a.MemoryGigabytes)
             : b.CpuPercent.CompareTo(a.CpuPercent));
 
-        var count = Math.Min(sorted.Count, MaxProcessChartSeries);
-        for (var i = 0; i < count; i++)
+        var charted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Always include pinned processes
+        foreach (var proc in sorted)
         {
-            var proc = sorted[i];
-            var value = isMemoryPanel ? proc.MemoryGigabytes : proc.CpuPercent;
-            if (value <= 0)
+            if (_pinnedProcesses.Contains(proc.Name))
             {
-                continue;
+                charted.Add(proc.Name);
             }
+        }
+
+        // Fill remaining slots with top N
+        foreach (var proc in sorted)
+        {
+            if (charted.Count >= MaxProcessChartSeries) break;
+            charted.Add(proc.Name);
+        }
+
+        foreach (var proc in sorted)
+        {
+            if (!charted.Contains(proc.Name)) continue;
+
+            var value = isMemoryPanel ? proc.MemoryGigabytes : proc.CpuPercent;
+            if (value <= 0) continue;
 
             var seriesKey = $"{ProcessSeriesPrefix}{proc.Name}";
             if (!_buffers.TryGetValue(seriesKey, out var buffer))
             {
-                // Offset palette by 10 to avoid clashing with existing series colors
-                var paletteIndex = 10 + i;
+                // Stable color based on process name hash — same process always gets same color
+                var paletteIndex = 10 + (Math.Abs(proc.Name.GetHashCode(StringComparison.OrdinalIgnoreCase)) % 12);
                 buffer = new SeriesBuffer(
                     seriesKey,
                     proc.Name,
@@ -1824,6 +1875,11 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private ProcessListItemViewModel CreateProcessRow(ProcessActivitySample process, double peakMemory)
     {
+        var isPinned = _pinnedProcesses.Contains(process.Name);
+        // Look up the chart color from the buffer if this process has a chart series
+        var seriesKey = $"{ProcessSeriesPrefix}{process.Name}";
+        Brush? chartColor = _perProcessChartsEnabled && _buffers.TryGetValue(seriesKey, out var buf) ? buf.StrokeBrush : null;
+
         if (string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase))
         {
             return new ProcessListItemViewModel(
@@ -1831,7 +1887,9 @@ public sealed class MetricPanelViewModel : ObservableObject
                 process.Name,
                 FormatCapacity(process.MemoryGigabytes),
                 $"{process.CpuPercent:0.#}% cpu · {FormatCompactCount(process.ThreadCount)} threads",
-                Math.Clamp(process.MemoryGigabytes / peakMemory, 0d, 1d));
+                Math.Clamp(process.MemoryGigabytes / peakMemory, 0d, 1d),
+                isPinned,
+                chartColor);
         }
 
         return new ProcessListItemViewModel(
@@ -1839,7 +1897,9 @@ public sealed class MetricPanelViewModel : ObservableObject
             process.Name,
             $"{process.CpuPercent:0.#}%",
             $"{FormatCompactCount(process.ThreadCount)} threads · PID {process.ProcessId}",
-            Math.Clamp(process.CpuPercent / 100d, 0d, 1d));
+            Math.Clamp(process.CpuPercent / 100d, 0d, 1d),
+            isPinned,
+            chartColor);
     }
 
     private SolidColorBrush ResolveBrush(int index)

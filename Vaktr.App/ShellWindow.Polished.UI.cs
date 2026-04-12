@@ -103,6 +103,7 @@ public sealed partial class ShellWindow
 
         root.Children.Add(_titleBarDragHost);
 
+        _shellBorderRef = shellBorder;
         _scrollHost.Content = new Border
         {
             Margin = new Thickness(24, 8, 24, 28),

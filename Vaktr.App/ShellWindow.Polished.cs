@@ -104,7 +104,8 @@ public sealed partial class ShellWindow : Window
 
         Title = "Vaktr";
 
-        _statusText = CreateSecondaryText(string.Empty, 12);
+        _statusText = CreateMutedText(string.Empty, 11);
+        _statusText.Opacity = 0.7;
         _controlsBodyHost = new Border();
         _brandHost = CreateBrandPlaceholder();
         _summaryHost = new Grid
@@ -196,6 +197,7 @@ public sealed partial class ShellWindow : Window
         Content = _rootLayout;
         SetTitleBar(_titleBarDragHost);
         ApplyInitialTheme(_viewModel.SelectedTheme);
+        InstallResizeHook();
 
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.DashboardPanels.CollectionChanged += OnDashboardPanelsChanged;
@@ -355,6 +357,7 @@ public sealed partial class ShellWindow : Window
             // Bind fill width and color to utilization
             card.PropertyChanged += (_, args) =>
             {
+                if (_isWindowResizing) return; // skip during resize
                 if (!string.Equals(args.PropertyName, nameof(SummaryCardViewModel.Utilization)))
                 {
                     return;
@@ -928,6 +931,20 @@ public sealed partial class ShellWindow : Window
     private void ApplyQueuedSnapshot()
     {
         _snapshotApplyQueued = false;
+
+        // During window resize, don't apply snapshots at all — keep them pending.
+        // Text/value updates cause WinUI layout invalidation which is the main
+        // source of resize stutter. The snapshot will be applied when resize ends.
+        if (_isWindowResizing)
+        {
+            if (_pendingSnapshot is not null)
+            {
+                _snapshotApplyQueued = true;
+                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, ApplyQueuedSnapshot);
+            }
+            return;
+        }
+
         var snapshot = _pendingSnapshot;
         _pendingSnapshot = null;
         if (snapshot is null)
@@ -1037,14 +1054,14 @@ public sealed partial class ShellWindow : Window
 
     private void OnScrollHostViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
+        if (_isWindowResizing) return; // no scroll handling during resize
+
         if (e.IsIntermediate)
         {
             SetPanelRenderingSuspended(true);
             return;
         }
 
-        // Scroll ended — resume rendering at normal priority so panels
-        // redraw promptly rather than waiting behind other low-priority work
         _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () => SetPanelRenderingSuspended(false));
     }
 
@@ -1075,50 +1092,95 @@ public sealed partial class ShellWindow : Window
         }
     }
 
-    private CancellationTokenSource? _resizeCts;
-    private double _lastResizeWidth;
+    private bool _isWindowResizing;
+    private Border? _shellBorderRef;
+
+    private void InstallResizeHook()
+    {
+        try
+        {
+            var hwnd = WindowNative.GetWindowHandle(this);
+            ResizeInterop.Install(hwnd,
+                onEnterResize: () => DispatcherQueue.TryEnqueue(() =>
+                {
+                    _isWindowResizing = true;
+
+                    // Cache the scroll content as a bitmap during resize so WinUI
+                    // stretches a raster image instead of re-rendering the visual tree
+                    if (_scrollHost.Content is UIElement scrollContent)
+                    {
+                        scrollContent.CacheMode = new BitmapCache();
+                    }
+
+                    // Flatten corner radii — rounded corners with composition
+                    // clipping are expensive during layout
+                    if (_shellBorderRef is not null)
+                    {
+                        _shellBorderRef.CornerRadius = new CornerRadius(0);
+                    }
+
+                    foreach (var card in _panelCards.Values)
+                    {
+                        card.SetRenderingSuspended(true);
+                        card.SetResizeMode(true);
+                    }
+                }),
+                onExitResize: () => DispatcherQueue.TryEnqueue(() =>
+                {
+                    _isWindowResizing = false;
+
+                    // Remove bitmap cache — back to live rendering
+                    if (_scrollHost.Content is UIElement scrollContent)
+                    {
+                        scrollContent.CacheMode = null;
+                    }
+
+                    if (_shellBorderRef is not null)
+                    {
+                        _shellBorderRef.CornerRadius = new CornerRadius(28);
+                    }
+
+                    var nextColumnCount = DetermineDashboardColumns();
+                    if (nextColumnCount != _lastDashboardColumnCount)
+                    {
+                        QueueDashboardRefresh();
+                    }
+                    else if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
+                    {
+                        BuildSummaryCards();
+                    }
+
+                    foreach (var card in _panelCards.Values)
+                    {
+                        card.SetResizeMode(false);
+                        card.SetRenderingSuspended(false);
+                    }
+                }));
+        }
+        catch
+        {
+            // Subclassing may fail in some hosts — fall back to SizeChanged
+        }
+    }
 
     private void OnRootLayoutSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (!_initialized)
+        // When the Win32 resize hook is active, skip all work here — the hook handles it
+        if (!_initialized || _isWindowResizing)
         {
             return;
         }
 
-        // Fast exit: if width hasn't changed meaningfully, skip all work.
-        // Height changes don't affect column layout at all.
-        var widthDelta = Math.Abs(e.NewSize.Width - _lastResizeWidth);
-        if (widthDelta < 2)
+        // Handle programmatic resizes (not drag) that don't trigger WM_ENTERSIZEMOVE
+        var nextColumnCount = DetermineDashboardColumns();
+        if (nextColumnCount != _lastDashboardColumnCount)
         {
-            return;
+            QueueDashboardRefresh();
         }
-
-        _lastResizeWidth = e.NewSize.Width;
-
-        // Cancel any pending layout update
-        _resizeCts?.Cancel();
-        _resizeCts = new CancellationTokenSource();
-        var token = _resizeCts.Token;
-
-        // Debounce: wait 120ms after the last resize event before doing layout work.
-        // During active drag-resize, this fires zero layout passes.
-        _ = System.Threading.Tasks.Task.Delay(120, token).ContinueWith(_ =>
+        else if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
         {
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (token.IsCancellationRequested) return;
-
-                var nextColumnCount = DetermineDashboardColumns();
-                if (nextColumnCount != _lastDashboardColumnCount)
-                {
-                    QueueDashboardRefresh();
-                }
-                else if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
-                {
-                    BuildSummaryCards();
-                }
-            });
-        }, TaskScheduler.Default);
+            BuildSummaryCards();
+        }
     }
 
     private void OnDashboardPanelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -1142,6 +1204,8 @@ public sealed partial class ShellWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_isWindowResizing) return; // no UI updates during resize
+
         if (string.Equals(e.PropertyName, nameof(MainViewModel.StatusText), StringComparison.Ordinal))
         {
             UpdateStatusText();
@@ -1642,9 +1706,17 @@ public sealed partial class ShellWindow : Window
         try
         {
             // Run entirely on a thread-pool thread so that ConfigureAwait(false)
-            // continuations inside StartAsync never resume on the UI thread
-            await Task.Run(() => _collectorService.StartAsync(config, CancellationToken.None));
+            // continuations inside StartAsync never resume on the UI thread.
+            // Timeout after 10 seconds — LibreHardwareMonitor or PDH can occasionally hang.
+            using var startCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await Task.Run(() => _collectorService.StartAsync(config, startCts.Token));
             StartupTrace.Write("CollectorService.StartAsync complete");
+        }
+        catch (OperationCanceledException)
+        {
+            StartupTrace.Write("CollectorService.StartAsync timed out — retrying without timeout");
+            // Retry without timeout in background — don't block startup
+            _ = Task.Run(() => _collectorService.StartAsync(config, CancellationToken.None));
         }
         catch (Exception ex)
         {
@@ -2051,6 +2123,48 @@ internal sealed record SummaryCardVisual(
     TextBlock CaptionText,
     Border BadgeHost,
     SummaryCardViewModel ViewModel);
+
+internal static class ResizeInterop
+{
+    private const uint WM_ENTERSIZEMOVE = 0x0231;
+    private const uint WM_EXITSIZEMOVE = 0x0232;
+    private const nint SubclassId = 1001;
+
+    private static Action? s_onEnterResize;
+    private static Action? s_onExitResize;
+    private static SubclassProc? s_procDelegate; // prevent GC collection
+
+    private delegate nint SubclassProc(nint hWnd, uint uMsg, nint wParam, nint lParam, nint uIdSubclass, nint dwRefData);
+
+    public static void Install(nint hwnd, Action onEnterResize, Action onExitResize)
+    {
+        s_onEnterResize = onEnterResize;
+        s_onExitResize = onExitResize;
+        s_procDelegate = SubclassCallback;
+        SetWindowSubclass(hwnd, s_procDelegate, SubclassId, 0);
+    }
+
+    private static nint SubclassCallback(nint hWnd, uint uMsg, nint wParam, nint lParam, nint uIdSubclass, nint dwRefData)
+    {
+        if (uMsg == WM_ENTERSIZEMOVE)
+        {
+            s_onEnterResize?.Invoke();
+        }
+        else if (uMsg == WM_EXITSIZEMOVE)
+        {
+            s_onExitResize?.Invoke();
+        }
+
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowSubclass(nint hWnd, SubclassProc pfnSubclass, nint uIdSubclass, nint dwRefData);
+
+    [DllImport("comctl32.dll")]
+    private static extern nint DefSubclassProc(nint hWnd, uint uMsg, nint wParam, nint lParam);
+}
 
 internal static class NativeWindowMethods
 {

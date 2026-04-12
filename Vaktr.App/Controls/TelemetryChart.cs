@@ -73,12 +73,13 @@ public sealed class TelemetryChart : UserControl
     private double _selectionStartX;
     private double _selectionCurrentX;
     private readonly List<(Border Tooltip, Line Marker)> _pinnedTooltips = [];
-    private CancellationTokenSource? _sizeChangedCts;
 
+
+    private static readonly FontFamily s_numericFont = new("Bahnschrift");
 
     public TelemetryChart()
     {
-        UseLayoutRounding = true;
+        UseLayoutRounding = false; // smoother diagonal lines on chart strokes
 
         _canvas = new Canvas();
         _interactionCanvas = new Canvas();
@@ -103,6 +104,7 @@ public sealed class TelemetryChart : UserControl
         };
         _hoverTooltipText = new TextBlock
         {
+            FontFamily = s_numericFont,
             FontSize = 10.5,
             TextWrapping = TextWrapping.Wrap,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
@@ -139,12 +141,15 @@ public sealed class TelemetryChart : UserControl
         {
             RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever,
         };
-        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.LinearDoubleKeyFrame
-            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.Zero), Value = 0.5 });
-        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.LinearDoubleKeyFrame
-            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1200)), Value = 1.0 });
-        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.LinearDoubleKeyFrame
-            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2400)), Value = 0.5 });
+        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.SplineDoubleKeyFrame
+            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.Zero), Value = 0.4,
+              KeySpline = new Microsoft.UI.Xaml.Media.Animation.KeySpline { ControlPoint1 = new Windows.Foundation.Point(0.4, 0), ControlPoint2 = new Windows.Foundation.Point(0.6, 1) } });
+        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.SplineDoubleKeyFrame
+            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1400)), Value = 1.0,
+              KeySpline = new Microsoft.UI.Xaml.Media.Animation.KeySpline { ControlPoint1 = new Windows.Foundation.Point(0.4, 0), ControlPoint2 = new Windows.Foundation.Point(0.6, 1) } });
+        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.SplineDoubleKeyFrame
+            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2800)), Value = 0.4,
+              KeySpline = new Microsoft.UI.Xaml.Media.Animation.KeySpline { ControlPoint1 = new Windows.Foundation.Point(0.4, 0), ControlPoint2 = new Windows.Foundation.Point(0.6, 1) } });
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(emptyPulse, _emptyStateText);
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(emptyPulse, "Opacity");
         var emptyStoryboard = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
@@ -222,21 +227,28 @@ public sealed class TelemetryChart : UserControl
 
     private void OnChartSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // Debounce size-changed redraws during window resize.
-        // Without this, every chart fires a redraw on every pixel of resize.
-        _sizeChangedCts?.Cancel();
-        _sizeChangedCts = new CancellationTokenSource();
-        var token = _sizeChangedCts.Token;
-        _ = System.Threading.Tasks.Task.Delay(80, token).ContinueWith(_ =>
+        // Skip if rendering is suspended (window resize) — the redraw will
+        // happen when rendering resumes via the deferred refresh path.
+        if (_renderingSuspended)
         {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (!token.IsCancellationRequested)
-                {
-                    ScheduleRedraw();
-                }
-            });
-        }, TaskScheduler.Default);
+            return;
+        }
+
+        ScheduleRedraw();
+    }
+
+    private bool _renderingSuspended;
+
+    /// <summary>Called by TelemetryPanelCard to suppress all redraws during resize.</summary>
+    public void SetRenderingSuspended(bool suspended)
+    {
+        _renderingSuspended = suspended;
+        if (!suspended)
+        {
+            // Force a redraw when coming out of suspension
+            _lastRenderedSeries = null;
+            ScheduleRedraw();
+        }
     }
 
     public void RefreshThemeResources()
@@ -326,7 +338,7 @@ public sealed class TelemetryChart : UserControl
             var emptyPlotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
             DrawPlotSurface(emptyPlotWidth, emptyPlotHeight);
             DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(0d), includeLabels: false);
-            _emptyStateText.Text = string.IsNullOrWhiteSpace(EmptyStateText) ? "Waiting for samples" : EmptyStateText;
+            _emptyStateText.Text = string.IsNullOrWhiteSpace(EmptyStateText) ? "\u23F3 Waiting for samples" : $"\u23F3 {EmptyStateText}";
             _emptyStateText.Visibility = Visibility.Visible;
             HideHover();
             return;
@@ -556,7 +568,7 @@ public sealed class TelemetryChart : UserControl
                 Width = plotWidth,
                 Height = plotHeight / divisions,
                 Fill = ResolveBrush("SurfaceGridBrush", index % 2 == 0 ? "#274768" : "#1B3650"),
-                Opacity = index % 2 == 0 ? 0.15 : 0.07,
+                Opacity = index % 2 == 0 ? 0.10 : 0.05,
             });
 
             Canvas.SetLeft(_canvas.Children[^1], LeftPadding);
@@ -570,7 +582,7 @@ public sealed class TelemetryChart : UserControl
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.58 : 0.34,
+                Opacity = index is 0 || index == divisions ? 0.40 : 0.20,
                 X1 = LeftPadding,
                 X2 = LeftPadding + plotWidth,
                 Y1 = y,
@@ -587,7 +599,7 @@ public sealed class TelemetryChart : UserControl
                 {
                     Stroke = gridBrush,
                     StrokeThickness = 1,
-                    Opacity = 0.18,
+                    Opacity = 0.12,
                     X1 = x,
                     X2 = x,
                     Y1 = TopPadding,
@@ -610,8 +622,9 @@ public sealed class TelemetryChart : UserControl
             var tick = start + TimeSpan.FromTicks((end - start).Ticks / divisions * index);
             var label = new TextBlock
             {
+                FontFamily = s_numericFont,
                 FontSize = 9,
-                Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
+                Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
                 Text = FormatTimeLabel(tick, end - start),
             };
             _canvas.Children.Add(label);
@@ -626,8 +639,8 @@ public sealed class TelemetryChart : UserControl
 
         var ceiling = new TextBlock
         {
+            FontFamily = s_numericFont,
             FontSize = 9,
-            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(maxValue, Unit),
         };
@@ -642,10 +655,11 @@ public sealed class TelemetryChart : UserControl
             var midY = TopPadding + (plotHeight / 2d);
             var midLabel = new TextBlock
             {
+                FontFamily = s_numericFont,
                 FontSize = 8.5,
                 Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
                 Text = FormatAxisValue(midValue, Unit),
-                Opacity = 0.7,
+                Opacity = 0.6,
             };
             _canvas.Children.Add(midLabel);
             Canvas.SetLeft(midLabel, LeftPadding);
@@ -654,8 +668,8 @@ public sealed class TelemetryChart : UserControl
 
         var floor = new TextBlock
         {
+            FontFamily = s_numericFont,
             FontSize = 9,
-            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(0d, Unit),
         };
@@ -1503,7 +1517,7 @@ public sealed class TelemetryChart : UserControl
         for (var i = 0; i < visibleLines; i++)
         {
             var line = lines[i];
-            builder.AppendLine($"\u2022 {line.Name}  {FormatAxisValue(line.Value, Unit)}");
+            builder.AppendLine($"\u25CF {line.Name}  {FormatAxisValue(line.Value, Unit)}");
         }
 
         if (lines.Count > 5)
