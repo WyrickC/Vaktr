@@ -10,7 +10,6 @@ namespace Vaktr.App;
 public sealed class App : Application
 {
     private ShellWindow? _window;
-    private bool _startupGuardActive = true;
 
     public static App CurrentApp => (App)Current;
 
@@ -87,7 +86,6 @@ public sealed class App : Application
 
     public void MarkStartupSettled()
     {
-        _startupGuardActive = false;
         StartupTrace.Write("Startup guard disarmed");
     }
 

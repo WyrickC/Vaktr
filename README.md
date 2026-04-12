@@ -25,32 +25,44 @@ Vaktr gives you **beautiful real-time charts, historical data, and zero configur
 ![Vaktr Live Board](Vaktr.App/Assets/dashboard2.png)
 
 ### At a Glance
-Four summary cards at the top with live utilization gauges — CPU, GPU, Memory, and Drives. Color-coded green/yellow/orange based on load so you can spot issues instantly.
+Four summary cards at the top with live utilization gauges — CPU, GPU, Memory, and Drives. Color-coded thresholds: green under 75%, yellow 75-90%, orange over 90%.
 
 ### Live Board
 Drag-and-drop telemetry panels with real-time time-series charts:
 
 | Metric | What's Tracked |
 |--------|---------------|
-| **CPU** | Total usage, per-core breakdown, clock frequency |
+| **CPU** | Total usage, per-core breakdown (sorted numerically), clock frequency |
 | **GPU** | Utilization, dedicated VRAM usage, temperature |
-| **Memory** | Used/available with percentage and total |
+| **Memory** | Used/available with percentage and accurate total from hardware |
 | **Disk** | Read/write throughput per drive, capacity gauges |
 | **Network** | Download/upload per interface |
-| **Processes** | Per-process CPU and memory with sortable tables |
+| **Processes** | Per-process CPU and memory with sortable tables and chart overlay |
 
-Each panel supports zoom (click-drag or presets from 1m to 30d), and panels can be reordered by dragging.
+**Chart features:**
+- Zoom via click-drag selection or quick range presets (1m, 5m, 15m, 1h, 2d, 5d, 7d, 30d, 90d, 1y)
+- Click a data point to pin a static tooltip with timestamp and values
+- Click a legend entry to isolate a single series for focused analysis
+- Panels freeze when zoomed into historical data so you can inspect without it shifting
+- Timestamps show dates when viewing data from previous days
+- Double-click to reset zoom and clear pinned tooltips
+
+Panels can be reordered by dragging.
 
 ### Control Deck
 
 ![Control Deck](Vaktr.App/Assets/control-deck.png)
 
-Adjust scrape cadence (1–60 seconds), data retention (30 minutes to 90 days), storage location, and theme — all from one place.
+Adjust scrape cadence (1-60 seconds), data retention (30 minutes to 90 days), storage location, and theme — all from one place.
 
 ## Install
 
 ### Download
-Grab the latest `VaktrSetup.exe` from [Releases](https://github.com/WyrickC/Vaktr/releases) and run it. That's it.
+Grab the latest installer from [Releases](https://github.com/WyrickC/Vaktr/releases):
+- **VaktrSetup-x64.exe** — Intel/AMD 64-bit (most PCs)
+- **VaktrSetup-ARM64.exe** — ARM-based Windows devices (Surface Pro X, Copilot+ PCs)
+
+Run it. That's it.
 
 ### Build from Source
 
@@ -67,7 +79,7 @@ Or open `Vaktr.sln` in Visual Studio, set `Vaktr.App` as startup, choose **Debug
 
 - Windows 10 1809+ (build 17763)
 - .NET 8 (bundled in the installer)
-- x64 processor
+- x64 or ARM64 processor
 
 ## How It Works
 
@@ -81,6 +93,7 @@ Vaktr.App         WinUI 3 desktop shell
 1. A background collector samples hardware counters every 2 seconds (configurable)
 2. Snapshots are stored in a local SQLite database with automatic retention pruning
 3. The UI updates live via dispatcher queue — charts, gauges, and process tables refresh in real time
+4. Deterministic min/max downsampling ensures stable, flicker-free chart rendering at any zoom level
 
 All data stays on your machine. No network calls, no telemetry, no cloud.
 
@@ -106,7 +119,7 @@ Your hardware data never leaves your PC.
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features including CPU temperature monitoring, panel resizing, notifications, data export, and Prometheus metrics endpoint.
+See [ROADMAP.md](ROADMAP.md) for planned features including CPU temperature monitoring, panel resizing, notifications, data export, Prometheus metrics endpoint, and in-game overlay.
 
 ## License
 

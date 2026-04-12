@@ -18,6 +18,12 @@ public sealed class ActionChip : UserControl
     private bool _isPressed;
     private string _text = string.Empty;
 
+    // Cached brushes to avoid allocating new gradient objects on every hover/state change
+    private Brush? _cachedIdleBg;
+    private Brush? _cachedHoverBg;
+    private Brush? _cachedAccentBg;
+    private bool _brushCacheIsLight;
+
     public ActionChip()
     {
         UseLayoutRounding = true;
@@ -74,6 +80,13 @@ public sealed class ActionChip : UserControl
             },
         };
         Content = _surface;
+
+        // Show hand cursor on hover to indicate clickable
+        Loaded += (_, _) =>
+        {
+            try { ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.Hand); }
+            catch { /* cursor not supported in all hosts */ }
+        };
 
         _surface.PointerEntered += OnPointerEntered;
         _surface.PointerExited += OnPointerExited;
@@ -147,6 +160,10 @@ public sealed class ActionChip : UserControl
 
     public void RefreshThemeResources()
     {
+        // Invalidate brush cache on theme change
+        _cachedIdleBg = null;
+        _cachedHoverBg = null;
+        _cachedAccentBg = null;
         UpdateVisualState();
     }
 
@@ -180,26 +197,57 @@ public sealed class ActionChip : UserControl
         var useAccent = _isActive || _isFilled;
         var isLight = IsLightPaletteActive();
 
+        // Rebuild cached brushes if theme changed or not yet created
+        if (_cachedIdleBg is null || _brushCacheIsLight != isLight)
+        {
+            _brushCacheIsLight = isLight;
+            if (isLight)
+            {
+                _cachedIdleBg = ResolveBrush("SurfaceElevatedBrush", "#F0F5FB");
+                _cachedHoverBg = ResolveBrush("SurfaceStrongBrush", "#E0EAF4");
+                _cachedAccentBg = ResolveBrush("AccentSoftBrush", "#C8E8F8");
+            }
+            else
+            {
+                _cachedIdleBg = CreateSurfaceGradient("#101A28", "#122031");
+                _cachedHoverBg = CreateSurfaceGradient("#132232", "#17293D");
+                _cachedAccentBg = CreateSurfaceGradient("#18344B", "#122437");
+            }
+        }
+
+        _surface.Background = useAccent
+            ? _cachedAccentBg
+            : _isHovered ? _cachedHoverBg : _cachedIdleBg;
+
         if (isLight)
         {
-            _surface.Background = useAccent
-                ? ResolveBrush("AccentSoftBrush", "#C8E8F8")
-                : ResolveBrush(_isHovered ? "SurfaceStrongBrush" : "SurfaceElevatedBrush", _isHovered ? "#E0EAF4" : "#F0F5FB");
             _surface.BorderBrush = useAccent
                 ? ResolveBrush("AccentStrongBrush", "#065A82")
                 : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#B0C4D8" : "#C4D2E2");
         }
         else
         {
-            _surface.Background = useAccent
-                ? CreateSurfaceGradient("#18344B", "#122437")
-                : CreateSurfaceGradient(_isHovered ? "#132232" : "#101A28", _isHovered ? "#17293D" : "#122031");
             _surface.BorderBrush = useAccent
                 ? ResolveBrush("AccentStrongBrush", "#9EEFFF")
                 : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#2C4866" : "#243D55");
         }
 
-        Opacity = _isPressed ? 0.82 : _isHovered ? 0.95 : 1.0;
+        // Smooth opacity transition for polished hover/press feel
+        var targetOpacity = _isPressed ? 0.82 : _isHovered ? 0.96 : 1.0;
+        if (Math.Abs(Opacity - targetOpacity) > 0.01)
+        {
+            var anim = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+            {
+                To = targetOpacity,
+                Duration = new Duration(TimeSpan.FromMilliseconds(_isPressed ? 50 : 100)),
+            };
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(anim, this);
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(anim, "Opacity");
+            var sb = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+            sb.Children.Add(anim);
+            sb.Begin();
+        }
+
         _label.Foreground = ResolveBrush("TextPrimaryBrush", isLight ? "#0A1824" : "#F2F8FF");
         _glow.Opacity = 0;
         _shine.Opacity = 0;

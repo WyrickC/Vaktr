@@ -407,7 +407,7 @@ public sealed class SqliteMetricStore : IMetricStore
             """
             PRAGMA optimize;
             PRAGMA wal_checkpoint(PASSIVE);
-            PRAGMA incremental_vacuum(64);
+            PRAGMA incremental_vacuum(512);
             """;
         await maintenanceCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }

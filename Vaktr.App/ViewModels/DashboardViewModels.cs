@@ -289,10 +289,17 @@ public sealed class MainViewModel : ObservableObject
         var detailContext = PanelDetailContext.FromSnapshot(snapshot);
         foreach (var panel in _panelLookup.Values)
         {
+            // Skip hidden panels to reduce per-tick work
+            if (!panel.IsVisible)
+            {
+                continue;
+            }
+
             panel.ApplyDetailContext(detailContext);
         }
 
-        StatusText = $"Last sample {snapshot.Timestamp.LocalDateTime:t}";
+        var panelCount = DashboardPanels.Count;
+        StatusText = $"Last sample {snapshot.Timestamp.LocalDateTime:t} · {panelCount} panels · {snapshot.Samples.Count} metrics";
         UpdateSummaryCards(snapshot, detailContext);
 
         if (panelCreated)
@@ -661,8 +668,12 @@ public sealed class MainViewModel : ObservableObject
         <= 60 => TimeRangePreset.OneHour,
         <= 720 => TimeRangePreset.TwelveHours,
         <= 1440 => TimeRangePreset.TwentyFourHours,
+        <= 2880 => TimeRangePreset.TwoDays,
+        <= 7200 => TimeRangePreset.FiveDays,
         <= 10080 => TimeRangePreset.SevenDays,
-        _ => TimeRangePreset.ThirtyDays,
+        <= 43200 => TimeRangePreset.ThirtyDays,
+        <= 129600 => TimeRangePreset.NinetyDays,
+        _ => TimeRangePreset.OneYear,
     };
 
     private static int ParseOptionalInt(string? text, int fallback, int minValue, int maxValue)
@@ -976,6 +987,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     private bool _processListExpanded;
     private bool _perProcessChartsEnabled;
     private int _totalProcessCount;
+    private string? _focusedSeriesKey;
     private const int MaxProcessChartSeries = 5;
     private const string ProcessSeriesPrefix = "proc:";
     private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
@@ -1170,9 +1182,9 @@ public sealed class MetricPanelViewModel : ObservableObject
                 return;
             }
 
-            // Remove process chart series when disabled
             if (!value)
             {
+                // Remove process chart series when disabled
                 var processKeys = new List<string>();
                 foreach (var key in _buffers.Keys)
                 {
@@ -1185,9 +1197,12 @@ public sealed class MetricPanelViewModel : ObservableObject
                 {
                     _buffers.Remove(key);
                 }
-            }
 
-            RefreshPresentation();
+                RefreshPresentation();
+            }
+            // When enabling, skip the expensive full rebuild — process series will
+            // appear on the next scrape via InjectPerProcessChartData, which already
+            // triggers RefreshPresentation through AppendSample.
         }
     }
 
@@ -1195,6 +1210,27 @@ public sealed class MetricPanelViewModel : ObservableObject
         string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase)
             ? "Process memory"
             : "Process load";
+
+    /// <summary>
+    /// When set, only this series is shown at full opacity; others are hidden.
+    /// Set to null to show all series.
+    /// </summary>
+    public string? FocusedSeriesKey
+    {
+        get => _focusedSeriesKey;
+        private set => SetProperty(ref _focusedSeriesKey, value);
+    }
+
+    /// <summary>
+    /// Toggles focus on a specific series. If the series is already focused, clears the focus.
+    /// </summary>
+    public void ToggleSeriesFocus(string? seriesKey)
+    {
+        FocusedSeriesKey = string.Equals(_focusedSeriesKey, seriesKey, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : seriesKey;
+        RefreshPresentation();
+    }
 
     public event EventHandler? ExpandRequested;
 
@@ -1257,11 +1293,23 @@ public sealed class MetricPanelViewModel : ObservableObject
             _buffers.Add(sample.SeriesKey, buffer);
         }
 
-        buffer.Points.Add(new MetricPoint(sample.Timestamp, sample.Value));
+        var point = new MetricPoint(sample.Timestamp, sample.Value);
+        buffer.Points.Add(point);
+        if (point.Value > buffer.TrackedPeak)
+        {
+            buffer.TrackedPeak = point.Value;
+        }
         _latestPointTimestampUtc = sample.Timestamp;
         if (sample.Timestamp - buffer.LastTrimUtc >= BufferTrimInterval)
         {
             TrimBuffers(sample.Timestamp);
+        }
+
+        // When zoomed into a historical range, buffer the data but don't re-render.
+        // The panel stays frozen so the user can inspect without it shifting.
+        if (IsZoomed)
+        {
+            return;
         }
 
         RefreshPresentation(sample.Timestamp);
@@ -1343,6 +1391,13 @@ public sealed class MetricPanelViewModel : ObservableObject
             }
 
             buffer.Points.Add(new MetricPoint(timestamp, value));
+
+            // Cap process series to a smaller budget (they accumulate per-process)
+            const int maxProcessPoints = 2000;
+            if (buffer.Points.Count > maxProcessPoints)
+            {
+                buffer.Points.RemoveRange(0, buffer.Points.Count - maxProcessPoints);
+            }
         }
     }
 
@@ -1419,6 +1474,7 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         _zoomWindowStartUtc = null;
         _zoomWindowEndUtc = null;
+        // Resume live rendering with all buffered data that accumulated while frozen
         RefreshPresentation();
     }
 
@@ -1431,6 +1487,7 @@ public sealed class MetricPanelViewModel : ObservableObject
         WindowEndUtc = end;
 
         var pointBudget = ResolveVisiblePointBudget(end - start);
+        var hasFocus = !string.IsNullOrEmpty(_focusedSeriesKey);
         var visibleSeries = new List<ChartSeriesViewModel>(_buffers.Count);
         foreach (var buffer in _buffers.Values)
         {
@@ -1445,7 +1502,20 @@ public sealed class MetricPanelViewModel : ObservableObject
                 continue;
             }
 
-            visibleSeries.Add(new ChartSeriesViewModel(buffer.Name, points, buffer.StrokeBrush, buffer.FillBrush));
+            // When a series is focused, dim unfocused series by using a low-opacity brush
+            // rather than hiding them entirely, so the user retains visual context.
+            var isFocused = !hasFocus || string.Equals(buffer.Key, _focusedSeriesKey, StringComparison.OrdinalIgnoreCase);
+            var strokeBrush = isFocused ? buffer.StrokeBrush : CreateDimmedBrush(buffer.StrokeBrush);
+            var fillBrush = isFocused ? buffer.FillBrush : CreateDimmedBrush(buffer.FillBrush);
+
+            visibleSeries.Add(new ChartSeriesViewModel(buffer.Key, buffer.Name, points, strokeBrush, fillBrush));
+        }
+
+        // Sort series for panels with numbered entries (e.g., CPU cores) so they
+        // appear in natural order: Core 0, Core 1, Core 2, ... rather than dictionary order.
+        if (string.Equals(PanelKey, "cpu-cores", StringComparison.OrdinalIgnoreCase))
+        {
+            visibleSeries.Sort((a, b) => NaturalCompareSeriesKey(a.Key, b.Key));
         }
 
         VisibleSeries = visibleSeries.ToArray();
@@ -1547,11 +1617,18 @@ public sealed class MetricPanelViewModel : ObservableObject
                 break;
             case MetricCategory.Memory:
                 var used = latestBySeries.GetValueOrDefault("Used");
-                // Read available from buffers directly since available-gb series is hidden from chart
-                var available = _buffers.TryGetValue("available-gb", out var availBuf) && availBuf.Points.Count > 0
-                    ? availBuf.Points[^1].Value
+                // Use total-gb from the collector (reports TotalPhys directly) for an accurate ceiling.
+                // Fallback to used + available if total-gb isn't available yet.
+                var total = _buffers.TryGetValue("total-gb", out var totalBuf) && totalBuf.Points.Count > 0
+                    ? totalBuf.Points[^1].Value
                     : 0d;
-                var total = used + available;
+                if (total <= 0d)
+                {
+                    var available = _buffers.TryGetValue("available-gb", out var availBuf) && availBuf.Points.Count > 0
+                        ? availBuf.Points[^1].Value
+                        : 0d;
+                    total = used + available;
+                }
                 var percent = total > 0 ? used / total * 100d : 0d;
                 UtilizationPercent = percent;
                 CurrentValue = $"{FormatCapacity(used)} used";
@@ -1635,9 +1712,10 @@ public sealed class MetricPanelViewModel : ObservableObject
             return false;
         }
 
-        // Memory panel: only show used-gb (hide available-gb to keep chart clean)
+        // Memory panel: only show used-gb (hide available-gb and total-gb to keep chart clean)
         if (string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(buffer.Key, "available-gb", StringComparison.OrdinalIgnoreCase))
+            (string.Equals(buffer.Key, "available-gb", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(buffer.Key, "total-gb", StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
@@ -1650,12 +1728,22 @@ public sealed class MetricPanelViewModel : ObservableObject
         return string.Equals(buffer.Key, "used-percent", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Maximum points per series buffer to cap memory usage.</summary>
+    private const int MaxBufferPointsPerSeries = 50_000;
+
     private void TrimBuffers(DateTimeOffset anchor)
     {
         var keepAfter = anchor - _retentionWindow;
         foreach (var buffer in _buffers.Values)
         {
             buffer.Points.RemoveAll(point => point.Timestamp < keepAfter);
+
+            // Hard cap to prevent unbounded memory growth on long retention windows
+            if (buffer.Points.Count > MaxBufferPointsPerSeries)
+            {
+                buffer.Points.RemoveRange(0, buffer.Points.Count - MaxBufferPointsPerSeries);
+            }
+
             buffer.LastTrimUtc = anchor;
         }
     }
@@ -1776,10 +1864,53 @@ public sealed class MetricPanelViewModel : ObservableObject
         return new SolidColorBrush(color);
     }
 
-    private SolidColorBrush ResolveFillBrush(int index)
+    private static Brush CreateDimmedBrush(Brush source)
+    {
+        if (source is SolidColorBrush solid)
+        {
+            var color = solid.Color;
+            return new SolidColorBrush(ColorHelper.FromArgb((byte)(color.A * 0.18), color.R, color.G, color.B));
+        }
+
+        // For gradient brushes (fill), just reduce overall opacity
+        if (source is LinearGradientBrush gradient)
+        {
+            var dimmed = new LinearGradientBrush
+            {
+                StartPoint = gradient.StartPoint,
+                EndPoint = gradient.EndPoint,
+            };
+            foreach (var stop in gradient.GradientStops)
+            {
+                var c = stop.Color;
+                dimmed.GradientStops.Add(new GradientStop
+                {
+                    Color = ColorHelper.FromArgb((byte)(c.A * 0.18), c.R, c.G, c.B),
+                    Offset = stop.Offset,
+                });
+            }
+            return dimmed;
+        }
+
+        return source;
+    }
+
+    private Brush ResolveFillBrush(int index)
     {
         var color = ResolveBrush(index).Color;
-        return new SolidColorBrush(ColorHelper.FromArgb(56, color.R, color.G, color.B));
+        // Gradient fill: series color at the top fading to transparent at the bottom.
+        // Creates a clean "mountain" silhouette like Grafana/Datadog dashboards.
+        return new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(0, 1),
+            GradientStops =
+            {
+                new GradientStop { Color = ColorHelper.FromArgb(64, color.R, color.G, color.B), Offset = 0 },
+                new GradientStop { Color = ColorHelper.FromArgb(12, color.R, color.G, color.B), Offset = 0.7 },
+                new GradientStop { Color = ColorHelper.FromArgb(0, color.R, color.G, color.B), Offset = 1.0 },
+            },
+        };
     }
 
     private static string FormatValue(double value, MetricUnit unit) => unit switch
@@ -1825,6 +1956,33 @@ public sealed class MetricPanelViewModel : ObservableObject
         return $"{value:0}";
     }
 
+    /// <summary>
+    /// Compares series keys with natural numeric ordering so "core-2" sorts before "core-10".
+    /// </summary>
+    private static int NaturalCompareSeriesKey(string a, string b)
+    {
+        // Extract trailing numeric suffix for natural sort
+        var numA = ExtractTrailingNumber(a);
+        var numB = ExtractTrailingNumber(b);
+        if (numA >= 0 && numB >= 0)
+        {
+            return numA.CompareTo(numB);
+        }
+
+        return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int ExtractTrailingNumber(string key)
+    {
+        var lastDash = key.LastIndexOf('-');
+        if (lastDash < 0 || lastDash >= key.Length - 1)
+        {
+            return -1;
+        }
+
+        return int.TryParse(key.AsSpan(lastDash + 1), out var num) ? num : -1;
+    }
+
     private static string FormatCapacity(double gigabytes)
     {
         if (gigabytes >= 1024d)
@@ -1835,17 +1993,21 @@ public sealed class MetricPanelViewModel : ObservableObject
         return $"{gigabytes:0.0} GiB";
     }
 
-    private static double ResolveDynamicCeiling(IReadOnlyList<ChartSeriesViewModel> series, double minimum)
+    private double ResolveDynamicCeiling(IReadOnlyList<ChartSeriesViewModel> series, double minimum)
     {
+        // Use tracked peak from buffers instead of iterating all visible points.
+        // This avoids O(N) iteration on every snapshot for panels with large datasets.
         var peak = minimum;
-        foreach (var item in series)
+        foreach (var buffer in _buffers.Values)
         {
-            foreach (var point in item.Points)
+            if (!ShouldShowSeries(buffer))
             {
-                if (point.Value > peak)
-                {
-                    peak = point.Value;
-                }
+                continue;
+            }
+
+            if (buffer.TrackedPeak > peak)
+            {
+                peak = buffer.TrackedPeak;
             }
         }
 
@@ -1893,38 +2055,128 @@ public sealed class MetricPanelViewModel : ObservableObject
                 hi = mid;
         }
 
-        var windowPoints = new List<MetricPoint>(Math.Min(points.Count - lo, pointBudget));
-        for (var index = lo; index < points.Count; index++)
+        // Count in-window points without copying first
+        var endIndex = lo;
+        while (endIndex < points.Count && points[endIndex].Timestamp <= end)
         {
-            var point = points[index];
-            if (point.Timestamp > end)
+            endIndex++;
+        }
+
+        var windowCount = endIndex - lo;
+        if (windowCount == 0)
+        {
+            return Array.Empty<MetricPoint>();
+        }
+
+        if (windowCount <= pointBudget)
+        {
+            var result = new MetricPoint[windowCount];
+            for (var i = 0; i < windowCount; i++)
             {
-                break;
+                result[i] = points[lo + i];
+            }
+            return result;
+        }
+
+        // Deterministic min/max bucket downsampling: divide the time window into
+        // fixed-width buckets based on absolute timestamps (not point indices).
+        // Within each bucket, keep the min and max values. This ensures the same
+        // time window always produces the same output regardless of when the render
+        // happens, eliminating flickering caused by index-based sampling shifts.
+        var bucketCount = pointBudget / 2;
+        if (bucketCount < 2) bucketCount = 2;
+        var windowMs = (end - start).TotalMilliseconds;
+        var bucketWidthMs = windowMs / bucketCount;
+        var startMs = (double)start.ToUnixTimeMilliseconds();
+
+        var sampled = new List<MetricPoint>(pointBudget + 2);
+        // Always include the first point for visual continuity
+        sampled.Add(points[lo]);
+
+        var bucketIndex = 0;
+        var bucketStartMs = startMs;
+        var bucketEndMs = startMs + bucketWidthMs;
+        var hasMin = false;
+        MetricPoint minPoint = points[lo];
+        MetricPoint maxPoint = points[lo];
+
+        for (var i = lo; i < endIndex; i++)
+        {
+            var point = points[i];
+            var pointMs = point.Timestamp.ToUnixTimeMilliseconds();
+
+            // Advance to the correct bucket
+            while (pointMs >= bucketEndMs && bucketIndex < bucketCount - 1)
+            {
+                // Emit the previous bucket's min/max
+                if (hasMin)
+                {
+                    if (minPoint.Timestamp <= maxPoint.Timestamp)
+                    {
+                        sampled.Add(minPoint);
+                        if (minPoint.Timestamp != maxPoint.Timestamp)
+                            sampled.Add(maxPoint);
+                    }
+                    else
+                    {
+                        sampled.Add(maxPoint);
+                        if (minPoint.Timestamp != maxPoint.Timestamp)
+                            sampled.Add(minPoint);
+                    }
+                }
+
+                bucketIndex++;
+                bucketStartMs = startMs + (bucketIndex * bucketWidthMs);
+                bucketEndMs = startMs + ((bucketIndex + 1) * bucketWidthMs);
+                hasMin = false;
             }
 
-            windowPoints.Add(point);
+            if (!hasMin)
+            {
+                minPoint = point;
+                maxPoint = point;
+                hasMin = true;
+            }
+            else
+            {
+                if (point.Value < minPoint.Value) minPoint = point;
+                if (point.Value > maxPoint.Value) maxPoint = point;
+            }
         }
 
-        if (windowPoints.Count <= pointBudget)
+        // Emit the last bucket
+        if (hasMin)
         {
-            return windowPoints.ToArray();
+            if (minPoint.Timestamp <= maxPoint.Timestamp)
+            {
+                sampled.Add(minPoint);
+                if (minPoint.Timestamp != maxPoint.Timestamp)
+                    sampled.Add(maxPoint);
+            }
+            else
+            {
+                sampled.Add(maxPoint);
+                if (minPoint.Timestamp != maxPoint.Timestamp)
+                    sampled.Add(minPoint);
+            }
         }
 
-        var sampled = new MetricPoint[pointBudget];
-        var step = (windowPoints.Count - 1d) / (pointBudget - 1d);
-        for (var index = 0; index < pointBudget; index++)
+        // Always include the last point for visual continuity
+        if (sampled.Count > 0 && sampled[^1].Timestamp != points[endIndex - 1].Timestamp)
         {
-            var sourceIndex = (int)Math.Round(index * step);
-            sampled[index] = windowPoints[Math.Clamp(sourceIndex, 0, windowPoints.Count - 1)];
+            sampled.Add(points[endIndex - 1]);
         }
 
-        return sampled;
+        return sampled.ToArray();
     }
 
     private static int ResolveVisiblePointBudget(TimeSpan window) => window switch
     {
+        _ when window >= TimeSpan.FromDays(365) => 160,
+        _ when window >= TimeSpan.FromDays(90) => 200,
         _ when window >= TimeSpan.FromDays(30) => 240,
         _ when window >= TimeSpan.FromDays(7) => 300,
+        _ when window >= TimeSpan.FromDays(2) => 360,
         _ when window >= TimeSpan.FromDays(1) => 380,
         _ when window >= TimeSpan.FromHours(12) => 460,
         _ when window >= TimeSpan.FromHours(1) => 560,
@@ -1933,6 +2185,16 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private static string FormatRangeLabel(int minutes)
     {
+        if (minutes >= 525600)
+        {
+            return "1y";
+        }
+
+        if (minutes >= 129600)
+        {
+            return "90d";
+        }
+
         if (minutes >= 43200)
         {
             return "30d";
@@ -1941,6 +2203,16 @@ public sealed class MetricPanelViewModel : ObservableObject
         if (minutes >= 10080)
         {
             return "7d";
+        }
+
+        if (minutes >= 7200)
+        {
+            return "5d";
+        }
+
+        if (minutes >= 2880)
+        {
+            return "2d";
         }
 
         if (minutes >= 1440)
@@ -1968,7 +2240,7 @@ public sealed class MetricPanelViewModel : ObservableObject
             string name,
             List<MetricPoint> points,
             SolidColorBrush strokeBrush,
-            SolidColorBrush fillBrush,
+            Brush fillBrush,
             DateTimeOffset lastTrimUtc)
         {
             Key = key;
@@ -1977,6 +2249,14 @@ public sealed class MetricPanelViewModel : ObservableObject
             StrokeBrush = strokeBrush;
             FillBrush = fillBrush;
             LastTrimUtc = lastTrimUtc;
+
+            // Compute initial peak from loaded history
+            var peak = 0d;
+            foreach (var point in points)
+            {
+                if (point.Value > peak) peak = point.Value;
+            }
+            TrackedPeak = peak;
         }
 
         public string Key { get; }
@@ -1987,21 +2267,27 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         public SolidColorBrush StrokeBrush { get; }
 
-        public SolidColorBrush FillBrush { get; }
+        public Brush FillBrush { get; }
 
         public DateTimeOffset LastTrimUtc { get; set; }
+
+        /// <summary>Tracked maximum value across all points, updated on append. Avoids O(N) scans.</summary>
+        public double TrackedPeak { get; set; }
     }
 }
 
 public sealed class ChartSeriesViewModel
 {
-    public ChartSeriesViewModel(string name, IReadOnlyList<MetricPoint> points, Brush strokeBrush, Brush fillBrush)
+    public ChartSeriesViewModel(string key, string name, IReadOnlyList<MetricPoint> points, Brush strokeBrush, Brush fillBrush)
     {
+        Key = key;
         Name = name;
         Points = points;
         StrokeBrush = strokeBrush;
         FillBrush = fillBrush;
     }
+
+    public string Key { get; }
 
     public string Name { get; }
 

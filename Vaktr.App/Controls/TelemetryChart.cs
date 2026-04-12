@@ -72,6 +72,9 @@ public sealed class TelemetryChart : UserControl
     private DispatcherQueuePriority _queuedRedrawPriority = DispatcherQueuePriority.Low;
     private double _selectionStartX;
     private double _selectionCurrentX;
+    private readonly List<(Border Tooltip, Line Marker)> _pinnedTooltips = [];
+    private CancellationTokenSource? _sizeChangedCts;
+
 
     public TelemetryChart()
     {
@@ -94,7 +97,8 @@ public sealed class TelemetryChart : UserControl
             Visibility = Visibility.Collapsed,
             Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
             StrokeThickness = 1,
-            Opacity = 0.45,
+            StrokeDashArray = new DoubleCollection { 4, 3 },
+            Opacity = 0.55,
             IsHitTestVisible = false,
         };
         _hoverTooltipText = new TextBlock
@@ -110,10 +114,11 @@ public sealed class TelemetryChart : UserControl
             Background = CreateSurfaceGradient("#15283B", "#203851"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(11, 8, 11, 8),
             Child = _hoverTooltipText,
             IsHitTestVisible = false,
+            Translation = new System.Numerics.Vector3(0, 0, 16), // Subtle elevation shadow
         };
         _interactionCanvas.Children.Add(_selectionRectangle);
         _interactionCanvas.Children.Add(_hoverLine);
@@ -157,13 +162,17 @@ public sealed class TelemetryChart : UserControl
         };
 
         Loaded += (_, _) => ScheduleRedraw();
-        SizeChanged += (_, _) => ScheduleRedraw();
+        SizeChanged += OnChartSizeChanged;
         PointerPressed += OnPointerPressed;
         PointerMoved += OnPointerMoved;
         PointerReleased += OnPointerReleased;
         PointerCaptureLost += OnPointerCaptureLost;
         PointerExited += (_, _) => HideHover();
-        DoubleTapped += (_, _) => ZoomResetRequested?.Invoke(this, EventArgs.Empty);
+        DoubleTapped += (_, _) =>
+        {
+            ClearPinnedTooltips();
+            ZoomResetRequested?.Invoke(this, EventArgs.Empty);
+        };
     }
 
     public event EventHandler<ChartZoomSelectionEventArgs>? ZoomSelectionRequested;
@@ -209,6 +218,25 @@ public sealed class TelemetryChart : UserControl
     private static void OnChartPropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
     {
         ((TelemetryChart)dependencyObject).ScheduleRedraw();
+    }
+
+    private void OnChartSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // Debounce size-changed redraws during window resize.
+        // Without this, every chart fires a redraw on every pixel of resize.
+        _sizeChangedCts?.Cancel();
+        _sizeChangedCts = new CancellationTokenSource();
+        var token = _sizeChangedCts.Token;
+        _ = System.Threading.Tasks.Task.Delay(80, token).ContinueWith(_ =>
+        {
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                if (!token.IsCancellationRequested)
+                {
+                    ScheduleRedraw();
+                }
+            });
+        }, TaskScheduler.Default);
     }
 
     public void RefreshThemeResources()
@@ -290,6 +318,7 @@ public sealed class TelemetryChart : UserControl
         _lastRenderedStart = WindowStartUtc;
         _lastRenderedEnd = WindowEndUtc;
         _lastRenderedCeiling = CeilingValue;
+
         if (!TryGetPointBounds(series, out var minTimestamp, out var maxTimestamp, out var maxObservedValue))
         {
             _canvas.Children.Clear();
@@ -388,22 +417,51 @@ public sealed class TelemetryChart : UserControl
                 });
             }
 
-            if (drawPointMarkers && renderablePoints.Count > 0)
+            // Draw latest-point marker only for primary (non-dimmed) series
+            // Skip if the stroke brush has very low alpha (dimmed/unfocused series)
+            var isDimmed = item.StrokeBrush is SolidColorBrush scb && scb.Color.A < 80;
+            if (drawPointMarkers && renderablePoints.Count > 0 && !isDimmed)
             {
                 var lastPoint = Project(renderablePoints[^1], LeftPadding, TopPadding, plotWidth, plotHeight, start, end, maxValue);
-                // Subtle glow behind the most recent point
                 var glow = new Ellipse
                 {
                     Width = 14,
                     Height = 14,
                     Fill = item.StrokeBrush,
-                    Opacity = 0.18,
+                    Opacity = 0.22,
                 };
                 Canvas.SetLeft(glow, lastPoint.X - 7);
                 Canvas.SetTop(glow, lastPoint.Y - 7);
                 _canvas.Children.Add(glow);
-                DrawPoint(lastPoint, item.StrokeBrush, 5);
+                DrawPoint(lastPoint, item.StrokeBrush, 5.5);
             }
+        }
+
+        // "Now" marker — subtle accent tick at the right edge of real-time charts
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var endMs2 = end.ToUnixTimeMilliseconds();
+        var startMs2 = start.ToUnixTimeMilliseconds();
+        if (Math.Abs(nowMs - endMs2) < 120_000 && endMs2 > startMs2)
+        {
+            var nowX = LeftPadding + (plotWidth * Math.Clamp((double)(nowMs - startMs2) / (endMs2 - startMs2), 0d, 1d));
+            var nowTriangle = new Path
+            {
+                Fill = ResolveBrush("AccentBrush", "#66E7FF"),
+                Opacity = 0.7,
+            };
+            var nowFigure = new PathFigure
+            {
+                StartPoint = new Windows.Foundation.Point(nowX, TopPadding + plotHeight - 6),
+                IsClosed = true,
+                IsFilled = true,
+                Segments = new PathSegmentCollection
+                {
+                    new LineSegment { Point = new Windows.Foundation.Point(nowX - 3, TopPadding + plotHeight) },
+                    new LineSegment { Point = new Windows.Foundation.Point(nowX + 3, TopPadding + plotHeight) },
+                },
+            };
+            nowTriangle.Data = new PathGeometry { Figures = { nowFigure } };
+            _canvas.Children.Add(nowTriangle);
         }
     }
 
@@ -569,6 +627,7 @@ public sealed class TelemetryChart : UserControl
         var ceiling = new TextBlock
         {
             FontSize = 9,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(maxValue, Unit),
         };
@@ -576,9 +635,27 @@ public sealed class TelemetryChart : UserControl
         Canvas.SetLeft(ceiling, LeftPadding);
         Canvas.SetTop(ceiling, 2);
 
+        // Mid-point Y-axis label for context
+        if (maxValue > 0 && plotHeight >= 80)
+        {
+            var midValue = maxValue / 2d;
+            var midY = TopPadding + (plotHeight / 2d);
+            var midLabel = new TextBlock
+            {
+                FontSize = 8.5,
+                Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
+                Text = FormatAxisValue(midValue, Unit),
+                Opacity = 0.7,
+            };
+            _canvas.Children.Add(midLabel);
+            Canvas.SetLeft(midLabel, LeftPadding);
+            Canvas.SetTop(midLabel, midY - 6);
+        }
+
         var floor = new TextBlock
         {
             FontSize = 9,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(0d, Unit),
         };
@@ -628,12 +705,86 @@ public sealed class TelemetryChart : UserControl
             return points;
         }
 
-        var sampled = new List<MetricPoint>(maxPoints);
-        var step = (points.Count - 1d) / (maxPoints - 1d);
-        for (var index = 0; index < maxPoints; index++)
+        // Deterministic min/max bucket downsampling: divide into fixed-width time
+        // buckets and keep the min and max value per bucket (in chronological order).
+        // This produces stable output regardless of when the render occurs.
+        var bucketCount = maxPoints / 2;
+        if (bucketCount < 2) bucketCount = 2;
+
+        var startMs = points[0].Timestamp.ToUnixTimeMilliseconds();
+        var endMs = points[^1].Timestamp.ToUnixTimeMilliseconds();
+        var rangeMs = Math.Max(1d, endMs - startMs);
+        var bucketWidthMs = rangeMs / bucketCount;
+
+        var sampled = new List<MetricPoint>(maxPoints + 2);
+        sampled.Add(points[0]);
+
+        var bucketIndex = 0;
+        var bucketEndMs = startMs + bucketWidthMs;
+        var hasMin = false;
+        MetricPoint minPoint = points[0];
+        MetricPoint maxPoint = points[0];
+
+        for (var i = 0; i < points.Count; i++)
         {
-            var sourceIndex = (int)Math.Round(index * step);
-            sampled.Add(points[Math.Clamp(sourceIndex, 0, points.Count - 1)]);
+            var point = points[i];
+            var pointMs = point.Timestamp.ToUnixTimeMilliseconds();
+
+            while (pointMs >= bucketEndMs && bucketIndex < bucketCount - 1)
+            {
+                if (hasMin)
+                {
+                    if (minPoint.Timestamp <= maxPoint.Timestamp)
+                    {
+                        sampled.Add(minPoint);
+                        if (minPoint.Timestamp != maxPoint.Timestamp)
+                            sampled.Add(maxPoint);
+                    }
+                    else
+                    {
+                        sampled.Add(maxPoint);
+                        if (minPoint.Timestamp != maxPoint.Timestamp)
+                            sampled.Add(minPoint);
+                    }
+                }
+
+                bucketIndex++;
+                bucketEndMs = startMs + ((bucketIndex + 1) * bucketWidthMs);
+                hasMin = false;
+            }
+
+            if (!hasMin)
+            {
+                minPoint = point;
+                maxPoint = point;
+                hasMin = true;
+            }
+            else
+            {
+                if (point.Value < minPoint.Value) minPoint = point;
+                if (point.Value > maxPoint.Value) maxPoint = point;
+            }
+        }
+
+        if (hasMin)
+        {
+            if (minPoint.Timestamp <= maxPoint.Timestamp)
+            {
+                sampled.Add(minPoint);
+                if (minPoint.Timestamp != maxPoint.Timestamp)
+                    sampled.Add(maxPoint);
+            }
+            else
+            {
+                sampled.Add(maxPoint);
+                if (minPoint.Timestamp != maxPoint.Timestamp)
+                    sampled.Add(minPoint);
+            }
+        }
+
+        if (sampled.Count > 0 && sampled[^1].Timestamp != points[^1].Timestamp)
+        {
+            sampled.Add(points[^1]);
         }
 
         return sampled;
@@ -652,8 +803,11 @@ public sealed class TelemetryChart : UserControl
 
         var windowFactor = window switch
         {
+            _ when window >= TimeSpan.FromDays(365) => 0.14d,
+            _ when window >= TimeSpan.FromDays(90) => 0.18d,
             _ when window >= TimeSpan.FromDays(30) => 0.24d,
             _ when window >= TimeSpan.FromDays(7) => 0.3d,
+            _ when window >= TimeSpan.FromDays(2) => 0.34d,
             _ when window >= TimeSpan.FromDays(1) => 0.38d,
             _ when window >= TimeSpan.FromHours(12) => 0.5d,
             _ when window >= TimeSpan.FromHours(1) => 0.66d,
@@ -701,17 +855,23 @@ public sealed class TelemetryChart : UserControl
                 ];
         }
 
-        // Count first to pre-size accurately
-        var count = 0;
-        for (var i = lo; i < points.Count && points[i].Timestamp <= end; i++)
+        // Find end index with a single scan, then slice as an array
+        var endIdx = lo;
+        while (endIdx < points.Count && points[endIdx].Timestamp <= end)
         {
-            count++;
+            endIdx++;
         }
 
-        var filtered = new List<MetricPoint>(count);
-        for (var i = lo; i < points.Count && points[i].Timestamp <= end; i++)
+        var count = endIdx - lo;
+        if (count == 0)
         {
-            filtered.Add(points[i]);
+            return Array.Empty<MetricPoint>();
+        }
+
+        var filtered = new MetricPoint[count];
+        for (var i = 0; i < count; i++)
+        {
+            filtered[i] = points[lo + i];
         }
 
         return filtered;
@@ -753,8 +913,18 @@ public sealed class TelemetryChart : UserControl
         }
 
         var startIndex = ResolveLeadingArtifactTrimIndex(points);
+        if (startIndex == 0)
+        {
+            return points;
+        }
 
-        return startIndex == 0 ? points : points.Skip(startIndex).ToArray();
+        var result = new Windows.Foundation.Point[points.Count - startIndex];
+        for (var i = 0; i < result.Length; i++)
+        {
+            result[i] = points[startIndex + i];
+        }
+
+        return result;
     }
 
     private static IReadOnlyList<Windows.Foundation.Point> ResolveFillPoints(IReadOnlyList<Windows.Foundation.Point> points)
@@ -771,15 +941,35 @@ public sealed class TelemetryChart : UserControl
             return points;
         }
 
-        var candidatePoints = startIndex == 0 ? points : points.Skip(startIndex).ToArray();
-        if (candidatePoints.Count > 1 &&
-            candidatePoints[0].X <= LeftPadding + 20d &&
-            candidatePoints[1].X - candidatePoints[0].X >= 28d)
+        if (startIndex > 0)
         {
-            return candidatePoints.Skip(1).ToArray();
+            var sliced = new Windows.Foundation.Point[points.Count - startIndex];
+            for (var i = 0; i < sliced.Length; i++)
+                sliced[i] = points[startIndex + i];
+
+            if (sliced.Length > 1 &&
+                sliced[0].X <= LeftPadding + 20d &&
+                sliced[1].X - sliced[0].X >= 28d)
+            {
+                var trimmed = new Windows.Foundation.Point[sliced.Length - 1];
+                Array.Copy(sliced, 1, trimmed, 0, trimmed.Length);
+                return trimmed;
+            }
+
+            return sliced;
         }
 
-        return candidatePoints;
+        if (points.Count > 1 &&
+            points[0].X <= LeftPadding + 20d &&
+            points[1].X - points[0].X >= 28d)
+        {
+            var trimmed = new Windows.Foundation.Point[points.Count - 1];
+            for (var i = 0; i < trimmed.Length; i++)
+                trimmed[i] = points[i + 1];
+            return trimmed;
+        }
+
+        return points;
     }
 
     private static int ResolveLeadingArtifactTrimIndex(IReadOnlyList<Windows.Foundation.Point> points)
@@ -819,29 +1009,33 @@ public sealed class TelemetryChart : UserControl
         maxObservedValue = 0d;
         var found = false;
 
+        // Points within each series are sorted by timestamp, so we can use
+        // first/last for timestamp bounds. Only value needs full scan, but
+        // the ViewModel already downsamples to a small point budget.
         foreach (var item in series)
         {
+            if (item.Points.Count == 0)
+            {
+                continue;
+            }
+
+            var seriesMin = item.Points[0].Timestamp;
+            var seriesMax = item.Points[^1].Timestamp;
+
+            if (!found)
+            {
+                minTimestamp = seriesMin;
+                maxTimestamp = seriesMax;
+                found = true;
+            }
+            else
+            {
+                if (seriesMin < minTimestamp) minTimestamp = seriesMin;
+                if (seriesMax > maxTimestamp) maxTimestamp = seriesMax;
+            }
+
             foreach (var point in item.Points)
             {
-                if (!found)
-                {
-                    minTimestamp = point.Timestamp;
-                    maxTimestamp = point.Timestamp;
-                    maxObservedValue = point.Value;
-                    found = true;
-                    continue;
-                }
-
-                if (point.Timestamp < minTimestamp)
-                {
-                    minTimestamp = point.Timestamp;
-                }
-
-                if (point.Timestamp > maxTimestamp)
-                {
-                    maxTimestamp = point.Timestamp;
-                }
-
                 if (point.Value > maxObservedValue)
                 {
                     maxObservedValue = point.Value;
@@ -880,42 +1074,69 @@ public sealed class TelemetryChart : UserControl
             return [points];
         }
 
-        // Detect the typical interval between points, then treat anything >3x that as a gap
+        // Detect the typical interval using median-of-sample approach (avoids sorting all intervals).
+        // Sample up to 15 intervals evenly spaced through the data to find the typical gap.
         var medianIntervalMs = 0d;
         if (points.Count >= 3)
         {
-            var intervals = new List<double>(points.Count - 1);
-            for (var i = 1; i < points.Count; i++)
+            var sampleCount = Math.Min(15, points.Count - 1);
+            var step = Math.Max(1, (points.Count - 1) / sampleCount);
+            var sampleIntervals = new double[sampleCount];
+            var si = 0;
+            for (var i = step; i < points.Count && si < sampleCount; i += step)
             {
-                intervals.Add((points[i].Timestamp - points[i - 1].Timestamp).TotalMilliseconds);
+                sampleIntervals[si++] = (points[i].Timestamp - points[i - step].Timestamp).TotalMilliseconds / step;
             }
-            intervals.Sort();
-            medianIntervalMs = intervals[intervals.Count / 2];
+            if (si > 0)
+            {
+                Array.Sort(sampleIntervals, 0, si);
+                medianIntervalMs = sampleIntervals[si / 2];
+            }
         }
 
-        // Minimum gap threshold: 3x the median interval, but at least 10 seconds
+        // Minimum gap threshold: 3x the median interval, but at least 10 seconds.
+        // For rolled-up data (60s intervals), this gives a 180s threshold.
         var gapThresholdMs = Math.Max(medianIntervalMs * 3d, 10_000d);
 
-        var segments = new List<IReadOnlyList<MetricPoint>>();
-        var current = new List<MetricPoint> { points[0] };
-
+        // Fast path: check if there are any gaps at all before allocating segment lists
+        var hasGap = false;
         for (var i = 1; i < points.Count; i++)
         {
-            var delta = (points[i].Timestamp - points[i - 1].Timestamp).TotalMilliseconds;
-            if (delta > gapThresholdMs)
+            if ((points[i].Timestamp - points[i - 1].Timestamp).TotalMilliseconds > gapThresholdMs)
             {
-                if (current.Count > 0)
-                {
-                    segments.Add(current.ToArray());
-                }
-                current = [];
+                hasGap = true;
+                break;
             }
-            current.Add(points[i]);
         }
 
-        if (current.Count > 0)
+        if (!hasGap)
         {
-            segments.Add(current.ToArray());
+            return [points];
+        }
+
+        var segments = new List<IReadOnlyList<MetricPoint>>();
+        var segStart = 0;
+        for (var i = 1; i < points.Count; i++)
+        {
+            if ((points[i].Timestamp - points[i - 1].Timestamp).TotalMilliseconds > gapThresholdMs)
+            {
+                if (i > segStart)
+                {
+                    var segment = new MetricPoint[i - segStart];
+                    for (var j = 0; j < segment.Length; j++)
+                        segment[j] = points[segStart + j];
+                    segments.Add(segment);
+                }
+                segStart = i;
+            }
+        }
+
+        if (segStart < points.Count)
+        {
+            var segment = new MetricPoint[points.Count - segStart];
+            for (var j = 0; j < segment.Length; j++)
+                segment[j] = points[segStart + j];
+            segments.Add(segment);
         }
 
         return segments;
@@ -923,51 +1144,40 @@ public sealed class TelemetryChart : UserControl
 
     private static Geometry BuildLineGeometry(IReadOnlyList<Windows.Foundation.Point> points)
     {
-        var figure = new PathFigure
-        {
-            StartPoint = points[0],
-            IsClosed = false,
-            IsFilled = false,
-        };
-
         var segments = new PathSegmentCollection();
         for (var index = 1; index < points.Count; index++)
         {
             segments.Add(new LineSegment { Point = points[index] });
         }
 
-        figure.Segments = segments;
         return new PathGeometry
         {
-            Figures = new PathFigureCollection { figure },
+            Figures = { new PathFigure { StartPoint = points[0], IsClosed = false, IsFilled = false, Segments = segments } },
         };
     }
 
     private static Geometry BuildAreaGeometry(IReadOnlyList<Windows.Foundation.Point> points, double height)
     {
-        var figure = new PathFigure
-        {
-            StartPoint = new Windows.Foundation.Point(points[0].X, height),
-            IsClosed = true,
-            IsFilled = true,
-        };
-
-        var segments = new PathSegmentCollection
-        {
-            new LineSegment { Point = points[0] },
-        };
-
+        var segments = new PathSegmentCollection();
+        segments.Add(new LineSegment { Point = points[0] });
         for (var index = 1; index < points.Count; index++)
         {
             segments.Add(new LineSegment { Point = points[index] });
         }
-
         segments.Add(new LineSegment { Point = new Windows.Foundation.Point(points[^1].X, height) });
-        figure.Segments = segments;
 
         return new PathGeometry
         {
-            Figures = new PathFigureCollection { figure },
+            Figures =
+            {
+                new PathFigure
+                {
+                    StartPoint = new Windows.Foundation.Point(points[0].X, height),
+                    IsClosed = true,
+                    IsFilled = true,
+                    Segments = segments,
+                },
+            },
         };
     }
 
@@ -1028,22 +1238,36 @@ public sealed class TelemetryChart : UserControl
 
     private static string FormatTimeLabel(DateTimeOffset timestamp, TimeSpan window)
     {
+        var local = timestamp.LocalDateTime;
+        var isToday = local.Date == DateTime.Today;
+
         if (window <= TimeSpan.FromMinutes(5))
         {
-            return timestamp.LocalDateTime.ToString("HH:mm:ss");
+            return local.ToString("HH:mm:ss");
+        }
+
+        if (window <= TimeSpan.FromHours(12) && isToday)
+        {
+            return local.ToString("HH:mm");
         }
 
         if (window <= TimeSpan.FromHours(12))
         {
-            return timestamp.LocalDateTime.ToString("HH:mm");
+            // Data from a different day - show the date
+            return local.ToString("MMM d HH:mm");
         }
 
         if (window <= TimeSpan.FromDays(2))
         {
-            return timestamp.LocalDateTime.ToString("MM-dd HH:mm");
+            return local.ToString("MMM d HH:mm");
         }
 
-        return timestamp.LocalDateTime.ToString("MM-dd");
+        if (window <= TimeSpan.FromDays(90))
+        {
+            return local.ToString("MMM d");
+        }
+
+        return local.ToString("yyyy-MM-dd");
     }
 
     private static string FormatAxisValue(double value, MetricUnit unit) => unit switch
@@ -1127,6 +1351,8 @@ public sealed class TelemetryChart : UserControl
         var right = Math.Max(_selectionStartX, _selectionCurrentX);
         if (right - left < MinimumSelectionWidth)
         {
+            // Short click (not a drag) — pin a tooltip at this position
+            TryPinTooltip(_selectionStartX);
             return;
         }
 
@@ -1230,8 +1456,13 @@ public sealed class TelemetryChart : UserControl
         DateTimeOffset? anchorTime = null;
         var bestDistance = TimeSpan.MaxValue;
 
-        foreach (var series in Series.Where(item => item.Points.Count > 0))
+        foreach (var series in Series)
         {
+            if (series.Points.Count == 0)
+            {
+                continue;
+            }
+
             var nearestPoint = FindNearestPoint(series.Points, target);
             if (nearestPoint is null)
             {
@@ -1265,9 +1496,14 @@ public sealed class TelemetryChart : UserControl
 
         var builder = new StringBuilder();
         builder.AppendLine(FormatHoverTime(anchorTime.Value, end - start));
-        foreach (var line in lines.OrderByDescending(item => item.Value).Take(5))
+
+        // Sort by value descending, show top 5 with clean formatting
+        lines.Sort((a, b) => b.Value.CompareTo(a.Value));
+        var visibleLines = Math.Min(lines.Count, 5);
+        for (var i = 0; i < visibleLines; i++)
         {
-            builder.AppendLine($"- {line.Name}  {FormatAxisValue(line.Value, Unit)}");
+            var line = lines[i];
+            builder.AppendLine($"\u2022 {line.Name}  {FormatAxisValue(line.Value, Unit)}");
         }
 
         if (lines.Count > 5)
@@ -1286,19 +1522,32 @@ public sealed class TelemetryChart : UserControl
             return null;
         }
 
-        MetricPoint best = points[0];
-        var bestDistance = (best.Timestamp - target).Duration();
-        for (var index = 1; index < points.Count; index++)
+        // Binary search for the closest point — O(log N) instead of O(N).
+        // Points are sorted by timestamp.
+        var lo = 0;
+        var hi = points.Count - 1;
+        while (lo < hi)
         {
-            var current = points[index];
-            var distance = (current.Timestamp - target).Duration();
-            if (distance >= bestDistance)
+            var mid = lo + ((hi - lo) >> 1);
+            if (points[mid].Timestamp < target)
             {
-                continue;
+                lo = mid + 1;
             }
+            else
+            {
+                hi = mid;
+            }
+        }
 
-            best = current;
-            bestDistance = distance;
+        // lo is now the first point >= target. Compare lo and lo-1 to find nearest.
+        var best = points[lo];
+        if (lo > 0)
+        {
+            var prev = points[lo - 1];
+            if ((target - prev.Timestamp).Duration() < (best.Timestamp - target).Duration())
+            {
+                best = prev;
+            }
         }
 
         return best;
@@ -1312,9 +1561,81 @@ public sealed class TelemetryChart : UserControl
 
     private static string FormatHoverTime(DateTimeOffset timestamp, TimeSpan window)
     {
-        return window <= TimeSpan.FromMinutes(5)
-            ? timestamp.LocalDateTime.ToString("h:mm:ss tt")
-            : timestamp.LocalDateTime.ToString("h:mm:ss tt");
+        // Always show full date + time in hover tooltips for maximum clarity
+        return timestamp.LocalDateTime.ToString("MMM d, yyyy  h:mm:ss tt");
+    }
+
+    private void TryPinTooltip(double pointerX)
+    {
+        var plotWidth = Math.Max(16d, ActualWidth - LeftPadding - RightPadding);
+        var plotHeight = Math.Max(16d, ActualHeight - TopPadding - BottomPadding);
+        if (!TryBuildHoverSnapshot(pointerX, plotWidth, plotHeight, out var hoverX, out var tooltip))
+        {
+            return;
+        }
+
+        // Create a pinned vertical marker line
+        var markerLine = new Line
+        {
+            Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
+            StrokeThickness = 1,
+            Opacity = 0.6,
+            X1 = hoverX,
+            X2 = hoverX,
+            Y1 = TopPadding,
+            Y2 = TopPadding + plotHeight,
+            IsHitTestVisible = false,
+        };
+
+        // Create pinned tooltip
+        var pinnedText = new TextBlock
+        {
+            FontSize = 10,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
+            MaxWidth = 200,
+            Text = tooltip,
+        };
+        var pinnedBorder = new Border
+        {
+            Background = CreateSurfaceGradient("#15283B", "#203851"),
+            BorderBrush = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 6, 8, 6),
+            Child = pinnedText,
+            IsHitTestVisible = false,
+            Opacity = 0.95,
+        };
+
+        _interactionCanvas.Children.Add(markerLine);
+        _interactionCanvas.Children.Add(pinnedBorder);
+
+        // Position the tooltip to the right of the marker, flipping left if near the edge
+        pinnedBorder.Measure(new Windows.Foundation.Size(220, double.PositiveInfinity));
+        var desired = pinnedBorder.DesiredSize;
+        var tooltipLeft = hoverX + 10;
+        if (tooltipLeft + desired.Width + 8 > ActualWidth)
+        {
+            tooltipLeft = hoverX - desired.Width - 10;
+        }
+
+        Canvas.SetLeft(pinnedBorder, Math.Clamp(tooltipLeft, 8, Math.Max(8, ActualWidth - desired.Width - 8)));
+        Canvas.SetTop(pinnedBorder, Math.Clamp(TopPadding + 8, TopPadding, Math.Max(TopPadding, ActualHeight - desired.Height - 8)));
+
+        _pinnedTooltips.Add((pinnedBorder, markerLine));
+    }
+
+    /// <summary>Removes all pinned tooltips from the chart.</summary>
+    public void ClearPinnedTooltips()
+    {
+        foreach (var (tooltip, marker) in _pinnedTooltips)
+        {
+            _interactionCanvas.Children.Remove(tooltip);
+            _interactionCanvas.Children.Remove(marker);
+        }
+
+        _pinnedTooltips.Clear();
     }
 }
 

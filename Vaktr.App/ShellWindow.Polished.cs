@@ -55,8 +55,12 @@ public sealed partial class ShellWindow : Window
     private readonly ActionChip _globalOneHourButton;
     private readonly ActionChip _globalTwelveHourButton;
     private readonly ActionChip _globalTwentyFourHourButton;
+    private readonly ActionChip _globalTwoDayButton;
+    private readonly ActionChip _globalFiveDayButton;
     private readonly ActionChip _globalSevenDayButton;
     private readonly ActionChip _globalThirtyDayButton;
+    private readonly ActionChip _globalNinetyDayButton;
+    private readonly ActionChip _globalOneYearButton;
     private readonly ActionChip _globalResetZoomButton;
 
     private CollectorService? _collectorService;
@@ -82,6 +86,9 @@ public sealed partial class ShellWindow : Window
     private DateTimeOffset? _globalAbsoluteStartUtc;
     private DateTimeOffset? _globalAbsoluteEndUtc;
     private MetricSnapshot? _pendingSnapshot;
+    private int _lastLoadedHistoryMinutes;
+    private static readonly Brush _thresholdOrangeBrush = BrushFactory.CreateBrush("#FF8C42");
+    private static readonly Brush _thresholdYellowBrush = BrushFactory.CreateBrush("#FFD166");
 
     public ShellWindow(
         MainViewModel viewModel,
@@ -123,8 +130,12 @@ public sealed partial class ShellWindow : Window
         _globalOneHourButton = CreateGlobalRangeChip("1h", 60);
         _globalTwelveHourButton = CreateGlobalRangeChip("12h", 720);
         _globalTwentyFourHourButton = CreateGlobalRangeChip("24h", 1440);
+        _globalTwoDayButton = CreateGlobalRangeChip("2d", 2880);
+        _globalFiveDayButton = CreateGlobalRangeChip("5d", 7200);
         _globalSevenDayButton = CreateGlobalRangeChip("7d", 10080);
         _globalThirtyDayButton = CreateGlobalRangeChip("30d", 43200);
+        _globalNinetyDayButton = CreateGlobalRangeChip("90d", 129600);
+        _globalOneYearButton = CreateGlobalRangeChip("1y", 525600);
         _globalResetZoomButton = CreateActionChip("Reset zoom", OnResetAllZoomClick);
         _titleBarDragHost = new Grid
         {
@@ -240,42 +251,48 @@ public sealed partial class ShellWindow : Window
         // Force-clear gradient cache before any surface gradient is rebuilt
         _gradientCache.Clear();
 
-        RunWithDeferredPanelRendering(() =>
+        // Suspend all panel rendering during the theme switch to prevent
+        // individual chart redraws for each panel. After all brushes are updated,
+        // a single low-priority pass redraws everything at once.
+        SetPanelRenderingSuspended(true);
+
+        if (_controlDeckEditableActive)
         {
-            if (_controlDeckEditableActive)
-            {
-                RenderEditableControlDeck();
-            }
-            else
-            {
-                RenderControlDeckSummary();
-            }
+            RenderEditableControlDeck();
+        }
+        else
+        {
+            RenderControlDeckSummary();
+        }
 
-            if (_globalRangeEditorVisible)
-            {
-                RenderGlobalRangeEditor();
-            }
+        if (_globalRangeEditorVisible)
+        {
+            RenderGlobalRangeEditor();
+        }
 
-            RefreshSummaryCardThemeResources();
-            foreach (var card in _panelCards.Values)
-            {
-                card.RefreshThemeResources();
-            }
+        RefreshSummaryCardThemeResources();
+        foreach (var card in _panelCards.Values)
+        {
+            card.RefreshThemeResources();
+        }
 
-            RefreshGlobalRangeControls();
-            foreach (var chip in new[]
-            {
-                _globalRangeButton, _globalOneMinuteButton, _globalFiveMinuteButton,
-                _globalFifteenMinuteButton, _globalThirtyMinuteButton, _globalOneHourButton,
-                _globalTwelveHourButton, _globalTwentyFourHourButton, _globalSevenDayButton,
-                _globalThirtyDayButton, _globalResetZoomButton,
-            })
-            {
-                chip.RefreshThemeResources();
-            }
+        RefreshGlobalRangeControls();
+        foreach (var chip in new[]
+        {
+            _globalRangeButton, _globalOneMinuteButton, _globalFiveMinuteButton,
+            _globalFifteenMinuteButton, _globalThirtyMinuteButton, _globalOneHourButton,
+            _globalTwelveHourButton, _globalTwentyFourHourButton, _globalTwoDayButton,
+            _globalFiveDayButton, _globalSevenDayButton, _globalThirtyDayButton,
+            _globalNinetyDayButton, _globalOneYearButton, _globalResetZoomButton,
+        })
+        {
+            chip.RefreshThemeResources();
+        }
 
-            RefreshWindowChrome();
-        });
+        RefreshWindowChrome();
+
+        // Resume rendering — panels will redraw on the next low-priority frame
+        SetPanelRenderingSuspended(false);
     }
 
     private void BuildSummaryCards()
@@ -307,7 +324,7 @@ public sealed partial class ShellWindow : Window
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
             var valueText = CreatePrimaryText(string.Empty, 25, true);
-            valueText.FontFamily = new FontFamily("Segoe UI Variable Display");
+            valueText.FontFamily = new FontFamily("Bahnschrift");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
             var captionText = CreateSecondaryText(string.Empty, 11.5);
@@ -346,8 +363,8 @@ public sealed partial class ShellWindow : Window
                 var util = card.Utilization;
                 var trackWidth = gaugeTrack.ActualWidth > 0 ? gaugeTrack.ActualWidth : 120;
                 gaugeFill.Width = trackWidth * Math.Clamp(util / 100d, 0d, 1d);
-                gaugeFill.Background = util > 90 ? BrushFactory.CreateBrush("#FF8C42")
-                    : util > 75 ? BrushFactory.CreateBrush("#FFD166")
+                gaugeFill.Background = util > 90 ? _thresholdOrangeBrush
+                    : util > 75 ? _thresholdYellowBrush
                     : card.AccentBrush;
             };
             // Also update on track size change
@@ -569,6 +586,22 @@ public sealed partial class ShellWindow : Window
         {
             await EnsureCollectorRunningAsync(config);
             _pendingHistoryLoad = TryLoadHistoryAsync(config);
+
+            // Run startup prune in the background — don't block telemetry startup.
+            // This catches up on missed maintenance without delaying the first snapshot.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _metricStore.PruneAsync(config, CancellationToken.None);
+                    StartupTrace.Write("Startup prune complete");
+                }
+                catch (Exception pruneEx)
+                {
+                    StartupTrace.WriteException("Startup prune", pruneEx);
+                }
+            });
+
             StartupTrace.Write("Background startup complete // polished-v19");
         }
         catch (Exception ex)
@@ -912,15 +945,23 @@ public sealed partial class ShellWindow : Window
             }
         }
 
+        // Suspend rendering during the snapshot application pass so that
+        // individual panel property changes don't trigger separate chart redraws.
+        // Everything renders once at the end when we resume.
+        SetPanelRenderingSuspended(true);
         _viewModel.ApplySnapshot(snapshot);
         if (_globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue)
         {
-            foreach (var panel in _viewModel.DashboardPanels.Where(panel => !panel.IsZoomed))
+            foreach (var panel in _viewModel.DashboardPanels)
             {
-                panel.ZoomToWindow(_globalAbsoluteStartUtc.Value, _globalAbsoluteEndUtc.Value);
+                if (!panel.IsZoomed)
+                {
+                    panel.ZoomToWindow(_globalAbsoluteStartUtc.Value, _globalAbsoluteEndUtc.Value);
+                }
             }
         }
 
+        SetPanelRenderingSuspended(false);
         UpdateStatusText();
 
         if (_pendingSnapshot is not null && !_snapshotApplyQueued)
@@ -1002,7 +1043,9 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => SetPanelRenderingSuspended(false));
+        // Scroll ended — resume rendering at normal priority so panels
+        // redraw promptly rather than waiting behind other low-priority work
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () => SetPanelRenderingSuspended(false));
     }
 
     private void RunWithDeferredPanelRendering(Action action)
@@ -1032,6 +1075,9 @@ public sealed partial class ShellWindow : Window
         }
     }
 
+    private CancellationTokenSource? _resizeCts;
+    private double _lastResizeWidth;
+
     private void OnRootLayoutSizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (!_initialized)
@@ -1039,18 +1085,40 @@ public sealed partial class ShellWindow : Window
             return;
         }
 
-        var nextColumnCount = DetermineDashboardColumns();
-        if (nextColumnCount == _lastDashboardColumnCount)
+        // Fast exit: if width hasn't changed meaningfully, skip all work.
+        // Height changes don't affect column layout at all.
+        var widthDelta = Math.Abs(e.NewSize.Width - _lastResizeWidth);
+        if (widthDelta < 2)
         {
-            if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
-            {
-                BuildSummaryCards();
-            }
-
             return;
         }
 
-        QueueDashboardRefresh();
+        _lastResizeWidth = e.NewSize.Width;
+
+        // Cancel any pending layout update
+        _resizeCts?.Cancel();
+        _resizeCts = new CancellationTokenSource();
+        var token = _resizeCts.Token;
+
+        // Debounce: wait 120ms after the last resize event before doing layout work.
+        // During active drag-resize, this fires zero layout passes.
+        _ = System.Threading.Tasks.Task.Delay(120, token).ContinueWith(_ =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (token.IsCancellationRequested) return;
+
+                var nextColumnCount = DetermineDashboardColumns();
+                if (nextColumnCount != _lastDashboardColumnCount)
+                {
+                    QueueDashboardRefresh();
+                }
+                else if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
+                {
+                    BuildSummaryCards();
+                }
+            });
+        }, TaskScheduler.Default);
     }
 
     private void OnDashboardPanelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -1544,6 +1612,7 @@ public sealed partial class ShellWindow : Window
             var historyWindow = retentionWindow;
             var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
             _viewModel.LoadHistory(history);
+            _lastLoadedHistoryMinutes = (int)historyWindow.TotalMinutes;
             StartupTrace.Write($"TryLoadHistoryAsync complete // panels={history.Count}");
         }
         catch (Exception ex)
@@ -1617,19 +1686,47 @@ public sealed partial class ShellWindow : Window
         _viewModel.ApplyGlobalWindowRange(minutes);
         HideGlobalRangeEditor();
         RefreshGlobalRangeControls();
+
+        // If the user selects a wider range than what we last loaded from the database,
+        // re-query to ensure the data covers the full requested window.
+        if (minutes > _lastLoadedHistoryMinutes)
+        {
+            _ = ReloadHistoryForRangeAsync(minutes);
+        }
+    }
+
+    private async Task ReloadHistoryForRangeAsync(int minutes)
+    {
+        try
+        {
+            var fromUtc = DateTimeOffset.UtcNow.AddMinutes(-minutes);
+            var history = await _metricStore.LoadHistoryAsync(fromUtc, CancellationToken.None);
+            _viewModel.LoadHistory(history);
+            _lastLoadedHistoryMinutes = minutes;
+        }
+        catch
+        {
+            // Best-effort — live data will still flow
+        }
     }
 
     private void RefreshGlobalRangeControls()
     {
-        ApplyGlobalRangeState(_globalOneMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 1);
-        ApplyGlobalRangeState(_globalFiveMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 5);
-        ApplyGlobalRangeState(_globalFifteenMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 15);
-        ApplyGlobalRangeState(_globalThirtyMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 30);
-        ApplyGlobalRangeState(_globalOneHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 60);
-        ApplyGlobalRangeState(_globalTwelveHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 720);
-        ApplyGlobalRangeState(_globalTwentyFourHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 1440);
-        ApplyGlobalRangeState(_globalSevenDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 10080);
-        ApplyGlobalRangeState(_globalThirtyDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 43200);
+        var noAbsolute = !_globalAbsoluteStartUtc.HasValue;
+        var minutes = _viewModel.SelectedWindowMinutes;
+        ApplyGlobalRangeState(_globalOneMinuteButton, noAbsolute && minutes == 1);
+        ApplyGlobalRangeState(_globalFiveMinuteButton, noAbsolute && minutes == 5);
+        ApplyGlobalRangeState(_globalFifteenMinuteButton, noAbsolute && minutes == 15);
+        ApplyGlobalRangeState(_globalThirtyMinuteButton, noAbsolute && minutes == 30);
+        ApplyGlobalRangeState(_globalOneHourButton, noAbsolute && minutes == 60);
+        ApplyGlobalRangeState(_globalTwelveHourButton, noAbsolute && minutes == 720);
+        ApplyGlobalRangeState(_globalTwentyFourHourButton, noAbsolute && minutes == 1440);
+        ApplyGlobalRangeState(_globalTwoDayButton, noAbsolute && minutes == 2880);
+        ApplyGlobalRangeState(_globalFiveDayButton, noAbsolute && minutes == 7200);
+        ApplyGlobalRangeState(_globalSevenDayButton, noAbsolute && minutes == 10080);
+        ApplyGlobalRangeState(_globalThirtyDayButton, noAbsolute && minutes == 43200);
+        ApplyGlobalRangeState(_globalNinetyDayButton, noAbsolute && minutes == 129600);
+        ApplyGlobalRangeState(_globalOneYearButton, noAbsolute && minutes == 525600);
 
         _globalRangeButton.Text = BuildGlobalRangeButtonText();
         _globalRangeButton.IsActive = _globalRangeEditorVisible;
@@ -1695,8 +1792,13 @@ public sealed partial class ShellWindow : Window
         var quickRangeRowSecondary = CreateChipWrapRow(
             _globalTwelveHourButton,
             _globalTwentyFourHourButton,
-            _globalSevenDayButton,
-            _globalThirtyDayButton);
+            _globalTwoDayButton,
+            _globalFiveDayButton,
+            _globalSevenDayButton);
+        var quickRangeRowTertiary = CreateChipWrapRow(
+            _globalThirtyDayButton,
+            _globalNinetyDayButton,
+            _globalOneYearButton);
 
         var quickRangeCard = new Border
         {
@@ -1713,6 +1815,7 @@ public sealed partial class ShellWindow : Window
                     CreateSectionHeader("QUICK RANGES", "Jump the whole board to a preset replay window."),
                     quickRangeRowPrimary,
                     quickRangeRowSecondary,
+                    quickRangeRowTertiary,
                 },
             },
         };
@@ -1890,8 +1993,12 @@ public sealed partial class ShellWindow : Window
         <= 60 => "1h",
         <= 720 => "12h",
         <= 1440 => "24h",
+        <= 2880 => "2d",
+        <= 7200 => "5d",
         <= 10080 => "7d",
-        _ => "30d",
+        <= 43200 => "30d",
+        <= 129600 => "90d",
+        _ => "1y",
     };
 
     private static bool TryParseGlobalDateTime(string text, out DateTimeOffset value)

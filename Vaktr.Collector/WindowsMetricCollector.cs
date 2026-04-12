@@ -269,6 +269,16 @@ public sealed class WindowsMetricCollector : IMetricCollector
             MetricUnit.Gigabytes,
             availableGb,
             timestamp));
+
+        samples.Add(new MetricSample(
+            "memory",
+            "Memory",
+            "total-gb",
+            "Total",
+            MetricCategory.Memory,
+            MetricUnit.Gigabytes,
+            totalGb,
+            timestamp));
     }
 
     private void AddDisk(List<MetricSample> samples, DateTimeOffset timestamp)

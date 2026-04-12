@@ -20,7 +20,7 @@
 
 ## 1. Performance
 
-### 1.1 - Reduce CPU and memory usage during long-running sessions
+### 1.1 - Reduce CPU and memory usage during long-running sessions [DONE]
 **Priority:** Critical
 **Area:** `Vaktr.App` (ViewModels, Controls), `Vaktr.Store`
 
@@ -35,7 +35,7 @@ With 2+ days of accumulated metrics, zooming out to view all data causes Vaktr t
 - Profile `LoadHistoryAsync` UNION query performance with large datasets
 - Evaluate whether `ObservableCollection` change notifications cascade unnecessary UI work
 
-### 1.2 - Fix app hitching and stuttering on long time ranges
+### 1.2 - Fix app hitching and stuttering on long time ranges [DONE]
 **Priority:** Critical
 **Area:** `Vaktr.App/Controls/TelemetryChart.cs`, `Vaktr.App/ShellWindow.Polished.cs`
 
@@ -49,7 +49,7 @@ With 2 days of built-up metrics, the app hitches and stutters with every metrics
 - `SplitAtGaps()` and `Downsample()` complexity with thousands of points
 - Multiple panels redrawing simultaneously - consider staggering or virtualizing off-screen panels
 
-### 1.3 - Improve theme switching performance
+### 1.3 - Improve theme switching performance [DONE x2]
 **Priority:** Medium
 **Area:** `Vaktr.App/App.cs`, `Vaktr.App/ShellWindow.Polished.Ui.cs`
 
@@ -73,7 +73,7 @@ Switching between time range presets triggers `ApplyRangePreset` on every panel 
 - `LoadHistoryAsync` may re-query the database on range changes - check if this can use cached data
 - Chart `Redraw()` does full canvas clear + redraw - consider incremental rendering for range shifts
 
-### 1.5 - Improve window resize smoothness
+### 1.5 - Improve window resize smoothness [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/ShellWindow.Polished.cs`
 
@@ -97,7 +97,7 @@ Scrolling the main window should be buttery smooth. The `_isRenderingSuspended` 
 - Legend and process table updates may still fire during scroll
 - Consider UI virtualization for panels far outside the viewport
 
-### 1.7 - Improve process chart toggle performance
+### 1.7 - Improve process chart toggle performance [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/ViewModels/DashboardViewModels.cs` (`MetricPanelViewModel`)
 
@@ -113,7 +113,7 @@ Toggling the "Chart" button on CPU/Memory process panels to show per-process cha
 
 ## 2. UI/UX - Chart & Panel Behavior
 
-### 2.1 - Fix chart line flickering and false spikes on longer time ranges
+### 2.1 - Fix chart line flickering and false spikes on longer time ranges [DONE]
 **Priority:** Critical
 **Area:** `Vaktr.App/Controls/TelemetryChart.cs`, `Vaktr.App/ViewModels/DashboardViewModels.cs`
 
@@ -131,7 +131,7 @@ When viewing longer time ranges, chart lines flicker and display false spikes th
 - Stabilize the raw/rollup boundary so points don't flip between sources
 - Consider snapping the query boundary to minute boundaries
 
-### 2.2 - Freeze panels when user is zoomed into a specific range
+### 2.2 - Freeze panels when user is zoomed into a specific range [DONE]
 **Priority:** High
 **Area:** `Vaktr.App/ViewModels/DashboardViewModels.cs`, `Vaktr.App/ShellWindow.Polished.cs`
 
@@ -144,7 +144,7 @@ When a user zooms into a specific historical time range to inspect data, the pan
 - Summary cards should continue updating regardless of zoom state
 - Status text or a visual indicator should show that a panel is in "frozen/inspection" mode
 
-### 2.3 - Show date in panel timestamps
+### 2.3 - Show date in panel timestamps [DONE]
 **Priority:** High
 **Area:** `Vaktr.App/Controls/TelemetryChart.cs`
 
@@ -155,7 +155,7 @@ Panel timestamps currently show only the time. When viewing historical data from
 - Hover tooltips should always include the full date and time
 - Format examples: "Apr 8 14:30" for multi-day views, "14:30:05" for same-day views
 
-### 2.4 - Fix zoom-to-selection accuracy for historical data
+### 2.4 - Fix zoom-to-selection accuracy for historical data [DONE]
 **Priority:** High
 **Area:** `Vaktr.App/Controls/TelemetryChart.cs`
 
@@ -167,7 +167,7 @@ Zooming in on a panel's past history for older metrics should zoom into exactly 
 - Verify that `ZoomSelectionRequested` event args contain the correct UTC timestamps corresponding to the visual selection
 - Check that `ZoomToWindow(start, end)` applies the exact requested range without snapping or rounding
 
-### 2.5 - Sort CPU cores in numerical order
+### 2.5 - Sort CPU cores in numerical order [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/ViewModels/DashboardViewModels.cs` or `Vaktr.Collector/WindowsMetricCollector.cs`
 
@@ -179,7 +179,7 @@ The CPU per-core panel should list cores in order: Core 0, Core 1, Core 2, etc. 
 - The legend in `TelemetryPanelCard` renders series in the order they appear in `VisibleSeries`
 - Fix: sort the PDH counter instances numerically before creating `MetricSample` entries, or sort `VisibleSeries` in the ViewModel
 
-### 2.6 - Fix max value display accuracy on panels
+### 2.6 - Fix max value display accuracy on panels [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/ViewModels/DashboardViewModels.cs`
 
@@ -199,7 +199,7 @@ Panel max values (shown in subtle gray boxes) need to display the total system m
 
 ## 3. UI/UX - Visual Design & Polish
 
-### 3.1 - Add threshold-based color coding for utilization
+### 3.1 - Add threshold-based color coding for utilization [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/Controls/TelemetryChart.cs`, `Vaktr.App/Controls/TelemetryPanelCard.cs`, `Vaktr.App/Controls/UsageGauge.cs`
 
@@ -221,7 +221,7 @@ Add color-coded thresholds for utilization metrics:
 - Avoid excessive per-frame color recalculation - cache threshold state and only update on value change
 - Per-core CPU threshold coloring could be expensive with many cores - profile before enabling
 
-### 3.2 - Improve panel hover and button hover smoothness
+### 3.2 - Improve panel hover and button hover smoothness [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/Controls/ActionChip.cs`, `Vaktr.App/Controls/TelemetryPanelCard.cs`
 
@@ -233,7 +233,7 @@ Hover interactions on panels and buttons should feel smooth and responsive witho
 - Panel card hover effects may trigger layout recalculations
 - Pointer enter/leave events during rapid mouse movement
 
-### 3.3 - Add subtle design touches for panel readability
+### 3.3 - Add subtle design touches for panel readability [DONE]
 **Priority:** Low
 **Area:** `Vaktr.App/Controls/TelemetryPanelCard.cs`, `Vaktr.App/Controls/TelemetryChart.cs`
 
@@ -251,7 +251,7 @@ General polish pass on panels to improve readability and design quality.
 
 ## 4. UI/UX - New Features
 
-### 4.1 - Add 2d, 5d, 30d, 90d, and 1y quick range presets
+### 4.1 - Add 2d, 5d, 30d, 90d, and 1y quick range presets [DONE]
 **Priority:** High
 **Area:** `Vaktr.Core/Models/Enums.cs`, `Vaktr.App/ShellWindow.Polished.cs`, `Vaktr.App/Controls/TelemetryPanelCard.cs`, `Vaktr.App/ViewModels/DashboardViewModels.cs`
 
@@ -274,7 +274,7 @@ Add additional time range options to the quick range preset buttons for full his
 - Longer ranges (30d, 90d, 1y) will likely require aggressive downsampling - verify the chart `Downsample()` point budget scales appropriately
 - Consider whether the retention setting should warn the user if they select a range longer than their configured retention
 
-### 4.1b - Fix time range presets not showing expected data
+### 4.1b - Fix time range presets not showing expected data [DONE]
 **Priority:** High
 **Area:** `Vaktr.App/ViewModels/DashboardViewModels.cs`, `Vaktr.Store/Persistence/SqliteMetricStore.cs`, `Vaktr.App/Controls/TelemetryChart.cs`
 
@@ -288,7 +288,7 @@ Time range presets don't always display the data they should. For example, selec
 - `ApplyRangePreset()` / `ApplyGlobalWindowRange()` - trace whether these trigger a fresh database query or just refilter in-memory data
 - If only in-memory data is used: the fix is to trigger `LoadHistoryAsync` with the appropriate `fromUtc` whenever the range changes to a window larger than what's currently in memory
 
-### 4.2 - Allow selecting individual series for focused drill-down
+### 4.2 - Allow selecting individual series for focused drill-down [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/Controls/TelemetryPanelCard.cs`, `Vaktr.App/ViewModels/DashboardViewModels.cs`
 
@@ -301,7 +301,7 @@ Allow users to click on a subfield (e.g., Up/Down on network, Core 0/Core 3 on C
 - For process panels, clicking a process name in the table isolates that process on the chart
 - The chart should rescale the Y-axis to fit the focused series for better visibility
 
-### 4.3 - Add click-to-pin static tooltip on chart data points
+### 4.3 - Add click-to-pin static tooltip on chart data points [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.App/Controls/TelemetryChart.cs`
 
@@ -334,7 +334,7 @@ When the "Chart" toggle is enabled on CPU/Memory process panels, users should be
 
 ## 5. CI/CD
 
-### 5.1 - Review CI/CD practices for coverage
+### 5.1 - Review CI/CD practices for coverage [DONE]
 **Priority:** High
 **Area:** `.github/workflows/ci.yml`
 
@@ -349,7 +349,7 @@ Review the current CI pipeline to ensure adequate build and test coverage.
 - [ ] Verify artifact retention policies are appropriate
 - [ ] Consider adding a smoke test that launches the built app and verifies it starts
 
-### 5.2 - Review security CI actions
+### 5.2 - Review security CI actions [DONE]
 **Priority:** High
 **Area:** `.github/workflows/security.yml`
 
@@ -365,7 +365,7 @@ Review the security pipeline for coverage gaps.
 - [ ] Consider adding dependency license compliance checking
 - [ ] CODEOWNERS file for security-sensitive paths
 
-### 5.3 - Support x64 + ARM64 installers, drop x86
+### 5.3 - Support x64 + ARM64 installers, drop x86 [DONE]
 **Priority:** Medium
 **Area:** `.github/workflows/release.yml`, `installer/vaktr-setup.iss`, `Vaktr.App/Vaktr.App.csproj`
 
@@ -385,7 +385,7 @@ The release workflow and installer only build for x64. ARM64 should be added as 
 
 ## 6. Testing
 
-### 6.1 - Expand unit test coverage
+### 6.1 - Expand unit test coverage [DONE]
 **Priority:** Medium
 **Area:** `Vaktr.Tests/`
 
@@ -421,11 +421,37 @@ The current test suite has a single test (`Normalize_Resets_Out_Of_Range_Values`
 - [ ] `MetricPanelViewModel.AppendSample()` - adds to correct series
 - [ ] `MetricPanelViewModel` sorting - `SortBucket` ordering
 
+### 6.2 - Investigate and fix data pruning not running [DONE]
+**Priority:** High
+**Area:** `Vaktr.Store/Persistence/SqliteMetricStore.cs`, `Vaktr.Collector/CollectorService.cs`, `Vaktr.App/ShellWindow.Polished.cs`
+
+v1.0.0 does not appear to prune old data from `%LocalAppData%\Vaktr\Data\`. The database grows indefinitely even when a retention window is configured. This causes the database file to bloat over time and contributes to the long-range performance issues.
+
+**Investigation areas:**
+- `MaybeMaintainAsync` is called after each `AppendSnapshotAsync` but only fires when `timestamp >= _nextMaintenanceUtc` (every 15 minutes). Verify this is actually triggering:
+  - Is `_nextMaintenanceUtc` being set correctly on startup?
+  - Is the `_config` field non-null when `MaybeMaintainAsync` runs?
+  - Is the `_gate` semaphore causing `MaybeMaintainAsync` to be skipped (it runs inside the gate from `AppendSnapshotAsync`)?
+- `CompactAndPruneAsync` logic:
+  - Verify `config.GetRetentionWindow()` returns the expected value (not `TimeSpan.Zero` or `TimeSpan.MaxValue`)
+  - Verify `retentionCutoffMs` is computed correctly — ensure it's not in the future
+  - Check if `RetentionPreset.Unlimited` (value 0) bypasses pruning entirely — if so, is that the default?
+  - Verify the DELETE statements actually match rows (check the `timestamp_ms` values in the DB vs the cutoff)
+- Check if the default config (`RetentionPreset.OneDay`, `MaxRetentionHours = 24`) is being applied correctly on first launch
+- Check if `JsonConfigStore.LoadAsync` returns a config with retention values that `GetRetentionWindow()` interprets as "keep everything"
+- Run `SELECT COUNT(*), MIN(timestamp_ms), MAX(timestamp_ms) FROM metric_samples` on a real database to verify data age
+- Verify `PRAGMA incremental_vacuum(64)` is actually reclaiming space in the `.db` file after DELETE operations
+
+**Fix approach:**
+- Add startup trace logging for the first maintenance run showing retention window and cutoff values
+- Consider running an explicit `PruneAsync` on startup to catch up on any missed maintenance
+- Add a visible indicator in the Control Deck showing database file size (see stretch goal 9.8)
+
 ---
 
 ## 7. Security
 
-### 7.1 - Audit for security issues and vulnerabilities
+### 7.1 - Audit for security issues and vulnerabilities [DONE]
 **Priority:** High
 **Area:** Entire codebase
 
@@ -448,7 +474,7 @@ Perform a security review of the codebase.
 
 ## 8. Documentation
 
-### 8.1 - Update README.md
+### 8.1 - Update README.md [DONE]
 **Priority:** Low
 **Area:** `README.md`
 

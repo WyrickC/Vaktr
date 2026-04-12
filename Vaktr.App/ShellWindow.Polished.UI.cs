@@ -81,29 +81,15 @@ public sealed partial class ShellWindow
     private Grid BuildRootLayout()
     {
         StartupTrace.Write("BuildRootLayout // polished-v19");
-        var shellHalo = new Border
-        {
-            Margin = new Thickness(-10),
-            Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF"),
-            CornerRadius = new CornerRadius(40),
-            Opacity = 0.08,
-        };
 
-        var shellOutline = new Border
-        {
-            Margin = new Thickness(-1),
-            BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(38),
-            Opacity = 0.08,
-        };
-
+        // Simplified shell — removed shellHalo and shellOutline decorative borders
+        // that added layout overhead during resize for negligible visual effect (0.08 opacity)
         var shellBorder = new Border
         {
             Background = ResolveBrush("ShellBackgroundBrush", "#07101B"),
             BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(38),
+            CornerRadius = new CornerRadius(28),
             Padding = new Thickness(28, 12, 28, 26),
             Child = BuildShellStack(),
         };
@@ -117,15 +103,10 @@ public sealed partial class ShellWindow
 
         root.Children.Add(_titleBarDragHost);
 
-        _scrollHost.Content = new Grid
+        _scrollHost.Content = new Border
         {
             Margin = new Thickness(24, 8, 24, 28),
-            Children =
-            {
-                shellHalo,
-                shellOutline,
-                shellBorder,
-            },
+            Child = shellBorder,
         };
         root.Children.Add(_scrollHost);
         Grid.SetRow(_scrollHost, 1);

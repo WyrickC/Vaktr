@@ -36,8 +36,12 @@ public enum TimeRangePreset
     OneHour = 60,
     TwelveHours = 720,
     TwentyFourHours = 1440,
+    TwoDays = 2880,
+    FiveDays = 7200,
     SevenDays = 10080,
     ThirtyDays = 43200,
+    NinetyDays = 129600,
+    OneYear = 525600,
 }
 
 public enum RetentionPreset

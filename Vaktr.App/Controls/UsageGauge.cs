@@ -92,7 +92,7 @@ public sealed class UsageGauge : UserControl
         };
 
         Loaded += (_, _) => ScheduleRedraw();
-        SizeChanged += (_, _) => ScheduleRedraw();
+        SizeChanged += OnGaugeSizeChanged;
     }
 
     public double Value
@@ -151,6 +151,25 @@ public sealed class UsageGauge : UserControl
             return (0.2126 * c.R) + (0.7152 * c.G) + (0.0722 * c.B) >= 170d;
         }
         return false;
+    }
+
+    private CancellationTokenSource? _sizeChangedCts;
+
+    private void OnGaugeSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        _sizeChangedCts?.Cancel();
+        _sizeChangedCts = new CancellationTokenSource();
+        var token = _sizeChangedCts.Token;
+        _ = System.Threading.Tasks.Task.Delay(80, token).ContinueWith(_ =>
+        {
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                if (!token.IsCancellationRequested)
+                {
+                    ScheduleRedraw();
+                }
+            });
+        }, TaskScheduler.Default);
     }
 
     private void ScheduleRedraw(DispatcherQueuePriority priority = DispatcherQueuePriority.Low)

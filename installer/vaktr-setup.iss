@@ -1,19 +1,38 @@
 ; Vaktr Inno Setup Script
-; Compiles into a single VaktrSetup.exe installer
+; Compiles into a single VaktrSetup.exe installer per architecture.
+;
+; Parameters (passed via /D on the command line):
+;   MyAppVersion  - Version string (e.g. "1.0.1")
+;   MyAppArch     - Architecture: "x64compatible" (default) or "arm64"
+;   MyPublishDir  - Publish output directory (default: "..\publish\x64")
+;   MyOutputSuffix - Suffix for the output filename (default: "-x64")
 ;
 ; Prerequisites:
 ;   1. Install Inno Setup: https://jrsoftware.org/isdl.php
 ;   2. Build the app:
 ;        dotnet publish Vaktr.App/Vaktr.App.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained -o publish/x64
-;   3. Open this file in Inno Setup Compiler and click Build → Compile
-;   4. The installer will be created in installer/Output/VaktrSetup.exe
+;   3. Open this file in Inno Setup Compiler and click Build > Compile
+;   4. The installer will be created in installer/Output/
 
 #define MyAppName "Vaktr"
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.1"
+#endif
 #define MyAppPublisher "Vaktr"
 #define MyAppURL "https://github.com/WyrickC/Vaktr"
 #define MyAppExeName "Vaktr.exe"
 #define MyAppDescription "System Telemetry Dashboard"
+
+; Architecture defaults
+#ifndef MyAppArch
+  #define MyAppArch "x64compatible"
+#endif
+#ifndef MyPublishDir
+  #define MyPublishDir "..\publish\x64"
+#endif
+#ifndef MyOutputSuffix
+  #define MyOutputSuffix "-x64"
+#endif
 
 [Setup]
 AppId={{B8F2A1C4-5D6E-4F7A-8B9C-0D1E2F3A4B5C}
@@ -27,7 +46,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=Output
-OutputBaseFilename=VaktrSetup-{#MyAppVersion}-x64
+OutputBaseFilename=VaktrSetup-{#MyAppVersion}{#MyOutputSuffix}
 SetupIconFile=..\Vaktr.App\Assets\Vaktr.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
@@ -35,8 +54,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#MyAppArch}
+ArchitecturesInstallIn64BitMode={#MyAppArch}
 MinVersion=10.0.17763
 CloseApplications=yes
 RestartApplications=no
@@ -50,7 +69,7 @@ Name: "launchonstartup"; Description: "Launch Vaktr when Windows starts"; GroupD
 
 [Files]
 ; Include everything from the publish folder
-Source: "..\publish\x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyPublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppDescription}"

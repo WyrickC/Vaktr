@@ -70,6 +70,12 @@ public sealed class InlineTextEntry : UserControl
 
         Content = _surface;
 
+        Loaded += (_, _) =>
+        {
+            try { ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.IBeam); }
+            catch { /* cursor not supported in all hosts */ }
+        };
+
         Tapped += OnTapped;
         PointerEntered += OnPointerEntered;
         PointerExited += OnPointerExited;
