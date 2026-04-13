@@ -250,35 +250,14 @@ public sealed partial class ShellWindow : Window
 
     private void RefreshThemeVisuals()
     {
-        // Force-clear gradient cache before any surface gradient is rebuilt
         _gradientCache.Clear();
 
-        // Suspend all panel rendering during the theme switch to prevent
-        // individual chart redraws for each panel. After all brushes are updated,
-        // a single low-priority pass redraws everything at once.
-        SetPanelRenderingSuspended(true);
-
-        if (_controlDeckEditableActive)
-        {
-            RenderEditableControlDeck();
-        }
-        else
-        {
-            RenderControlDeckSummary();
-        }
-
-        if (_globalRangeEditorVisible)
-        {
-            RenderGlobalRangeEditor();
-        }
-
+        // All brush updates run synchronously so the user never sees a half-themed state.
+        // Chart redraws are already deferred inside each card's RefreshThemeResources.
+        RefreshWindowChrome();
         RefreshSummaryCardThemeResources();
-        foreach (var card in _panelCards.Values)
-        {
-            card.RefreshThemeResources();
-        }
-
         RefreshGlobalRangeControls();
+
         foreach (var chip in new[]
         {
             _globalRangeButton, _globalOneMinuteButton, _globalFiveMinuteButton,
@@ -291,10 +270,29 @@ public sealed partial class ShellWindow : Window
             chip.RefreshThemeResources();
         }
 
-        RefreshWindowChrome();
+        // Panel cards — update brushes only, chart redraws are deferred inside each card
+        foreach (var card in _panelCards.Values)
+        {
+            card.RefreshThemeResources();
+        }
 
-        // Resume rendering — panels will redraw on the next low-priority frame
-        SetPanelRenderingSuspended(false);
+        // Rebuild control deck on next frame — it's less critical than panel visuals
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
+        {
+            if (_controlDeckEditableActive)
+            {
+                RenderEditableControlDeck();
+            }
+            else
+            {
+                RenderControlDeckSummary();
+            }
+
+            if (_globalRangeEditorVisible)
+            {
+                RenderGlobalRangeEditor();
+            }
+        });
     }
 
     private void BuildSummaryCards()
@@ -403,12 +401,12 @@ public sealed partial class ShellWindow : Window
             var summaryCard = new Border
             {
                 DataContext = card,
-                Background = CreateSurfaceGradient("#0F1C2D", "#15283F"),
+                Background = CreateSurfaceGradient("#0E1A2C", "#142436"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
-                Padding = new Thickness(18, 15, 18, 15),
-                MinHeight = 100,
+                BorderThickness = new Thickness(0.7),
+                CornerRadius = new CornerRadius(16),
+                Padding = new Thickness(16, 13, 16, 13),
+                MinHeight = 92,
                 Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);
@@ -436,26 +434,17 @@ public sealed partial class ShellWindow : Window
         for (var i = 0; i < _summaryCardVisuals.Count; i++)
         {
             var visual = _summaryCardVisuals[i];
-            visual.Surface.Background = CreateSurfaceGradient("#0F1C2D", "#15283F");
+            visual.Surface.Background = CreateSurfaceGradient("#0E1A2C", "#142436");
             visual.Surface.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
             visual.TitleText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
             visual.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             visual.CaptionText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
-
-            // Replace the entire badge tile — the outer Border has themed background/border
-            var newTile = (Border)IconFactory.CreateTile(visual.ViewModel.Title, visual.ViewModel.AccentBrush, 48, 16);
-            newTile.VerticalAlignment = VerticalAlignment.Center;
-            if (visual.BadgeHost.Parent is Grid parentGrid)
+            // Skip badge recreation — just update its background/border colors
+            if (visual.BadgeHost is Border badge)
             {
-                var idx = parentGrid.Children.IndexOf(visual.BadgeHost);
-                if (idx >= 0)
-                {
-                    parentGrid.Children.RemoveAt(idx);
-                    parentGrid.Children.Insert(idx, newTile);
-                }
+                badge.Background = CreateSurfaceGradient("#102131", "#17304A");
+                badge.BorderBrush = visual.ViewModel.AccentBrush;
             }
-
-            _summaryCardVisuals[i] = visual with { BadgeHost = newTile };
         }
     }
 
@@ -768,12 +757,24 @@ public sealed partial class ShellWindow : Window
         }
     }
 
-    private void OnThemeQuickToggle(object? sender, EventArgs e)
+    private async void OnThemeQuickToggle(object? sender, EventArgs e)
     {
         _draftThemeMode = _draftThemeMode == ThemeMode.Dark
             ? ThemeMode.Light
             : ThemeMode.Dark;
-        App.CurrentApp.PreviewTheme(_draftThemeMode);
+        _viewModel.SelectedTheme = _draftThemeMode;
+        App.CurrentApp.ApplyTheme(_draftThemeMode);
+
+        // Persist immediately so the theme is remembered on next launch
+        try
+        {
+            var config = _viewModel.BuildConfig();
+            await _configStore.SaveAsync(config, CancellationToken.None);
+        }
+        catch
+        {
+            // Best effort — theme will still be active for this session
+        }
     }
 
     private void OnToggleGlobalRangeEditor(object? sender, EventArgs e)
@@ -1105,15 +1106,11 @@ public sealed partial class ShellWindow : Window
                 {
                     _isWindowResizing = true;
 
-                    // Cache the scroll content as a bitmap during resize so WinUI
-                    // stretches a raster image instead of re-rendering the visual tree
                     if (_scrollHost.Content is UIElement scrollContent)
                     {
                         scrollContent.CacheMode = new BitmapCache();
                     }
 
-                    // Flatten corner radii — rounded corners with composition
-                    // clipping are expensive during layout
                     if (_shellBorderRef is not null)
                     {
                         _shellBorderRef.CornerRadius = new CornerRadius(0);
@@ -1124,6 +1121,25 @@ public sealed partial class ShellWindow : Window
                         card.SetRenderingSuspended(true);
                         card.SetResizeMode(true);
                     }
+
+                    // Safety: auto-clear resize flag after 5 seconds in case WM_EXITSIZEMOVE is missed
+                    _ = System.Threading.Tasks.Task.Delay(5000).ContinueWith(_ =>
+                    {
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            if (_isWindowResizing)
+                            {
+                                _isWindowResizing = false;
+                                if (_scrollHost.Content is UIElement sc) sc.CacheMode = null;
+                                if (_shellBorderRef is not null) _shellBorderRef.CornerRadius = new CornerRadius(22);
+                                foreach (var card in _panelCards.Values)
+                                {
+                                    card.SetResizeMode(false);
+                                    card.SetRenderingSuspended(false);
+                                }
+                            }
+                        });
+                    }, TaskScheduler.Default);
                 }),
                 onExitResize: () => DispatcherQueue.TryEnqueue(() =>
                 {
@@ -1137,7 +1153,7 @@ public sealed partial class ShellWindow : Window
 
                     if (_shellBorderRef is not null)
                     {
-                        _shellBorderRef.CornerRadius = new CornerRadius(28);
+                        _shellBorderRef.CornerRadius = new CornerRadius(22);
                     }
 
                     var nextColumnCount = DetermineDashboardColumns();
@@ -1703,30 +1719,25 @@ public sealed partial class ShellWindow : Window
         _viewModel.StatusText = "Starting telemetry";
         UpdateStatusText();
         StartupTrace.Write("Calling CollectorService.StartAsync");
-        try
-        {
-            // Run entirely on a thread-pool thread so that ConfigureAwait(false)
-            // continuations inside StartAsync never resume on the UI thread.
-            // Timeout after 10 seconds — LibreHardwareMonitor or PDH can occasionally hang.
-            using var startCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await Task.Run(() => _collectorService.StartAsync(config, startCts.Token));
-            StartupTrace.Write("CollectorService.StartAsync complete");
-        }
-        catch (OperationCanceledException)
-        {
-            StartupTrace.Write("CollectorService.StartAsync timed out — retrying without timeout");
-            // Retry without timeout in background — don't block startup
-            _ = Task.Run(() => _collectorService.StartAsync(config, CancellationToken.None));
-        }
-        catch (Exception ex)
-        {
-            StartupTrace.WriteException("CollectorService.StartAsync", ex);
-            throw;
-        }
 
-        // StartAsync uses ConfigureAwait(false) internally, so we may be on a
-        // thread-pool thread here. Dispatch back to the UI thread for any
-        // visual updates to avoid a WinUI originate error.
+        // Fire and forget — don't block startup waiting for the collector.
+        // The collector runs on a background thread and fires SnapshotCollected
+        // when the first sample is ready. The loading overlay dismisses on
+        // first snapshot, not on collector start.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _collectorService.StartAsync(config, CancellationToken.None);
+                StartupTrace.Write("CollectorService.StartAsync complete");
+            }
+            catch (Exception ex)
+            {
+                StartupTrace.WriteException("CollectorService.StartAsync", ex);
+            }
+        });
+
+        // Immediately proceed with UI setup — don't wait for collector
         DispatcherQueue.TryEnqueue(() =>
         {
             if (!_summaryCardsBound)

@@ -30,9 +30,9 @@ public sealed class ActionChip : UserControl
 
         _surface = new Border
         {
-            CornerRadius = new CornerRadius(11),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(13, 7, 13, 7),
+            CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(0.8),
+            Padding = new Thickness(12, 6, 12, 6),
             Background = ResolveBrush("SurfaceElevatedBrush", "#111D2A"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#243D55"),
         };
@@ -222,8 +222,8 @@ public sealed class ActionChip : UserControl
         if (isLight)
         {
             _surface.BorderBrush = useAccent
-                ? ResolveBrush("AccentStrongBrush", "#065A82")
-                : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#B0C4D8" : "#C4D2E2");
+                ? ResolveBrush("AccentStrongBrush", "#04506E")
+                : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#A0B4C8" : "#C0CEDC");
         }
         else
         {

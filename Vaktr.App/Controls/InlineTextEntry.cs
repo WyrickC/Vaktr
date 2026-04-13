@@ -35,10 +35,10 @@ public sealed class InlineTextEntry : UserControl
         {
             Background = CreateSurfaceGradient("#101B2A", "#142335"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(14, 10, 14, 10),
-            MinHeight = 44,
+            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(12, 8, 12, 8),
+            MinHeight = 40,
         };
 
         _shine = new Border

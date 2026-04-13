@@ -93,24 +93,24 @@ public sealed class App : Application
     {
         var palette = mode == ThemeMode.Light
             ? new ThemePalette(
-                "#EEF5FB",
-                "#F8FBFF",
-                "#C4D2E2",
-                "#FFFFFF",
-                "#F0F5FB",
-                "#E4EDF6",
-                "#B8C9DC",
-                "#E6EFF8",
-                "#C8D8E8",
-                "#0A1824",
-                "#3A5068",
-                "#576F85",
-                "#0975A8",
-                "#065A82",
-                "#C8E8F8",
-                "#1C7EA229",
-                "#19D2A04A",
-                "#90E0EBF5")
+                "#E2EBF4",     // AppBackdrop — noticeably gray-blue, not near-white
+                "#EDF2F8",     // ShellBackground — slightly lighter than backdrop
+                "#B0C0D4",     // ShellStroke — visible border
+                "#FFFFFF",     // Surface — pure white cards stand out from gray bg
+                "#F4F7FB",     // SurfaceElevated — very slight tint
+                "#E8EEF5",     // SurfaceStrong — clearly tinted for buttons/hover
+                "#C0CEDC",     // SurfaceStroke — visible card borders
+                "#DCE5EF",     // PanelOverlay — distinct overlay tint
+                "#B8C8D8",     // SurfaceGrid — visible grid lines
+                "#0A1824",     // TextPrimary — strong dark text
+                "#2C4460",     // TextSecondary — darker for better contrast
+                "#5A7084",     // TextMuted — still readable
+                "#0868A0",     // Accent — deeper blue for visibility on light bg
+                "#04506E",     // AccentStrong — very dark blue
+                "#D0E8F8",     // AccentSoft — light blue tint
+                "#18609020",   // AccentHalo
+                "#15C09040",   // WarningHalo
+                "#80D8E4F0")   // OverlayScrim
             : new ThemePalette(
                 "#030812",
                 "#07101B",

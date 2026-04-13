@@ -89,8 +89,8 @@ public sealed partial class ShellWindow
             Background = ResolveBrush("ShellBackgroundBrush", "#07101B"),
             BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(28),
-            Padding = new Thickness(28, 12, 28, 26),
+            CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(24, 12, 24, 22),
             Child = BuildShellStack(),
         };
 
@@ -483,7 +483,7 @@ public sealed partial class ShellWindow
             Background = ResolveBrush("SurfaceElevatedBrush", "#15263C"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(20),
+            CornerRadius = new CornerRadius(16),
             Padding = new Thickness(15, 13, 15, 13),
             MinHeight = 82,
             Child = new Grid
@@ -641,7 +641,7 @@ public sealed partial class ShellWindow
             Background = ResolveBrush("SurfaceStrongBrush", "#183148"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(16),
             Padding = new Thickness(14),
             Child = new StackPanel
             {
@@ -666,7 +666,7 @@ public sealed partial class ShellWindow
             Background = ResolveBrush("SurfaceStrongBrush", "#183148"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(16),
             Padding = new Thickness(14),
             Child = new StackPanel
             {
@@ -687,7 +687,7 @@ public sealed partial class ShellWindow
         {
             Width = 40,
             Height = 40,
-            CornerRadius = new CornerRadius(20),
+            CornerRadius = new CornerRadius(16),
             BorderBrush = ResolveBrush(isActive ? "AccentStrongBrush" : "SurfaceStrokeBrush", isActive ? "#B7F7FF" : "#27425E"),
             BorderThickness = new Thickness(1),
             Background = ResolveBrush("SurfaceBrush", "#102131"),
@@ -959,7 +959,7 @@ public sealed partial class ShellWindow
         new()
         {
             Height = 1,
-            Margin = new Thickness(20, 4, 20, 4),
+            Margin = new Thickness(32, 8, 32, 8),
             Background = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0),
@@ -967,7 +967,8 @@ public sealed partial class ShellWindow
                 GradientStops = new GradientStopCollection
                 {
                     new GradientStop { Color = Color.FromArgb(0, 39, 66, 94), Offset = 0 },
-                    new GradientStop { Color = Color.FromArgb(50, 39, 66, 94), Offset = 0.5 },
+                    new GradientStop { Color = Color.FromArgb(35, 39, 66, 94), Offset = 0.3 },
+                    new GradientStop { Color = Color.FromArgb(35, 39, 66, 94), Offset = 0.7 },
                     new GradientStop { Color = Color.FromArgb(0, 39, 66, 94), Offset = 1 },
                 },
             },
@@ -978,16 +979,16 @@ public sealed partial class ShellWindow
     {
         return new Grid
         {
-            Margin = new Thickness(4, 2, 4, 0),
+            Margin = new Thickness(4, 4, 4, 0),
             Children =
             {
                 new StackPanel
                 {
-                    Spacing = 2,
+                    Spacing = 3,
                     Children =
                     {
-                        CreateAccentText(eyebrow, 11, 85),
-                        CreateSecondaryText(text, 12.5),
+                        CreateAccentText(eyebrow, 10.5, 100),
+                        CreateSecondaryText(text, 12),
                     },
                 },
             },
@@ -1266,18 +1267,47 @@ public sealed partial class ShellWindow
         // Map dark surface hex to distinct light equivalents — more contrast between layers
         return darkHex.TrimStart('#').ToUpperInvariant() switch
         {
-            "0E1B2C" => ParseColor("#FFFFFF"),  // card surface start (brightest)
-            "13253A" => ParseColor("#F4F8FC"),  // card surface end
-            "0F1C2D" => ParseColor("#F0F5FB"),  // process/summary surface start
-            "15283F" or "14263A" => ParseColor("#E6EFF7"), // process/summary surface end
-            "102131" or "17304A" => ParseColor("#E2EBF4"), // badge surface (darker for depth)
-            "0E1A2B" or "13263B" => ParseColor("#F2F6FB"), // chart frame
-            "101C2D" or "132438" => ParseColor("#EAF1F8"), // legend row
-            "102031" or "15283E" => ParseColor("#E6EEF6"), // range shell
-            "0B1726" or "12243A" => ParseColor("#F6F9FD"), // chart plot (lighter bg)
-            "102133" or "162A40" => ParseColor("#DCE8F2"), // hover surface (noticeably darker)
-            "0F1B2D" or "13243A" => ParseColor("#ECF3FA"), // control editor card
-            _ => ParseColor("#F5F8FC"),  // default light surface
+            // Card surfaces — pure white, stands out from gray-blue backdrop
+            "0E1B2C" or "0E1A2C" => ParseColor("#FFFFFF"),
+            "13253A" or "142436" => ParseColor("#F8FAFD"),
+
+            // Summary/control card surfaces
+            "0F1C2D" => ParseColor("#FAFCFF"),
+            "15283F" or "14263A" => ParseColor("#F0F4FA"),
+
+            // Badge tile — slightly tinted so it's visible on white cards
+            "102131" or "17304A" => ParseColor("#E0EAF4"),
+
+            // Chart frame — light gray inset, clearly distinct from white card
+            "0E1A2B" or "13263B" or "0C1824" or "111F30" => ParseColor("#EDF1F7"),
+
+            // Legend row idle — subtle gray
+            "101C2D" or "132438" => ParseColor("#F0F4F9"),
+            // Legend row hover — noticeably darker
+            "162A3E" or "1C3350" => ParseColor("#E0E8F2"),
+
+            // Range shell
+            "102031" or "15283E" => ParseColor("#ECF0F6"),
+
+            // Chart plot background — light gray, not white (creates inset feel)
+            "0B1726" or "12243A" or "0A141F" or "0F1E2E" => ParseColor("#EEF2F8"),
+
+            // Card hover — visible shift from white
+            "102133" or "162A40" => ParseColor("#E4ECF4"),
+
+            // Control editor cards
+            "0F1B2D" or "13243A" => ParseColor("#F4F7FC"),
+
+            // Process section — gray inset
+            "0D1824" or "12202F" => ParseColor("#EBF0F6"),
+
+            // Scale pill / misc
+            "101D2E" or "152840" => ParseColor("#E6ECF4"),
+
+            // Tooltip
+            "15283B" or "203851" => ParseColor("#FFFFFF"),
+
+            _ => ParseColor("#F2F6FB"),
         };
     }
 

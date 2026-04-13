@@ -134,7 +134,15 @@ public sealed class MainViewModel : ObservableObject
         var preset = MapToRangePreset(minutes);
         foreach (var panel in _panelLookup.Values)
         {
-            panel.ApplyRangePreset(preset);
+            // Only refresh visible panels — hidden ones refresh when shown
+            if (panel.IsVisible)
+            {
+                panel.ApplyRangePreset(preset);
+            }
+            else
+            {
+                panel.SelectedRange = preset;
+            }
         }
     }
 
@@ -142,7 +150,10 @@ public sealed class MainViewModel : ObservableObject
     {
         foreach (var panel in _panelLookup.Values)
         {
-            panel.ZoomToWindow(startUtc, endUtc);
+            if (panel.IsVisible)
+            {
+                panel.ZoomToWindow(startUtc, endUtc);
+            }
         }
     }
 
@@ -281,9 +292,18 @@ public sealed class MainViewModel : ObservableObject
         foreach (var sample in snapshot.Samples)
         {
             var panel = GetOrCreatePanel(sample.PanelKey, sample.PanelTitle, sample.Category, sample.Unit);
-            panel.AppendSample(sample);
+            panel.AppendSampleFast(sample);
             panelCreated |= panel.IsNewlyCreated;
             panel.IsNewlyCreated = false;
+        }
+
+        // Batch presentation refresh for visible panels only — after all samples are appended
+        foreach (var panel in _panelLookup.Values)
+        {
+            if (panel.IsVisible && !panel.IsZoomed)
+            {
+                panel.RefreshPresentation();
+            }
         }
 
         var detailContext = PanelDetailContext.FromSnapshot(snapshot);
@@ -1233,10 +1253,25 @@ public sealed class MetricPanelViewModel : ObservableObject
             _pinnedProcesses.Add(processName);
         }
 
-        // Enable per-process charts automatically when a process is pinned
-        if (_pinnedProcesses.Count > 0 && !_perProcessChartsEnabled)
+        // Auto-enable per-process charts when a process is pinned,
+        // auto-disable when all are unpinned
+        var shouldEnable = _pinnedProcesses.Count > 0;
+        if (_perProcessChartsEnabled != shouldEnable)
         {
-            _perProcessChartsEnabled = true;
+            _perProcessChartsEnabled = shouldEnable;
+
+            if (!shouldEnable)
+            {
+                // Clean up process series buffers when disabling
+                var processKeys = _buffers.Keys
+                    .Where(k => k.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal))
+                    .ToArray();
+                foreach (var key in processKeys)
+                {
+                    _buffers.Remove(key);
+                }
+            }
+
             RaisePropertyChanged(nameof(PerProcessChartsEnabled));
         }
 
@@ -1314,7 +1349,18 @@ public sealed class MetricPanelViewModel : ObservableObject
         RefreshPresentation();
     }
 
+    /// <summary>Appends a sample and refreshes presentation (used for single-sample updates).</summary>
     public void AppendSample(MetricSample sample)
+    {
+        AppendSampleFast(sample);
+        if (!IsZoomed)
+        {
+            RefreshPresentation(sample.Timestamp);
+        }
+    }
+
+    /// <summary>Appends a sample without refreshing presentation (used during batch snapshot apply).</summary>
+    internal void AppendSampleFast(MetricSample sample)
     {
         if (!_buffers.TryGetValue(sample.SeriesKey, out var buffer))
         {
@@ -1340,15 +1386,6 @@ public sealed class MetricPanelViewModel : ObservableObject
         {
             TrimBuffers(sample.Timestamp);
         }
-
-        // When zoomed into a historical range, buffer the data but don't re-render.
-        // The panel stays frozen so the user can inspect without it shifting.
-        if (IsZoomed)
-        {
-            return;
-        }
-
-        RefreshPresentation(sample.Timestamp);
     }
 
     public void SetRetentionWindow(TimeSpan retentionWindow)
@@ -1460,7 +1497,14 @@ public sealed class MetricPanelViewModel : ObservableObject
         }
 
         normalizedPosition = Math.Clamp(normalizedPosition, 0d, 1d);
-        var referenceSeries = VisibleSeries.OrderByDescending(series => series.Points.Count).FirstOrDefault();
+        // Find the series with the most points for timestamp reference
+        ChartSeriesViewModel? referenceSeries = null;
+        foreach (var s in VisibleSeries)
+        {
+            if (referenceSeries is null || s.Points.Count > referenceSeries.Points.Count)
+                referenceSeries = s;
+        }
+
         if (referenceSeries is null || referenceSeries.Points.Count == 0)
         {
             return null;
@@ -1470,23 +1514,16 @@ public sealed class MetricPanelViewModel : ObservableObject
         index = Math.Clamp(index, 0, referenceSeries.Points.Count - 1);
         var targetTimestamp = referenceSeries.Points[index].Timestamp;
 
-        var values = VisibleSeries
-            .Select(series =>
-            {
-                if (series.Points.Count == 0)
-                {
-                    return null;
-                }
+        var values = new List<HoverSeriesValue>(VisibleSeries.Count);
+        foreach (var series in VisibleSeries)
+        {
+            if (series.Points.Count == 0) continue;
+            var seriesIndex = (int)Math.Round(normalizedPosition * Math.Max(0, series.Points.Count - 1));
+            var point = series.Points[Math.Clamp(seriesIndex, 0, series.Points.Count - 1)];
+            values.Add(new HoverSeriesValue(series.Name, FormatValue(point.Value, Unit), series.StrokeBrush));
+        }
 
-                var seriesIndex = (int)Math.Round(normalizedPosition * Math.Max(0, series.Points.Count - 1));
-                var point = series.Points[Math.Clamp(seriesIndex, 0, series.Points.Count - 1)];
-                return new HoverSeriesValue(series.Name, FormatValue(point.Value, Unit), series.StrokeBrush);
-            })
-            .Where(value => value is not null)
-            .Cast<HoverSeriesValue>()
-            .ToArray();
-
-        return values.Length == 0 ? null : new PanelHoverInfo(targetTimestamp, values);
+        return values.Count == 0 ? null : new PanelHoverInfo(targetTimestamp, values);
     }
 
     public void RequestExpand() => ExpandRequested?.Invoke(this, EventArgs.Empty);
@@ -1529,7 +1566,7 @@ public sealed class MetricPanelViewModel : ObservableObject
         RefreshPresentation();
     }
 
-    private void RefreshPresentation(DateTimeOffset? anchor = null)
+    internal void RefreshPresentation(DateTimeOffset? anchor = null)
     {
         var liveAnchor = anchor ?? _latestPointTimestampUtc;
         var end = IsZoomed ? _zoomWindowEndUtc!.Value : liveAnchor;
@@ -1556,8 +1593,8 @@ public sealed class MetricPanelViewModel : ObservableObject
             // When a series is focused, dim unfocused series by using a low-opacity brush
             // rather than hiding them entirely, so the user retains visual context.
             var isFocused = !hasFocus || string.Equals(buffer.Key, _focusedSeriesKey, StringComparison.OrdinalIgnoreCase);
-            var strokeBrush = isFocused ? buffer.StrokeBrush : CreateDimmedBrush(buffer.StrokeBrush);
-            var fillBrush = isFocused ? buffer.FillBrush : CreateDimmedBrush(buffer.FillBrush);
+            var strokeBrush = isFocused ? buffer.StrokeBrush : GetOrCreateDimmedBrush(buffer.StrokeBrush);
+            var fillBrush = isFocused ? buffer.FillBrush : GetOrCreateDimmedBrush(buffer.FillBrush);
 
             visibleSeries.Add(new ChartSeriesViewModel(buffer.Key, buffer.Name, points, strokeBrush, fillBrush));
         }
@@ -1574,16 +1611,27 @@ public sealed class MetricPanelViewModel : ObservableObject
         FooterText = BuildFooterText(start, end);
     }
 
+    /// <summary>Gets the latest value from a buffer by key, or 0 if not found.</summary>
+    private double LatestBufferValue(string key)
+    {
+        return _buffers.TryGetValue(key, out var buf) && buf.Points.Count > 0
+            ? buf.Points[^1].Value
+            : 0d;
+    }
+
+    /// <summary>Gets the latest value from a visible series by name, or 0 if not found.</summary>
+    private double LatestSeriesValue(string name)
+    {
+        foreach (var s in VisibleSeries)
+        {
+            if (s.Points.Count > 0 && string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+                return s.Points[^1].Value;
+        }
+        return 0d;
+    }
+
     private void UpdateSummaryText()
     {
-        var latestByKey = new Dictionary<string, double>(_buffers.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in _buffers)
-        {
-            if (entry.Value.Points.Count > 0)
-            {
-                latestByKey[entry.Key] = entry.Value.Points[^1].Value;
-            }
-        }
 
         if (VisibleSeries.Count == 0)
         {
@@ -1608,19 +1656,14 @@ public sealed class MetricPanelViewModel : ObservableObject
 
         EmptyStateText = "Waiting for samples";
 
-        var latestBySeries = new Dictionary<string, double>(VisibleSeries.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var series in VisibleSeries)
+        // No dictionary allocation — use LatestSeriesValue/LatestBufferValue helpers
         {
-            if (series.Points.Count > 0)
-            {
-                latestBySeries[series.Name] = series.Points[^1].Value;
-            }
         }
 
         switch (Category)
         {
             case MetricCategory.Cpu when string.Equals(PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase):
-                var cpuUsage = latestBySeries.GetValueOrDefault("Usage");
+                var cpuUsage = LatestSeriesValue("Usage");
                 UtilizationPercent = cpuUsage;
                 CurrentValue = $"{cpuUsage:0.#}%";
                 SecondaryValue = BuildJoinedText(
@@ -1633,10 +1676,16 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Cpu:
-                var averageCore = latestBySeries.Count > 0 ? latestBySeries.Values.Average() : 0d;
+                var coreCount = VisibleSeries.Count;
+                var coreSum = 0d;
+                foreach (var s in VisibleSeries)
+                {
+                    if (s.Points.Count > 0) coreSum += s.Points[^1].Value;
+                }
+                var averageCore = coreCount > 0 ? coreSum / coreCount : 0d;
                 if (string.Equals(PanelKey, "cpu-frequency", StringComparison.OrdinalIgnoreCase))
                 {
-                    var clockMhz = latestBySeries.GetValueOrDefault("Clock");
+                    var clockMhz = LatestSeriesValue("Clock");
                     CurrentValue = $"{clockMhz / 1000d:0.00} GHz";
                     SecondaryValue = BuildJoinedText(
                         "Processor frequency",
@@ -1651,7 +1700,7 @@ public sealed class MetricPanelViewModel : ObservableObject
 
                 if (string.Equals(PanelKey, "cpu-temperature", StringComparison.OrdinalIgnoreCase))
                 {
-                    var cpuTemp = latestBySeries.GetValueOrDefault("Temperature");
+                    var cpuTemp = LatestSeriesValue("Temperature");
                     CurrentValue = $"{cpuTemp:0.#} C";
                     SecondaryValue = "Processor temperature";
                     ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
@@ -1661,13 +1710,13 @@ public sealed class MetricPanelViewModel : ObservableObject
 
                 CurrentValue = $"{averageCore:0.#}% avg";
                 SecondaryValue = BuildJoinedText(
-                    latestBySeries.Count == 1 ? "1 core lane active" : $"{latestBySeries.Count} core lanes active",
+                    coreCount == 1 ? "1 core lane active" : $"{coreCount} core lanes active",
                     _detailContext.CpuFrequencyMhz > 0 ? $"{_detailContext.CpuFrequencyMhz / 1000d:0.00} GHz" : null);
-                ScaleLabel = $"100% per core / {latestBySeries.Count} cores";
+                ScaleLabel = $"100% per core / {coreCount} cores";
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Memory:
-                var used = latestBySeries.GetValueOrDefault("Used");
+                var used = LatestSeriesValue("Used");
                 // Use total-gb from the collector (reports TotalPhys directly) for an accurate ceiling.
                 // Fallback to used + available if total-gb isn't available yet.
                 var total = _buffers.TryGetValue("total-gb", out var totalBuf) && totalBuf.Points.Count > 0
@@ -1691,7 +1740,7 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ChartCeilingValue = Math.Max(total, 1d);
                 break;
             case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-memory", StringComparison.OrdinalIgnoreCase):
-                var dedicated = latestBySeries.GetValueOrDefault("Dedicated");
+                var dedicated = LatestSeriesValue("Dedicated");
                 var peakVram = ResolveDynamicCeiling(VisibleSeries, Math.Max(1d, dedicated));
                 CurrentValue = $"{FormatCapacity(dedicated)}";
                 SecondaryValue = $"Dedicated VRAM · peak {FormatCapacity(peakVram)}";
@@ -1699,33 +1748,33 @@ public sealed class MetricPanelViewModel : ObservableObject
                 ScaleLabel = $"{FormatCapacity(peakVram)} peak";
                 break;
             case MetricCategory.Gpu when string.Equals(PanelKey, "gpu-temperature", StringComparison.OrdinalIgnoreCase):
-                var gpuTemp = latestBySeries.GetValueOrDefault("Temperature");
+                var gpuTemp = LatestSeriesValue("Temperature");
                 CurrentValue = $"{gpuTemp:0.#} C";
                 SecondaryValue = "Graphics temperature";
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
                 ScaleLabel = $"Max {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Gpu:
-                UtilizationPercent = latestBySeries.GetValueOrDefault("Usage");
-                CurrentValue = $"{latestBySeries.GetValueOrDefault("Usage"):0.#}%";
+                UtilizationPercent = LatestSeriesValue("Usage");
+                CurrentValue = $"{LatestSeriesValue("Usage"):0.#}%";
                 SecondaryValue = "GPU usage";
                 ChartCeilingValue = 100d;
                 ScaleLabel = "100% ceiling";
                 break;
             case MetricCategory.Disk when PrefersGaugeVisual:
-                UtilizationPercent = latestBySeries.GetValueOrDefault("Used");
-                CurrentValue = $"{latestBySeries.GetValueOrDefault("Used"):0.#}% used";
-                var totalGb = latestByKey.GetValueOrDefault("total-gb");
-                var usedGb = latestByKey.GetValueOrDefault("used-gb");
+                UtilizationPercent = LatestSeriesValue("Used");
+                CurrentValue = $"{LatestSeriesValue("Used"):0.#}% used";
+                var totalGb = LatestBufferValue("total-gb");
+                var usedGb = LatestBufferValue("used-gb");
                 SecondaryValue = totalGb > 0 ? $"{FormatCapacity(usedGb)} of {FormatCapacity(totalGb)}" : "Drive capacity";
                 ScaleLabel = totalGb > 0 ? $"{FormatCapacity(totalGb)} total" : "100% ceiling";
                 ChartCeilingValue = 100d;
                 break;
             case MetricCategory.Disk:
                 _detailContext.TryGetDriveDetail(PanelKey, out var driveDetail);
-                CurrentValue = $"{latestBySeries.GetValueOrDefault("Read"):0.0} MB/s read";
+                CurrentValue = $"{LatestSeriesValue("Read"):0.0} MB/s read";
                 SecondaryValue = BuildJoinedText(
-                    $"{latestBySeries.GetValueOrDefault("Write"):0.0} MB/s write",
+                    $"{LatestSeriesValue("Write"):0.0} MB/s write",
                     driveDetail.TotalGigabytes > 0 ? $"{driveDetail.UsedPercent:0.#}% full" : null);
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
                 ScaleLabel = driveDetail.TotalGigabytes > 0
@@ -1733,16 +1782,16 @@ public sealed class MetricPanelViewModel : ObservableObject
                     : $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.Network:
-                CurrentValue = $"{latestBySeries.GetValueOrDefault("Down"):0.0} Mbps down";
-                SecondaryValue = $"{latestBySeries.GetValueOrDefault("Up"):0.0} Mbps up";
+                CurrentValue = $"{LatestSeriesValue("Down"):0.0} Mbps down";
+                SecondaryValue = $"{LatestSeriesValue("Up"):0.0} Mbps up";
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 10d);
                 ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
             case MetricCategory.System:
-                CurrentValue = $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Processes"))} proc";
+                CurrentValue = $"{FormatCompactCount(LatestSeriesValue("Processes"))} proc";
                 SecondaryValue = BuildJoinedText(
-                    $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Threads"))} thr",
-                    $"{FormatCompactCount(latestBySeries.GetValueOrDefault("Handles"))} handles");
+                    $"{FormatCompactCount(LatestSeriesValue("Threads"))} thr",
+                    $"{FormatCompactCount(LatestSeriesValue("Handles"))} handles");
                 ChartCeilingValue = ResolveDynamicCeiling(VisibleSeries, 100d);
                 ScaleLabel = $"Peak {FormatValue(ChartCeilingValue, Unit)}";
                 break;
@@ -1787,12 +1836,31 @@ public sealed class MetricPanelViewModel : ObservableObject
         var keepAfter = anchor - _retentionWindow;
         foreach (var buffer in _buffers.Values)
         {
-            buffer.Points.RemoveAll(point => point.Timestamp < keepAfter);
-
-            // Hard cap to prevent unbounded memory growth on long retention windows
-            if (buffer.Points.Count > MaxBufferPointsPerSeries)
+            // Binary search for the cutoff — O(log N) instead of O(N) RemoveAll
+            var points = buffer.Points;
+            if (points.Count > 0 && points[0].Timestamp < keepAfter)
             {
-                buffer.Points.RemoveRange(0, buffer.Points.Count - MaxBufferPointsPerSeries);
+                var lo = 0;
+                var hi = points.Count - 1;
+                while (lo < hi)
+                {
+                    var mid = lo + ((hi - lo) >> 1);
+                    if (points[mid].Timestamp < keepAfter)
+                        lo = mid + 1;
+                    else
+                        hi = mid;
+                }
+
+                if (lo > 0)
+                {
+                    points.RemoveRange(0, lo);
+                }
+            }
+
+            // Hard cap to prevent unbounded memory growth
+            if (points.Count > MaxBufferPointsPerSeries)
+            {
+                points.RemoveRange(0, points.Count - MaxBufferPointsPerSeries);
             }
 
             buffer.LastTrimUtc = anchor;
@@ -1814,16 +1882,14 @@ public sealed class MetricPanelViewModel : ObservableObject
             return;
         }
 
-        // Manual max instead of LINQ
-        var peakMemory = 0d;
-        foreach (var p in sourceProcesses)
+        // Use total system memory for meter scaling (not peak process)
+        // so bars represent proportion of total RAM, not relative to each other
+        var totalMemory = LatestBufferValue("total-gb");
+        if (totalMemory <= 0)
         {
-            if (p.MemoryGigabytes > peakMemory)
-            {
-                peakMemory = p.MemoryGigabytes;
-            }
+            totalMemory = LatestBufferValue("used-gb") + LatestBufferValue("available-gb");
         }
-        peakMemory = Math.Max(0.1d, peakMemory);
+        totalMemory = Math.Max(1d, totalMemory);
 
         // Copy to array for in-place sort (avoids LINQ OrderBy allocations)
         var sorted = new ProcessActivitySample[sourceProcesses.Count];
@@ -1867,27 +1933,27 @@ public sealed class MetricPanelViewModel : ObservableObject
         var rows = new ProcessListItemViewModel[visibleCount];
         for (var i = 0; i < visibleCount; i++)
         {
-            rows[i] = CreateProcessRow(sorted[i], peakMemory);
+            rows[i] = CreateProcessRow(sorted[i], totalMemory);
         }
 
         ProcessRows = rows;
     }
 
-    private ProcessListItemViewModel CreateProcessRow(ProcessActivitySample process, double peakMemory)
+    private ProcessListItemViewModel CreateProcessRow(ProcessActivitySample process, double totalMemory)
     {
         var isPinned = _pinnedProcesses.Contains(process.Name);
-        // Look up the chart color from the buffer if this process has a chart series
         var seriesKey = $"{ProcessSeriesPrefix}{process.Name}";
         Brush? chartColor = _perProcessChartsEnabled && _buffers.TryGetValue(seriesKey, out var buf) ? buf.StrokeBrush : null;
 
         if (string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase))
         {
+            // Meter bar shows proportion of TOTAL system RAM, not relative to peak process
             return new ProcessListItemViewModel(
                 $"{process.ProcessId}",
                 process.Name,
                 FormatCapacity(process.MemoryGigabytes),
                 $"{process.CpuPercent:0.#}% cpu · {FormatCompactCount(process.ThreadCount)} threads",
-                Math.Clamp(process.MemoryGigabytes / peakMemory, 0d, 1d),
+                Math.Clamp(process.MemoryGigabytes / totalMemory, 0d, 1d),
                 isPinned,
                 chartColor);
         }
@@ -1922,6 +1988,21 @@ public sealed class MetricPanelViewModel : ObservableObject
         };
 
         return new SolidColorBrush(color);
+    }
+
+    // Cache dimmed brushes to avoid creating new brush objects on every render tick
+    private static readonly Dictionary<Brush, Brush> s_dimmedBrushCache = new(ReferenceEqualityComparer.Instance);
+
+    private static Brush GetOrCreateDimmedBrush(Brush source)
+    {
+        if (s_dimmedBrushCache.TryGetValue(source, out var cached))
+        {
+            return cached;
+        }
+
+        var dimmed = CreateDimmedBrush(source);
+        s_dimmedBrushCache[source] = dimmed;
+        return dimmed;
     }
 
     private static Brush CreateDimmedBrush(Brush source)

@@ -449,32 +449,6 @@ public sealed class TelemetryChart : UserControl
             }
         }
 
-        // "Now" marker — subtle accent tick at the right edge of real-time charts
-        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var endMs2 = end.ToUnixTimeMilliseconds();
-        var startMs2 = start.ToUnixTimeMilliseconds();
-        if (Math.Abs(nowMs - endMs2) < 120_000 && endMs2 > startMs2)
-        {
-            var nowX = LeftPadding + (plotWidth * Math.Clamp((double)(nowMs - startMs2) / (endMs2 - startMs2), 0d, 1d));
-            var nowTriangle = new Path
-            {
-                Fill = ResolveBrush("AccentBrush", "#66E7FF"),
-                Opacity = 0.7,
-            };
-            var nowFigure = new PathFigure
-            {
-                StartPoint = new Windows.Foundation.Point(nowX, TopPadding + plotHeight - 6),
-                IsClosed = true,
-                IsFilled = true,
-                Segments = new PathSegmentCollection
-                {
-                    new LineSegment { Point = new Windows.Foundation.Point(nowX - 3, TopPadding + plotHeight) },
-                    new LineSegment { Point = new Windows.Foundation.Point(nowX + 3, TopPadding + plotHeight) },
-                },
-            };
-            nowTriangle.Data = new PathGeometry { Figures = { nowFigure } };
-            _canvas.Children.Add(nowTriangle);
-        }
     }
 
     private void DrawPlotSurface(double plotWidth, double plotHeight)
@@ -510,7 +484,7 @@ public sealed class TelemetryChart : UserControl
 
         // Subtle edge fade for depth at left and right edges
         var edgeFadeWidth = Math.Min(24d, plotWidth * 0.06);
-        var plotBg = IsLightPaletteActive() ? BrushFactory.ParseColor("#F6F9FD") : BrushFactory.ParseColor("#0A141F");
+        var plotBg = IsLightPaletteActive() ? BrushFactory.ParseColor("#EEF2F8") : BrushFactory.ParseColor("#0A141F");
         var leftFade = new Rectangle
         {
             Width = edgeFadeWidth,
@@ -1205,6 +1179,16 @@ public sealed class TelemetryChart : UserControl
         return BrushFactory.CreateBrush(fallbackHex);
     }
 
+    private static Color LiftToLight(string darkHex)
+    {
+        return darkHex.TrimStart('#').ToUpperInvariant() switch
+        {
+            "0A141F" or "0F1E2E" => BrushFactory.ParseColor("#EEF2F8"), // plot background — gray inset
+            "15283B" or "203851" => BrushFactory.ParseColor("#FFFFFF"), // tooltip — white
+            _ => BrushFactory.ParseColor("#F2F6FB"),
+        };
+    }
+
     private static Brush CreateSurfaceGradient(string startHex, string endHex)
     {
         if (IsLightPaletteActive())
@@ -1215,8 +1199,8 @@ public sealed class TelemetryChart : UserControl
                 EndPoint = new Windows.Foundation.Point(1, 1),
                 GradientStops = new GradientStopCollection
                 {
-                    new GradientStop { Color = ResolveColor("SurfaceBrush", "#F8FBFF"), Offset = 0d },
-                    new GradientStop { Color = ResolveColor("SurfaceElevatedBrush", "#EEF5FB"), Offset = 1d },
+                    new GradientStop { Color = LiftToLight(startHex), Offset = 0d },
+                    new GradientStop { Color = LiftToLight(endHex), Offset = 1d },
                 },
             };
         }

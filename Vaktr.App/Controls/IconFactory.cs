@@ -18,14 +18,14 @@ internal static class IconFactory
         if (isLight && accentBrush is SolidColorBrush lightSolid)
         {
             var c = lightSolid.Color;
-            var darkC = DarkenColor(c, 0.5);
+            var boldC = DarkenColor(c, 0.55);
             return new Border
             {
                 Width = size,
                 Height = size,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, darkC.R, darkC.G, darkC.B)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, darkC.R, darkC.G, darkC.B)),
-                BorderThickness = new Thickness(1.2),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(40, boldC.R, boldC.G, boldC.B)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(80, boldC.R, boldC.G, boldC.B)),
+                BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(corner),
                 Child = CreateIcon(key, accentBrush, iconSize),
             };
@@ -62,9 +62,9 @@ internal static class IconFactory
         var glyph = ResolveGlyph(Normalize(key));
         var isLight = IsLightPaletteActive();
 
-        // In light mode, darken the icon for strong contrast on light backgrounds
+        // In light mode, use a bold saturated version for strong contrast
         var iconBrush = isLight && accentBrush is SolidColorBrush solid
-            ? new SolidColorBrush(DarkenColor(solid.Color, 0.5))
+            ? new SolidColorBrush(DarkenColor(solid.Color, 0.6))
             : accentBrush;
 
         return new FontIcon
