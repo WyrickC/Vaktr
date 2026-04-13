@@ -297,23 +297,39 @@ public sealed class MainViewModel : ObservableObject
             panel.IsNewlyCreated = false;
         }
 
-        // Batch presentation refresh for visible panels only — after all samples are appended
+        // Batch presentation refresh only for panels that received new data
         foreach (var panel in _panelLookup.Values)
         {
-            if (panel.IsVisible && !panel.IsZoomed)
+            if (panel.IsVisible && !panel.IsZoomed && panel._hasNewSamples)
             {
+                panel._hasNewSamples = false;
                 panel.RefreshPresentation();
             }
         }
 
-        var detailContext = PanelDetailContext.FromSnapshot(snapshot);
+        // Only extract detail context if at least one visible panel needs it
+        var needsDetail = false;
         foreach (var panel in _panelLookup.Values)
         {
-            // Skip hidden panels to reduce per-tick work
-            if (!panel.IsVisible)
+            if (!panel.IsVisible) continue;
+            if (panel.SupportsProcessTable || panel.Category == MetricCategory.Cpu || panel.Category == MetricCategory.Disk)
             {
-                continue;
+                needsDetail = true;
+                break;
             }
+        }
+
+        var detailContext = needsDetail ? PanelDetailContext.FromSnapshot(snapshot) : PanelDetailContext.Empty;
+        foreach (var panel in _panelLookup.Values)
+        {
+            // Only apply detail context to visible panels that need it
+            // (process tables + panels that show frequency/process/thread counts)
+            if (!panel.IsVisible) continue;
+            if (!panel.SupportsProcessTable &&
+                !string.Equals(panel.PanelKey, "cpu-total", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(panel.PanelKey, "cpu-cores", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(panel.PanelKey, "cpu-frequency", StringComparison.OrdinalIgnoreCase) &&
+                panel.Category != MetricCategory.Disk) continue;
 
             panel.ApplyDetailContext(detailContext);
         }
@@ -957,6 +973,7 @@ public enum ProcessSortMode
     Highest = 0,
     Lowest = 1,
     Name = 2,
+    NameReverse = 3,
 }
 
 public sealed class ProcessListItemViewModel
@@ -1020,6 +1037,8 @@ public sealed class MetricPanelViewModel : ObservableObject
     private const string ProcessSeriesPrefix = "proc:";
     private readonly HashSet<string> _pinnedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private TimeSpan _retentionWindow = TimeSpan.FromHours(VaktrConfig.DefaultMaxRetentionHours);
+    internal bool _hasNewSamples;
+    internal bool _forceProcessRowRebuild;
 
     public MetricPanelViewModel(string panelKey, string title, MetricCategory category, MetricUnit unit)
     {
@@ -1252,30 +1271,21 @@ public sealed class MetricPanelViewModel : ObservableObject
         {
             _pinnedProcesses.Add(processName);
         }
-
-        // Auto-enable per-process charts when a process is pinned,
-        // auto-disable when all are unpinned
-        var shouldEnable = _pinnedProcesses.Count > 0;
-        if (_perProcessChartsEnabled != shouldEnable)
+        else
         {
-            _perProcessChartsEnabled = shouldEnable;
-
-            if (!shouldEnable)
-            {
-                // Clean up process series buffers when disabling
-                var processKeys = _buffers.Keys
-                    .Where(k => k.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal))
-                    .ToArray();
-                foreach (var key in processKeys)
-                {
-                    _buffers.Remove(key);
-                }
-            }
-
-            RaisePropertyChanged(nameof(PerProcessChartsEnabled));
+            // Unpinned — remove that process's chart data
+            var seriesKey = $"{ProcessSeriesPrefix}{processName}";
+            _buffers.Remove(seriesKey);
         }
 
+        // Enable/disable per-process charts based on pin count
+        _perProcessChartsEnabled = _pinnedProcesses.Count > 0;
+
+        // Force a full process row rebuild so pin visual state (bold, dot) updates.
+        // The flag stays true until the UI consumes it in RefreshProcessRows.
+        _forceProcessRowRebuild = true;
         RefreshPresentation();
+        RefreshProcessRows();
     }
 
     /// <summary>Whether a specific process is pinned to the chart.</summary>
@@ -1362,6 +1372,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     /// <summary>Appends a sample without refreshing presentation (used during batch snapshot apply).</summary>
     internal void AppendSampleFast(MetricSample sample)
     {
+        _hasNewSamples = true;
         if (!_buffers.TryGetValue(sample.SeriesKey, out var buffer))
         {
             var paletteIndex = _buffers.Count;
@@ -1424,7 +1435,8 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private void InjectPerProcessChartData(PanelDetailContext detailContext)
     {
-        if (!_perProcessChartsEnabled || detailContext.Processes.Count == 0)
+        // Only inject data for explicitly pinned processes — no auto top-N
+        if (_pinnedProcesses.Count == 0 || detailContext.Processes.Count == 0)
         {
             return;
         }
@@ -1432,33 +1444,9 @@ public sealed class MetricPanelViewModel : ObservableObject
         var timestamp = _latestPointTimestampUtc;
         var isMemoryPanel = string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
 
-        // Build the set of processes to chart: pinned processes + top N by metric
-        var sorted = new List<ProcessActivitySample>(detailContext.Processes);
-        sorted.Sort((a, b) => isMemoryPanel
-            ? b.MemoryGigabytes.CompareTo(a.MemoryGigabytes)
-            : b.CpuPercent.CompareTo(a.CpuPercent));
-
-        var charted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Always include pinned processes
-        foreach (var proc in sorted)
+        foreach (var proc in detailContext.Processes)
         {
-            if (_pinnedProcesses.Contains(proc.Name))
-            {
-                charted.Add(proc.Name);
-            }
-        }
-
-        // Fill remaining slots with top N
-        foreach (var proc in sorted)
-        {
-            if (charted.Count >= MaxProcessChartSeries) break;
-            charted.Add(proc.Name);
-        }
-
-        foreach (var proc in sorted)
-        {
-            if (!charted.Contains(proc.Name)) continue;
+            if (!_pinnedProcesses.Contains(proc.Name)) continue;
 
             var value = isMemoryPanel ? proc.MemoryGigabytes : proc.CpuPercent;
             if (value <= 0) continue;
@@ -1806,8 +1794,17 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private bool ShouldShowSeries(SeriesBuffer buffer)
     {
-        // Hide per-process chart series when toggle is off
-        if (buffer.Key.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal) && !_perProcessChartsEnabled)
+        var isProcessSeries = buffer.Key.StartsWith(ProcessSeriesPrefix, StringComparison.Ordinal);
+
+        // Hide per-process chart series when no processes are pinned
+        if (isProcessSeries && !_perProcessChartsEnabled)
+        {
+            return false;
+        }
+
+        // When processes are pinned on a panel that supports process tables,
+        // hide the overall usage series so only the pinned process lines show.
+        if (_perProcessChartsEnabled && !isProcessSeries && SupportsProcessTable)
         {
             return false;
         }
@@ -1829,7 +1826,7 @@ public sealed class MetricPanelViewModel : ObservableObject
     }
 
     /// <summary>Maximum points per series buffer to cap memory usage.</summary>
-    private const int MaxBufferPointsPerSeries = 50_000;
+    private const int MaxBufferPointsPerSeries = 20_000;
 
     private void TrimBuffers(DateTimeOffset anchor)
     {
@@ -1899,13 +1896,16 @@ public sealed class MetricPanelViewModel : ObservableObject
         }
 
         var isMemoryPanel = string.Equals(PanelKey, "memory", StringComparison.OrdinalIgnoreCase);
+        var sortMode = ProcessSortMode;
         Array.Sort(sorted, (a, b) =>
         {
             int cmp;
-            switch (ProcessSortMode)
+            switch (sortMode)
             {
                 case ProcessSortMode.Name:
                     return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                case ProcessSortMode.NameReverse:
+                    return string.Compare(b.Name, a.Name, StringComparison.OrdinalIgnoreCase);
                 case ProcessSortMode.Lowest when isMemoryPanel:
                     cmp = a.MemoryGigabytes.CompareTo(b.MemoryGigabytes);
                     return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
@@ -1924,9 +1924,9 @@ public sealed class MetricPanelViewModel : ObservableObject
         });
 
         _totalProcessCount = sorted.Length;
-        // Cap visible rows — UI perf degrades with hundreds of rows
-        const int defaultVisibleRows = 30;
-        const int expandedVisibleRows = 100;
+        // Cap visible rows — fewer rows = less DOM, less layout cost
+        const int defaultVisibleRows = 15;
+        const int expandedVisibleRows = 50;
         var visibleCount = _processListExpanded
             ? Math.Min(sorted.Length, expandedVisibleRows)
             : Math.Min(sorted.Length, defaultVisibleRows);
@@ -2313,15 +2313,15 @@ public sealed class MetricPanelViewModel : ObservableObject
 
     private static int ResolveVisiblePointBudget(TimeSpan window) => window switch
     {
-        _ when window >= TimeSpan.FromDays(365) => 160,
-        _ when window >= TimeSpan.FromDays(90) => 200,
-        _ when window >= TimeSpan.FromDays(30) => 240,
-        _ when window >= TimeSpan.FromDays(7) => 300,
-        _ when window >= TimeSpan.FromDays(2) => 360,
-        _ when window >= TimeSpan.FromDays(1) => 380,
-        _ when window >= TimeSpan.FromHours(12) => 460,
-        _ when window >= TimeSpan.FromHours(1) => 560,
-        _ => 680,
+        _ when window >= TimeSpan.FromDays(365) => 120,
+        _ when window >= TimeSpan.FromDays(90) => 150,
+        _ when window >= TimeSpan.FromDays(30) => 180,
+        _ when window >= TimeSpan.FromDays(7) => 220,
+        _ when window >= TimeSpan.FromDays(2) => 260,
+        _ when window >= TimeSpan.FromDays(1) => 280,
+        _ when window >= TimeSpan.FromHours(12) => 320,
+        _ when window >= TimeSpan.FromHours(1) => 380,
+        _ => 450,
     };
 
     private static string FormatRangeLabel(int minutes)

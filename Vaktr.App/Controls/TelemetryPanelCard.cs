@@ -58,7 +58,7 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly ActionChip _perProcessChartButton;
     private readonly Border _legendDivider;
     private readonly Dictionary<string, (ClickableBorder Row, Border InnerBorder, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack, Ellipse? ChartDot)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (ClickableBorder Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, LinearGradientBrush FillBrush, Border RowBorder, Ellipse? ChartDot)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private bool _processScrollLoadQueued;
     private bool _processSectionRevealed;
     private MetricPanelViewModel? _observedPanel;
@@ -238,6 +238,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             Spacing = 0,
         };
+        // Click handlers are attached per-row in the slow path of RefreshProcessRows
         _processScroller = new ScrollViewer
         {
             MaxHeight = 320,
@@ -794,11 +795,9 @@ public sealed class TelemetryPanelCard : UserControl
 
         foreach (var rowParts in _processRowParts.Values)
         {
-            rowParts.Row.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-            rowParts.NameText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-            rowParts.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-            rowParts.CaptionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-            rowParts.MeterTrack.Background = ResolveBrush("SurfaceStrongBrush", "#162A41");
+            rowParts.NameText.Foreground = primaryBrush;
+            rowParts.ValueText.Foreground = primaryBrush;
+            rowParts.CaptionText.Foreground = mutedBrush;
         }
 
         if (Panel is { } panel)
@@ -906,36 +905,54 @@ public sealed class TelemetryPanelCard : UserControl
             return;
         }
 
-        // Fast path: if row count and keys match in order, just update values in-place
+        // Fast path: if all rows already exist as UI elements, just reorder + update in-place.
+        // Skip fast path if a pin state changed (need full rebuild for bold/dot visuals).
         var rows = panel.ProcessRows;
-        if (_processRowsHost.Children.Count == rows.Count)
+        var forceRebuild = panel._forceProcessRowRebuild;
+        if (forceRebuild) panel._forceProcessRowRebuild = false; // consume the flag
+        var allExist = !forceRebuild && rows.Count <= _processRowParts.Count;
+        if (allExist)
         {
-            var allMatch = true;
             for (var i = 0; i < rows.Count; i++)
             {
-                if (!_processRowParts.TryGetValue(rows[i].Key, out var rp) ||
-                    !ReferenceEquals(_processRowsHost.Children[i], rp.Row))
+                if (!_processRowParts.ContainsKey(rows[i].Key))
                 {
-                    allMatch = false;
+                    allExist = false;
                     break;
                 }
             }
+        }
 
-            if (allMatch)
+        if (allExist && rows.Count > 0)
+        {
+            // Reorder existing rows and update values — no new UI elements created
+            _processRowsHost.Children.Clear();
+            for (var i = 0; i < rows.Count; i++)
             {
-                // Same rows, same order — just update text and meter values
-                for (var i = 0; i < rows.Count; i++)
+                var item = rows[i];
+                var rp = _processRowParts[item.Key];
+                rp.NameText.Text = item.Name;
+                rp.ValueText.Text = item.Value;
+                rp.CaptionText.Text = item.Caption;
+                var intensity = Math.Clamp(item.Intensity, 0d, 1d);
+                if (rp.FillBrush.GradientStops.Count >= 3)
                 {
-                    var item = rows[i];
-                    var rp = _processRowParts[item.Key];
-                    rp.NameText.Text = item.Name;
-                    rp.ValueText.Text = item.Value;
-                    rp.CaptionText.Text = item.Caption;
-                    rp.MeterFill.Width = 32 * Math.Clamp(item.Intensity, 0d, 1d);
+                    rp.FillBrush.GradientStops[1].Offset = intensity;
+                    rp.FillBrush.GradientStops[2].Offset = Math.Min(intensity + 0.03, 1.0);
                 }
-
-                return;
+                _processRowsHost.Children.Add(rp.Row);
             }
+
+            // Remove entries for rows no longer shown
+            if (_processRowParts.Count > rows.Count)
+            {
+                var activeKeys = new HashSet<string>(rows.Count, StringComparer.OrdinalIgnoreCase);
+                foreach (var r in rows) activeKeys.Add(r.Key);
+                foreach (var key in _processRowParts.Keys.Where(k => !activeKeys.Contains(k)).ToArray())
+                    _processRowParts.Remove(key);
+            }
+
+            return;
         }
 
         // Slow path: rebuild the row list (sort change, new/removed processes)
@@ -949,9 +966,28 @@ public sealed class TelemetryPanelCard : UserControl
             _processRowParts.Add(item.Key, rowParts);
             _processRowsHost.Children.Add(rowParts.Row);
 
-            // Click a process row to pin/unpin it to the chart
-            var capturedName = item.Name;
-            rowParts.Row.Tapped += (_, _) => Panel?.ToggleProcessPin(capturedName);
+            // Track press/release to distinguish taps from scroll drags.
+            // Use AddHandler with handledEventsToo so events fire even when
+            // the parent ScrollViewer has already marked them as Handled.
+            var processName = item.Name;
+            Windows.Foundation.Point pressPos = default;
+            rowParts.Row.AddHandler(PointerPressedEvent, new PointerEventHandler((sender, args) =>
+            {
+                pressPos = args.GetCurrentPoint((UIElement)sender).Position;
+            }), true);
+            rowParts.Row.AddHandler(PointerReleasedEvent, new PointerEventHandler((sender, args) =>
+            {
+                if (Panel is not { } p) return;
+                var releasePos = args.GetCurrentPoint((UIElement)sender).Position;
+                // Only count as a click if the pointer didn't move far (not a scroll)
+                var dx = Math.Abs(releasePos.X - pressPos.X);
+                var dy = Math.Abs(releasePos.Y - pressPos.Y);
+                if (dx < 12 && dy < 12)
+                {
+                    p.ToggleProcessPin(processName);
+                }
+                args.Handled = true;
+            }), true);
         }
 
     }
@@ -1046,7 +1082,9 @@ public sealed class TelemetryPanelCard : UserControl
     {
         ApplyRangeState(_sortHighestButton, panel?.ProcessSortMode == ProcessSortMode.Highest);
         ApplyRangeState(_sortLowestButton, panel?.ProcessSortMode == ProcessSortMode.Lowest);
-        ApplyRangeState(_sortNameButton, panel?.ProcessSortMode == ProcessSortMode.Name);
+        var isNameSort = panel?.ProcessSortMode is ProcessSortMode.Name or ProcessSortMode.NameReverse;
+        ApplyRangeState(_sortNameButton, isNameSort);
+        _sortNameButton.Text = panel?.ProcessSortMode == ProcessSortMode.NameReverse ? "Name \u2191" : "Name \u2193";
     }
 
     private void ApplyPalette(MetricPanelViewModel panel)
@@ -1335,8 +1373,16 @@ public sealed class TelemetryPanelCard : UserControl
 
         if (Panel is { } panel)
         {
-            // Update button states immediately for snappy feedback
-            RefreshProcessSortButtons(panel);
+            // Toggle Name → NameReverse on second click
+            if (sortMode == ProcessSortMode.Name && panel.ProcessSortMode == ProcessSortMode.Name)
+            {
+                sortMode = ProcessSortMode.NameReverse;
+            }
+            else if (sortMode == ProcessSortMode.Name && panel.ProcessSortMode == ProcessSortMode.NameReverse)
+            {
+                sortMode = ProcessSortMode.Name;
+            }
+
             panel.ProcessSortMode = sortMode;
             RefreshProcessSortButtons(panel);
         }
@@ -1649,7 +1695,7 @@ public sealed class TelemetryPanelCard : UserControl
         return (wrapper, border, nameText, valueText, dot);
     }
 
-    private static (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack, Ellipse? ChartDot) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
+    private static (ClickableBorder Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, LinearGradientBrush FillBrush, Border RowBorder, Ellipse? ChartDot) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
     {
         // Small color dot showing the process chart line color (if charted)
         Ellipse? chartDot = null;
@@ -1664,12 +1710,18 @@ public sealed class TelemetryPanelCard : UserControl
         };
         var nameText = (TextBlock)nameContent;
 
+        // Bold name + color dot when pinned
+        if (item.IsPinned)
+        {
+            nameText.FontWeight = FontWeights.SemiBold;
+        }
+
         if (item.ChartColor is not null)
         {
             chartDot = new Ellipse
             {
-                Width = 6,
-                Height = 6,
+                Width = 7,
+                Height = 7,
                 Fill = item.ChartColor,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 6, 0),
@@ -1693,26 +1745,6 @@ public sealed class TelemetryPanelCard : UserControl
             Margin = new Thickness(8, 0, 0, 0),
         };
 
-        // Inline meter bar right next to the value
-        var meterFill = new Border
-        {
-            Width = 32 * Math.Clamp(item.Intensity, 0d, 1d),
-            Height = 3,
-            Background = accentBrush,
-            CornerRadius = new CornerRadius(999),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        var meterTrack = new Border
-        {
-            Width = 32,
-            Height = 3,
-            Background = ResolveBrush("SurfaceStrongBrush", "#162A41"),
-            CornerRadius = new CornerRadius(999),
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = meterFill,
-        };
-
         var valueText = new TextBlock
         {
             FontFamily = new FontFamily("Bahnschrift"),
@@ -1726,32 +1758,80 @@ public sealed class TelemetryPanelCard : UserControl
             TextAlignment = TextAlignment.Right,
         };
 
-        // Clean table row: Name | Caption | Meter+Value (right-aligned)
+        // Table row: Name | Caption | Value
         var rowGrid = new Grid
         {
             ColumnSpacing = 6,
         };
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 90 });
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.7, GridUnitType.Star) });
-        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         rowGrid.Children.Add(nameContent);
         rowGrid.Children.Add(captionText);
         Grid.SetColumn(captionText, 1);
-        rowGrid.Children.Add(meterTrack);
-        Grid.SetColumn(meterTrack, 2);
         rowGrid.Children.Add(valueText);
-        Grid.SetColumn(valueText, 3);
+        Grid.SetColumn(valueText, 2);
 
-        // Subtle bottom separator instead of bordered card
-        return (new Border
+        // Background gradient fill — row itself acts as the meter (Grafana-style)
+        var intensity = Math.Clamp(item.Intensity, 0d, 1d);
+        var accentColor = accentBrush is SolidColorBrush scb ? scb.Color : BrushFactory.ParseColor("#66E7FF");
+        var baseAlpha = item.IsPinned ? (byte)70 : (byte)55;
+        var edgeAlpha = item.IsPinned ? (byte)50 : (byte)35;
+
+        var fillBrush = new LinearGradientBrush
         {
-            Padding = new Thickness(6, 4, 6, 4),
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 0),
+            GradientStops =
+            {
+                new GradientStop { Color = Color.FromArgb(baseAlpha, accentColor.R, accentColor.G, accentColor.B), Offset = 0 },
+                new GradientStop { Color = Color.FromArgb(edgeAlpha, accentColor.R, accentColor.G, accentColor.B), Offset = intensity },
+                new GradientStop { Color = Color.FromArgb(0, accentColor.R, accentColor.G, accentColor.B), Offset = Math.Min(intensity + 0.03, 1.0) },
+            },
+        };
+
+        var rowBorder = new Border
+        {
+            Padding = new Thickness(8, 5, 8, 5),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(0, 0, 0, 0.5),
-            Child = rowGrid,
-        }, nameText, valueText, captionText, meterFill, meterTrack, chartDot);
+            BorderThickness = new Thickness(0, 0, 0, 0.4),
+            Background = fillBrush,
+            // Transparent background on the grid ensures the entire row is hit-testable
+            Child = new Grid { Background = BrushFactory.CreateBrush("#01000000"), Children = { rowGrid } },
+        };
+
+        // Hover feedback — accent border + subtle background brighten
+        rowBorder.PointerEntered += (_, _) =>
+        {
+            rowBorder.BorderBrush = ResolveBrush("AccentBrush", "#66E7FF");
+            rowBorder.BorderThickness = new Thickness(0, 0, 0, 1.2);
+            // Boost fill opacity on hover for clear visual feedback
+            if (fillBrush.GradientStops.Count >= 3)
+            {
+                var c0 = fillBrush.GradientStops[0].Color;
+                var c1 = fillBrush.GradientStops[1].Color;
+                fillBrush.GradientStops[0].Color = Color.FromArgb(Math.Min((byte)120, (byte)(c0.A + 40)), c0.R, c0.G, c0.B);
+                fillBrush.GradientStops[1].Color = Color.FromArgb(Math.Min((byte)100, (byte)(c1.A + 40)), c1.R, c1.G, c1.B);
+            }
+        };
+        rowBorder.PointerExited += (_, _) =>
+        {
+            rowBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            rowBorder.BorderThickness = new Thickness(0, 0, 0, 0.4);
+            // Restore original fill opacity
+            if (fillBrush.GradientStops.Count >= 3)
+            {
+                var c0 = fillBrush.GradientStops[0].Color;
+                var c1 = fillBrush.GradientStops[1].Color;
+                fillBrush.GradientStops[0].Color = Color.FromArgb(baseAlpha, c0.R, c0.G, c0.B);
+                fillBrush.GradientStops[1].Color = Color.FromArgb(edgeAlpha, c1.R, c1.G, c1.B);
+            }
+        };
+
+        // Wrap in ClickableBorder for hand cursor + click handlers in slow path
+        var clickableRow = new ClickableBorder(rowBorder);
+        return (clickableRow, nameText, valueText, captionText, fillBrush, rowBorder, chartDot);
     }
 
     private void UpdateBadgeIcon(MetricPanelViewModel? panel)

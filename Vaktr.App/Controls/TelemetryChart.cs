@@ -301,9 +301,31 @@ public sealed class TelemetryChart : UserControl
     };
 
     private IReadOnlyList<ChartSeriesViewModel>? _lastRenderedSeries;
+    private int _lastRenderedPointHash;
     private DateTimeOffset _lastRenderedStart;
     private DateTimeOffset _lastRenderedEnd;
     private double _lastRenderedCeiling;
+
+    private bool SeriesMatchesLastRendered(IReadOnlyList<ChartSeriesViewModel> series)
+    {
+        if (_lastRenderedSeries is null || series.Count != _lastRenderedSeries.Count)
+        {
+            return false;
+        }
+
+        // Quick hash: compare series count and last point timestamp of each series
+        var hash = series.Count;
+        for (var i = 0; i < series.Count; i++)
+        {
+            var pts = series[i].Points;
+            if (pts.Count > 0)
+            {
+                hash = unchecked(hash * 31 + pts[^1].Timestamp.GetHashCode());
+            }
+        }
+
+        return hash == _lastRenderedPointHash;
+    }
 
     private void Redraw()
     {
@@ -316,12 +338,12 @@ public sealed class TelemetryChart : UserControl
 
         var series = Series ?? Array.Empty<ChartSeriesViewModel>();
 
-        // Skip redraw if nothing has changed
-        if (ReferenceEquals(series, _lastRenderedSeries) &&
+        // Skip redraw if nothing meaningful has changed
+        if (_canvas.Children.Count > 0 &&
             WindowStartUtc == _lastRenderedStart &&
             WindowEndUtc == _lastRenderedEnd &&
-            CeilingValue == _lastRenderedCeiling &&
-            _canvas.Children.Count > 0)
+            Math.Abs(CeilingValue - _lastRenderedCeiling) < 0.01 &&
+            SeriesMatchesLastRendered(series))
         {
             return;
         }
@@ -330,6 +352,14 @@ public sealed class TelemetryChart : UserControl
         _lastRenderedStart = WindowStartUtc;
         _lastRenderedEnd = WindowEndUtc;
         _lastRenderedCeiling = CeilingValue;
+        var hash = series.Count;
+        for (var i = 0; i < series.Count; i++)
+        {
+            var pts = series[i].Points;
+            if (pts.Count > 0)
+                hash = unchecked(hash * 31 + pts[^1].Timestamp.GetHashCode());
+        }
+        _lastRenderedPointHash = hash;
 
         if (!TryGetPointBounds(series, out var minTimestamp, out var maxTimestamp, out var maxObservedValue))
         {
@@ -782,24 +812,24 @@ public sealed class TelemetryChart : UserControl
     {
         var density = seriesCount switch
         {
-            <= 1 => 0.72d,
-            2 => 0.58d,
-            <= 4 => 0.42d,
-            <= 8 => 0.3d,
-            _ => 0.22d,
+            <= 1 => 0.50d,
+            2 => 0.40d,
+            <= 4 => 0.30d,
+            <= 8 => 0.22d,
+            _ => 0.16d,
         };
 
         var windowFactor = window switch
         {
-            _ when window >= TimeSpan.FromDays(365) => 0.14d,
-            _ when window >= TimeSpan.FromDays(90) => 0.18d,
-            _ when window >= TimeSpan.FromDays(30) => 0.24d,
-            _ when window >= TimeSpan.FromDays(7) => 0.3d,
-            _ when window >= TimeSpan.FromDays(2) => 0.34d,
-            _ when window >= TimeSpan.FromDays(1) => 0.38d,
-            _ when window >= TimeSpan.FromHours(12) => 0.5d,
-            _ when window >= TimeSpan.FromHours(1) => 0.66d,
-            _ => 0.88d,
+            _ when window >= TimeSpan.FromDays(365) => 0.12d,
+            _ when window >= TimeSpan.FromDays(90) => 0.15d,
+            _ when window >= TimeSpan.FromDays(30) => 0.20d,
+            _ when window >= TimeSpan.FromDays(7) => 0.25d,
+            _ when window >= TimeSpan.FromDays(2) => 0.28d,
+            _ when window >= TimeSpan.FromDays(1) => 0.32d,
+            _ when window >= TimeSpan.FromHours(12) => 0.40d,
+            _ when window >= TimeSpan.FromHours(1) => 0.50d,
+            _ => 0.65d,
         };
 
         return Math.Max(24, (int)Math.Round(width * density * windowFactor));

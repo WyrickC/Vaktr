@@ -12,9 +12,9 @@ public sealed class WindowsMetricCollector : IMetricCollector
 {
     private const double BytesPerMegabyte = 1024d * 1024d;
     private const double BitsPerMegabit = 1_000_000d;
-    private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(75);
-    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan TemperatureRefreshInterval = TimeSpan.FromSeconds(20);
 
     private readonly nint _query;
