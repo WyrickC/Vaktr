@@ -1,4 +1,5 @@
 using Microsoft.UI.Text;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Input;
 using Windows.System;
 using Vaktr.App.ViewModels;
@@ -213,9 +214,10 @@ public sealed class InlineTextEntry : UserControl
             _isFocused ? "#122739" : _isHovered ? "#1A2C42" : "#142335");
         _surface.BorderBrush = ResolveBrush(_isFocused ? "AccentStrongBrush" : "SurfaceStrokeBrush",
             _isFocused ? "#B7F7FF" : "#27425E");
-        Opacity = _isPressed ? 0.96 : 1.0;
+        _surface.BorderThickness = new Thickness(_isFocused ? 1.2 : _isHovered ? 1.0 : 0.8);
+        Opacity = _isPressed ? 0.96 : _isHovered ? 0.99 : 1.0;
         _glow.Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF");
-        _glow.Opacity = _isFocused ? 0.045 : _isHovered ? 0.015 : 0;
+        _glow.Opacity = _isFocused ? 0.06 : _isHovered ? 0.02 : 0;
         _shine.Background = _isFocused
             ? ResolveBrush("AccentStrongBrush", "#D7FBFF")
             : ResolveBrush("TextPrimaryBrush", "#F2F8FF");
@@ -226,11 +228,13 @@ public sealed class InlineTextEntry : UserControl
         {
             _label.Text = _isFocused ? $"{_placeholderText} |" : _placeholderText;
             _label.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+            AutomationProperties.SetName(this, string.IsNullOrWhiteSpace(_placeholderText) ? "Input" : _placeholderText);
             return;
         }
 
         _label.Text = _isFocused ? $"{displayText} |" : displayText;
         _label.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+        AutomationProperties.SetName(this, string.IsNullOrWhiteSpace(_placeholderText) ? displayText : _placeholderText);
     }
 
     private static Brush ResolveBrush(string key, string fallbackHex)

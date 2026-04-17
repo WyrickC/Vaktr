@@ -99,7 +99,9 @@ public sealed class App : Application
                 "#FFFFFF",     // Surface — pure white cards stand out from gray bg
                 "#F4F7FB",     // SurfaceElevated — very slight tint
                 "#E8EEF5",     // SurfaceStrong — clearly tinted for buttons/hover
+                "#E3EAF3",     // SurfaceInset — slightly recessed beds
                 "#C0CEDC",     // SurfaceStroke — visible card borders
+                "#B0FFFFFF",   // SurfaceHighlight — crisp top highlight
                 "#DCE5EF",     // PanelOverlay — distinct overlay tint
                 "#B8C8D8",     // SurfaceGrid — visible grid lines
                 "#0A1824",     // TextPrimary — strong dark text
@@ -110,6 +112,8 @@ public sealed class App : Application
                 "#D0E8F8",     // AccentSoft — light blue tint
                 "#18609020",   // AccentHalo
                 "#15C09040",   // WarningHalo
+                "#B8861F",     // Warning
+                "#C96C36",     // Critical
                 "#80D8E4F0")   // OverlayScrim
             : new ThemePalette(
                 "#030812",
@@ -118,7 +122,9 @@ public sealed class App : Application
                 "#0C1726",
                 "#112033",
                 "#18314A",
+                "#091321",
                 "#315274",
+                "#22FFFFFF",
                 "#091321",
                 "#426A8C",
                 "#F4F9FF",
@@ -129,6 +135,8 @@ public sealed class App : Application
                 "#163B60",
                 "#2B8FE6C4",
                 "#1EFFA25C",
+                "#F0C968",
+                "#FF9761",
                 "#B0060A12");
 
         SetBrushResource("AppBackdropBrush", palette.AppBackdrop);
@@ -137,7 +145,9 @@ public sealed class App : Application
         SetBrushResource("SurfaceBrush", palette.Surface);
         SetBrushResource("SurfaceElevatedBrush", palette.SurfaceElevated);
         SetBrushResource("SurfaceStrongBrush", palette.SurfaceStrong);
+        SetBrushResource("SurfaceInsetBrush", palette.SurfaceInset);
         SetBrushResource("SurfaceStrokeBrush", palette.SurfaceStroke);
+        SetBrushResource("SurfaceHighlightBrush", palette.SurfaceHighlight);
         SetBrushResource("PanelOverlayBrush", palette.PanelOverlay);
         SetBrushResource("SurfaceGridBrush", palette.SurfaceGrid);
         SetBrushResource("TextPrimaryBrush", palette.TextPrimary);
@@ -148,6 +158,8 @@ public sealed class App : Application
         SetBrushResource("AccentSoftBrush", palette.AccentSoft);
         SetBrushResource("AccentHaloBrush", palette.AccentHalo);
         SetBrushResource("WarningHaloBrush", palette.WarningHalo);
+        SetBrushResource("WarningBrush", palette.Warning);
+        SetBrushResource("CriticalBrush", palette.Critical);
         SetBrushResource("OverlayScrimBrush", palette.OverlayScrim);
     }
 
@@ -246,7 +258,9 @@ public sealed class App : Application
         string Surface,
         string SurfaceElevated,
         string SurfaceStrong,
+        string SurfaceInset,
         string SurfaceStroke,
+        string SurfaceHighlight,
         string PanelOverlay,
         string SurfaceGrid,
         string TextPrimary,
@@ -257,5 +271,7 @@ public sealed class App : Application
         string AccentSoft,
         string AccentHalo,
         string WarningHalo,
+        string Warning,
+        string Critical,
         string OverlayScrim);
 }

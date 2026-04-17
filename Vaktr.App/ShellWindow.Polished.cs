@@ -87,9 +87,6 @@ public sealed partial class ShellWindow : Window
     private DateTimeOffset? _globalAbsoluteEndUtc;
     private MetricSnapshot? _pendingSnapshot;
     private int _lastLoadedHistoryMinutes;
-    private static readonly Brush _thresholdOrangeBrush = BrushFactory.CreateBrush("#FF8C42");
-    private static readonly Brush _thresholdYellowBrush = BrushFactory.CreateBrush("#FFD166");
-
     public ShellWindow(
         MainViewModel viewModel,
         IMetricStore metricStore,
@@ -320,10 +317,10 @@ public sealed partial class ShellWindow : Window
             badgeHost.VerticalAlignment = VerticalAlignment.Center;
 
             var titleText = CreateMutedText(string.Empty, 9.5);
-            titleText.CharacterSpacing = 90;
+            titleText.CharacterSpacing = 110;
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
-            var valueText = CreatePrimaryText(string.Empty, 25, true);
+            var valueText = CreatePrimaryText(string.Empty, 28, true);
             valueText.FontFamily = new FontFamily("Bahnschrift");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
@@ -333,19 +330,19 @@ public sealed partial class ShellWindow : Window
             // Mini utilization bar — thin horizontal bar below the value
             var gaugeTrack = new Border
             {
-                Height = 3,
+                Height = 4,
                 CornerRadius = new CornerRadius(2),
                 Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                Opacity = 0.5,
-                Margin = new Thickness(0, 4, 0, 5),
+                Opacity = 0.38,
+                Margin = new Thickness(0, 7, 0, 6),
             };
             var gaugeFill = new Border
             {
-                Height = 3,
+                Height = 4,
                 CornerRadius = new CornerRadius(2),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Background = card.AccentBrush,
-                Margin = new Thickness(0, 4, 0, 5),
+                Margin = new Thickness(0, 7, 0, 6),
             };
             var gaugeHost = new Grid
             {
@@ -364,20 +361,19 @@ public sealed partial class ShellWindow : Window
                 var util = card.Utilization;
                 var trackWidth = gaugeTrack.ActualWidth > 0 ? gaugeTrack.ActualWidth : 120;
                 gaugeFill.Width = trackWidth * Math.Clamp(util / 100d, 0d, 1d);
-                gaugeFill.Background = util > 90 ? _thresholdOrangeBrush
-                    : util > 75 ? _thresholdYellowBrush
-                    : card.AccentBrush;
+                gaugeFill.Background = ResolveSummaryUtilizationBrush(util, card.AccentBrush);
             };
             // Also update on track size change
             gaugeTrack.SizeChanged += (_, _) =>
             {
                 var util = card.Utilization;
                 gaugeFill.Width = gaugeTrack.ActualWidth * Math.Clamp(util / 100d, 0d, 1d);
+                gaugeFill.Background = ResolveSummaryUtilizationBrush(util, card.AccentBrush);
             };
 
             var details = new StackPanel
             {
-                Spacing = 1,
+                Spacing = 2,
                 VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
@@ -390,7 +386,7 @@ public sealed partial class ShellWindow : Window
 
             var contentGrid = new Grid
             {
-                ColumnSpacing = 12,
+                ColumnSpacing = 14,
             };
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -401,16 +397,16 @@ public sealed partial class ShellWindow : Window
             var summaryCard = new Border
             {
                 DataContext = card,
-                Background = CreateSurfaceGradient("#0E1A2C", "#142436"),
+                Background = CreateSurfaceGradient("#101B2D", "#16273D"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                BorderThickness = new Thickness(0.7),
-                CornerRadius = new CornerRadius(16),
-                Padding = new Thickness(16, 13, 16, 13),
-                MinHeight = 92,
+                BorderThickness = new Thickness(0.9),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(18, 15, 18, 15),
+                MinHeight = 98,
                 Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);
-            _summaryCardVisuals.Add(new SummaryCardVisual(summaryCard, titleText, valueText, captionText, badgeHost, card));
+            _summaryCardVisuals.Add(new SummaryCardVisual(summaryCard, titleText, valueText, captionText, badgeHost, gaugeTrack, gaugeFill, card));
             var index = _summaryHost.Children.Count - 1;
             while (_summaryHost.RowDefinitions.Count <= index / summaryColumns)
             {
@@ -434,11 +430,13 @@ public sealed partial class ShellWindow : Window
         for (var i = 0; i < _summaryCardVisuals.Count; i++)
         {
             var visual = _summaryCardVisuals[i];
-            visual.Surface.Background = CreateSurfaceGradient("#0E1A2C", "#142436");
+            visual.Surface.Background = CreateSurfaceGradient("#101B2D", "#16273D");
             visual.Surface.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
             visual.TitleText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
             visual.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             visual.CaptionText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+            visual.GaugeTrack.Background = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            visual.GaugeFill.Background = ResolveSummaryUtilizationBrush(visual.ViewModel.Utilization, visual.ViewModel.AccentBrush);
             // Skip badge recreation — just update its background/border colors
             if (visual.BadgeHost is Border badge)
             {
@@ -446,6 +444,21 @@ public sealed partial class ShellWindow : Window
                 badge.BorderBrush = visual.ViewModel.AccentBrush;
             }
         }
+    }
+
+    private Brush ResolveSummaryUtilizationBrush(double utilization, Brush accentBrush)
+    {
+        if (utilization > 90)
+        {
+            return ResolveBrush("CriticalBrush", "#FF9761");
+        }
+
+        if (utilization > 75)
+        {
+            return ResolveBrush("WarningBrush", "#F0C968");
+        }
+
+        return accentBrush;
     }
 
     private void RefreshPanelToggles()
@@ -2133,6 +2146,8 @@ internal sealed record SummaryCardVisual(
     TextBlock ValueText,
     TextBlock CaptionText,
     Border BadgeHost,
+    Border GaugeTrack,
+    Border GaugeFill,
     SummaryCardViewModel ViewModel);
 
 internal static class ResizeInterop

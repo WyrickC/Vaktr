@@ -86,11 +86,11 @@ public sealed partial class ShellWindow
         // that added layout overhead during resize for negligible visual effect (0.08 opacity)
         var shellBorder = new Border
         {
-            Background = ResolveBrush("ShellBackgroundBrush", "#07101B"),
+            Background = CreateSurfaceGradient("#08111C", "#0D1A29"),
             BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(24, 12, 24, 22),
+            CornerRadius = new CornerRadius(24),
+            Padding = new Thickness(26, 16, 26, 24),
             Child = BuildShellStack(),
         };
 
@@ -122,16 +122,14 @@ public sealed partial class ShellWindow
         StartupTrace.Write("BuildShellStack // polished-v19");
         return new StackPanel
         {
-            Spacing = 16,
+            Spacing = 18,
             Children =
             {
                 BuildHeader(),
                 CreateSectionBand("AT A GLANCE", "Current node snapshot."),
                 BuildSummarySurface(),
-                CreateSectionDivider(),
                 BuildBoardSectionBand(),
                 _dashboardGrid,
-                CreateSectionDivider(),
                 BuildControlsSurface(),
             },
         };
@@ -153,24 +151,24 @@ public sealed partial class ShellWindow
         {
             Text = "Vaktr",
             FontFamily = new FontFamily("Segoe UI Variable Display"),
-            FontSize = 52,
-            FontWeight = FontWeights.Light,
-            CharacterSpacing = 60,
+            FontSize = 50,
+            FontWeight = FontWeights.Normal,
+            CharacterSpacing = 48,
             Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"),
         };
         var subtitleText = new TextBlock
         {
             Text = "SYSTEM TELEMETRY DASHBOARD",
             FontFamily = new FontFamily("Segoe UI Variable Text"),
-            FontSize = 10.5,
-            CharacterSpacing = 220,
+            FontSize = 11,
+            CharacterSpacing = 180,
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
-            Margin = new Thickness(3, 0, 0, 0),
+            Margin = new Thickness(4, 1, 0, 0),
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var titleStack = new StackPanel
         {
-            Spacing = 2,
+            Spacing = 3,
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
@@ -206,11 +204,11 @@ public sealed partial class ShellWindow
 
         return new Border
         {
-            Background = ResolveBrush("SurfaceBrush", "#0C1726"),
+            Background = CreateSurfaceGradient("#0F1B2D", "#15263D"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(28),
-            Padding = new Thickness(22, 20, 22, 20),
+            BorderThickness = new Thickness(0.9),
+            CornerRadius = new CornerRadius(26),
+            Padding = new Thickness(22, 19, 22, 20),
             Child = root,
         };
     }
@@ -480,35 +478,29 @@ public sealed partial class ShellWindow
         var accentBrush = BrushFactory.CreateBrush(accentHex);
         var card = new Border
         {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15263C"),
+            Background = CreateSurfaceGradient("#101C2E", "#15273D"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(15, 13, 15, 13),
-            MinHeight = 82,
-            Child = new Grid
+            BorderThickness = new Thickness(0.9),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(16, 14, 16, 14),
+            MinHeight = 88,
+            Child = new StackPanel
             {
+                Orientation = Orientation.Horizontal,
+                Spacing = 12,
+                VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
+                    IconFactory.CreateTile(label, accentBrush, 42, 16),
                     new StackPanel
                     {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 12,
+                        Spacing = 2,
                         VerticalAlignment = VerticalAlignment.Center,
                         Children =
                         {
-                            IconFactory.CreateTile(label, accentBrush, 42, 16),
-                            new StackPanel
-                            {
-                                Spacing = 2,
-                                VerticalAlignment = VerticalAlignment.Center,
-                                Children =
-                                {
-                                    CreateMutedText(label, 10),
-                                    CreatePrimaryText(value, 18, true),
-                                    CreateSecondaryText(caption, 11),
-                                },
-                            },
+                            CreateMutedText(label, 10),
+                            CreatePrimaryText(value, 18, true),
+                            CreateSecondaryText(caption, 11),
                         },
                     },
                 },
@@ -909,11 +901,11 @@ public sealed partial class ShellWindow
         {
             Child = new StackPanel
             {
-                Spacing = 4,
+                Spacing = 5,
                 Children =
                 {
                     CreateAccentText(eyebrow, 12, 95),
-                    CreateSecondaryText(text, 14),
+                    CreateSecondaryText(text, 13.5),
                 },
             },
         };
@@ -929,11 +921,11 @@ public sealed partial class ShellWindow
 
         grid.Children.Add(new StackPanel
         {
-            Spacing = 2,
+            Spacing = 4,
             Children =
             {
                 CreateAccentText("LIVE BOARD", 11, 85),
-                CreateSecondaryText("Real-time telemetry panels.", 12.5),
+                CreateSecondaryText("Real-time telemetry panels.", 13),
             },
         });
 
@@ -955,26 +947,6 @@ public sealed partial class ShellWindow
         };
     }
 
-    private static Border CreateSectionDivider() =>
-        new()
-        {
-            Height = 1,
-            Margin = new Thickness(32, 8, 32, 8),
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0),
-                EndPoint = new Windows.Foundation.Point(1, 0),
-                GradientStops = new GradientStopCollection
-                {
-                    new GradientStop { Color = Color.FromArgb(0, 39, 66, 94), Offset = 0 },
-                    new GradientStop { Color = Color.FromArgb(35, 39, 66, 94), Offset = 0.3 },
-                    new GradientStop { Color = Color.FromArgb(35, 39, 66, 94), Offset = 0.7 },
-                    new GradientStop { Color = Color.FromArgb(0, 39, 66, 94), Offset = 1 },
-                },
-            },
-            IsHitTestVisible = false,
-        };
-
     private static Grid CreateSectionBand(string eyebrow, string text)
     {
         return new Grid
@@ -984,11 +956,11 @@ public sealed partial class ShellWindow
             {
                 new StackPanel
                 {
-                    Spacing = 3,
+                    Spacing = 4,
                     Children =
                     {
-                        CreateAccentText(eyebrow, 10.5, 100),
-                        CreateSecondaryText(text, 12),
+                        CreateAccentText(eyebrow, 11, 108),
+                        CreateSecondaryText(text, 12.5),
                     },
                 },
             },
@@ -1010,12 +982,12 @@ public sealed partial class ShellWindow
 
         var labelStack = new StackPanel
         {
-            Spacing = 4,
+            Spacing = 5,
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
                 CreateAccentText(eyebrow, 10, 90),
-                CreatePrimaryText(headline, 17, true),
+                CreatePrimaryText(headline, 18, true),
             },
         };
         headerGrid.Children.Add(labelStack);
@@ -1043,11 +1015,11 @@ public sealed partial class ShellWindow
 
         return new Border
         {
-            Background = CreateSurfaceGradient("#0F1B2D", "#13243A"),
+            Background = CreateSurfaceGradient("#101C2E", "#15273D"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(17, 15, 17, 15),
+            BorderThickness = new Thickness(0.9),
+            CornerRadius = new CornerRadius(24),
+            Padding = new Thickness(18, 16, 18, 16),
             VerticalAlignment = VerticalAlignment.Stretch,
             Child = contentStack,
         };
@@ -1056,9 +1028,9 @@ public sealed partial class ShellWindow
     private static Border CreateTopStatusPill(UIElement content) =>
         new()
         {
-            Background = CreateSurfaceGradient("#132438", "#18314B"),
+            Background = ResolveBrush("PanelOverlayBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#2A4662"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.8),
             CornerRadius = new CornerRadius(14),
             Padding = new Thickness(16, 10, 16, 10),
             Child = new Grid
@@ -1077,9 +1049,9 @@ public sealed partial class ShellWindow
             Width = 36,
             Height = 36,
             CornerRadius = new CornerRadius(12),
-            Background = ResolveBrush("SurfaceElevatedBrush", "#112033"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#315274"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.9),
         };
 
         var imagePath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "vaktr.png");
@@ -1131,14 +1103,14 @@ public sealed partial class ShellWindow
     private static Border CreateInfoPanel(string title, string value) =>
         new()
         {
-            Background = ResolveBrush("SurfaceElevatedBrush", "#15273C"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(14, 11, 14, 11),
+            BorderThickness = new Thickness(0.9),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(14, 12, 14, 12),
             Child = new StackPanel
             {
-                Spacing = 3,
+                Spacing = 4,
                 Children =
                 {
                     CreateMutedText(title, 11),
@@ -1267,9 +1239,13 @@ public sealed partial class ShellWindow
         // Map dark surface hex to distinct light equivalents — more contrast between layers
         return darkHex.TrimStart('#').ToUpperInvariant() switch
         {
+            // Shell surfaces
+            "08111C" => ParseColor("#F0F4F9"),
+            "0D1A29" => ParseColor("#E7EEF6"),
+
             // Card surfaces — pure white, stands out from gray-blue backdrop
-            "0E1B2C" or "0E1A2C" => ParseColor("#FFFFFF"),
-            "13253A" or "142436" => ParseColor("#F8FAFD"),
+            "0E1B2C" or "0E1A2C" or "101B2D" or "101C2E" => ParseColor("#FFFFFF"),
+            "13253A" or "142436" or "15273D" or "16273D" => ParseColor("#F8FAFD"),
 
             // Summary/control card surfaces
             "0F1C2D" => ParseColor("#FAFCFF"),
@@ -1293,7 +1269,7 @@ public sealed partial class ShellWindow
             "0B1726" or "12243A" or "0A141F" or "0F1E2E" => ParseColor("#EEF2F8"),
 
             // Card hover — visible shift from white
-            "102133" or "162A40" => ParseColor("#E4ECF4"),
+            "102133" or "162A40" or "122034" or "1A2C46" => ParseColor("#E4ECF4"),
 
             // Control editor cards
             "0F1B2D" or "13243A" => ParseColor("#F4F7FC"),

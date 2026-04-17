@@ -1,4 +1,5 @@
 using Microsoft.UI.Text;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -14,6 +15,7 @@ public sealed class ActionChip : UserControl
     private readonly TextBlock _label;
     private bool _isActive;
     private bool _isFilled;
+    private bool _isFocused;
     private bool _isHovered;
     private bool _isPressed;
     private string _text = string.Empty;
@@ -27,6 +29,7 @@ public sealed class ActionChip : UserControl
     public ActionChip()
     {
         UseLayoutRounding = true;
+        UseSystemFocusVisuals = false;
 
         _surface = new Border
         {
@@ -96,8 +99,18 @@ public sealed class ActionChip : UserControl
 
         IsTabStop = true;
         KeyDown += OnKeyDown;
-        GotFocus += (_, _) => { _isHovered = true; UpdateVisualState(); };
-        LostFocus += (_, _) => { _isHovered = false; UpdateVisualState(); };
+        GotFocus += (_, _) =>
+        {
+            _isFocused = true;
+            _isHovered = true;
+            UpdateVisualState();
+        };
+        LostFocus += (_, _) =>
+        {
+            _isFocused = false;
+            _isHovered = false;
+            UpdateVisualState();
+        };
 
         UpdateVisualState();
     }
@@ -111,6 +124,7 @@ public sealed class ActionChip : UserControl
         {
             _text = value;
             _label.Text = value;
+            AutomationProperties.SetName(this, value ?? string.Empty);
         }
     }
 
@@ -219,38 +233,32 @@ public sealed class ActionChip : UserControl
             ? _cachedAccentBg
             : _isHovered ? _cachedHoverBg : _cachedIdleBg;
 
+        _surface.BorderThickness = new Thickness(_isFocused ? 1.2 : 0.8);
         if (isLight)
         {
-            _surface.BorderBrush = useAccent
+            _surface.BorderBrush = _isFocused
+                ? ResolveBrush("AccentStrongBrush", "#04506E")
+                : useAccent
                 ? ResolveBrush("AccentStrongBrush", "#04506E")
                 : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#A0B4C8" : "#C0CEDC");
         }
         else
         {
-            _surface.BorderBrush = useAccent
+            _surface.BorderBrush = _isFocused
+                ? ResolveBrush("AccentStrongBrush", "#9EEFFF")
+                : useAccent
                 ? ResolveBrush("AccentStrongBrush", "#9EEFFF")
                 : ResolveBrush("SurfaceStrokeBrush", _isHovered ? "#2C4866" : "#243D55");
         }
 
-        // Smooth opacity transition for polished hover/press feel
-        var targetOpacity = _isPressed ? 0.82 : _isHovered ? 0.96 : 1.0;
-        if (Math.Abs(Opacity - targetOpacity) > 0.01)
-        {
-            var anim = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
-            {
-                To = targetOpacity,
-                Duration = new Duration(TimeSpan.FromMilliseconds(_isPressed ? 50 : 100)),
-            };
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(anim, this);
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(anim, "Opacity");
-            var sb = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
-            sb.Children.Add(anim);
-            sb.Begin();
-        }
-
         _label.Foreground = ResolveBrush("TextPrimaryBrush", isLight ? "#0A1824" : "#F2F8FF");
-        _glow.Opacity = 0;
-        _shine.Opacity = 0;
+        Opacity = _isPressed ? 0.84 : _isHovered ? 0.97 : 1.0;
+        _glow.Background = ResolveBrush("AccentHaloBrush", "#2B8FE6C4");
+        _glow.Opacity = _isFocused ? 0.08 : useAccent ? 0.04 : 0;
+        _shine.Background = _isFocused
+            ? ResolveBrush("AccentStrongBrush", isLight ? "#04506E" : "#C7F5FF")
+            : ResolveBrush("TextPrimaryBrush", isLight ? "#0A1824" : "#F2F8FF");
+        _shine.Opacity = _isFocused ? 0.14 : _isHovered ? 0.08 : 0.04;
     }
 
     private static Brush ResolveBrush(string key, string fallbackHex)

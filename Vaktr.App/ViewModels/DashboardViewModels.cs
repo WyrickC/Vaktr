@@ -65,7 +65,7 @@ public sealed class MainViewModel : ObservableObject
         SummaryCards =
         [
             new SummaryCardViewModel("CPU", "CPU", BrushFactory.CreateBrush("#5DE6FF")),
-            new SummaryCardViewModel("GPU", "GPU", BrushFactory.CreateBrush("#E87BFF")),
+            new SummaryCardViewModel("GPU", "GPU", BrushFactory.CreateBrush("#7FB4FF")),
             new SummaryCardViewModel("RAM", "Memory", BrushFactory.CreateBrush("#7BF7D0")),
             new SummaryCardViewModel("Drive", "Drives", BrushFactory.CreateBrush("#FF9B54")),
         ];
@@ -1976,12 +1976,12 @@ public sealed class MetricPanelViewModel : ObservableObject
             MetricCategory.Cpu => index % 2 == 0 ? BrushFactory.ParseColor("#3BB7FF") : BrushFactory.ParseColor("#8BF7FF"),
             MetricCategory.Memory when index == 0 => BrushFactory.ParseColor("#7BF7D0"),
             MetricCategory.Memory => BrushFactory.ParseColor("#54C99B"),
-            MetricCategory.Gpu when index == 0 => BrushFactory.ParseColor("#6DA8FF"),
-            MetricCategory.Gpu => BrushFactory.ParseColor("#8D7BFF"),
+            MetricCategory.Gpu when index == 0 => BrushFactory.ParseColor("#7FB4FF"),
+            MetricCategory.Gpu => index % 2 == 0 ? BrushFactory.ParseColor("#5E96F4") : BrushFactory.ParseColor("#9CC7FF"),
             MetricCategory.Disk when index == 0 => BrushFactory.ParseColor("#FF9B54"),
             MetricCategory.Disk => BrushFactory.ParseColor("#FFD166"),
-            MetricCategory.Network when index == 0 => BrushFactory.ParseColor("#9A8CFF"),
-            MetricCategory.Network => BrushFactory.ParseColor("#6E9BFF"),
+            MetricCategory.Network when index == 0 => BrushFactory.ParseColor("#6CC7FF"),
+            MetricCategory.Network => BrushFactory.ParseColor("#4C9FE0"),
             MetricCategory.System when index == 0 => BrushFactory.ParseColor("#79C7FF"),
             MetricCategory.System => BrushFactory.ParseColor("#4FA3FF"),
             _ => BrushFactory.ParseColor("#7AD8FF"),

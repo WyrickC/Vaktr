@@ -113,29 +113,30 @@ public sealed class TelemetryPanelCard : UserControl
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        _footerText = CreateTextBlock(fontSize: 9.5);
-        _footerText.CharacterSpacing = 40;
-        _footerText.Opacity = 0.6;
+        _footerText = CreateTextBlock(fontSize: 10);
+        _footerText.CharacterSpacing = 55;
+        _footerText.Opacity = 0.72;
         _scaleText = CreateTextBlock("Bahnschrift", 9.5, FontWeights.Normal);
         _scaleText.TextWrapping = TextWrapping.NoWrap;
         _scaleText.TextTrimming = TextTrimming.CharacterEllipsis;
         _scaleText.MaxWidth = 200;
-        _titleText = CreateTextBlock("Segoe UI Variable Display", 16, FontWeights.Medium);
+        _titleText = CreateTextBlock("Segoe UI Variable Display", 15.5, FontWeights.Medium);
         _titleText.TextTrimming = TextTrimming.CharacterEllipsis;
         _titleText.TextWrapping = TextWrapping.NoWrap;
         _titleText.MaxLines = 1;
-        _titleText.Opacity = 0.9;
-        _currentValueText = CreateTextBlock("Bahnschrift", 24, FontWeights.SemiBold);
-        _secondaryValueText = CreateTextBlock(fontSize: 11);
-        _secondaryValueText.Opacity = 0.7;
+        _titleText.Opacity = 0.94;
+        _currentValueText = CreateTextBlock("Bahnschrift", 28, FontWeights.SemiBold);
+        _currentValueText.CharacterSpacing = -12;
+        _secondaryValueText = CreateTextBlock(fontSize: 11.5);
+        _secondaryValueText.Opacity = 0.78;
 
         _badgeBorder = new Border
         {
-            Width = 34,
-            Height = 34,
-            CornerRadius = new CornerRadius(10),
-            BorderThickness = new Thickness(0.8),
-            Background = CreateSurfaceGradient("#102131", "#17304A"),
+            Width = 36,
+            Height = 36,
+            CornerRadius = new CornerRadius(11),
+            BorderThickness = new Thickness(0.9),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             Child = _badgeIconHost,
         };
 
@@ -185,11 +186,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _chartFrame = new Border
         {
-            Background = CreateSurfaceGradient("#0C1824", "#111F30"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(0.6),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(2, 2, 2, 1),
+            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(4, 4, 4, 3),
             Child = _chart,
         };
 
@@ -349,11 +350,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _processSection = new Border
         {
-            Background = CreateSurfaceGradient("#0D1824", "#12202F"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(0.6),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(12, 10, 12, 10),
+            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(13, 11, 13, 11),
             Visibility = Visibility.Collapsed,
             Child = new StackPanel
             {
@@ -384,11 +385,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _rangeShell = new Border
         {
-            Background = CreateSurfaceGradient("#102031", "#15283E"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(6, 5, 6, 5),
+            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(7, 6, 7, 6),
             Child = rangeHost,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
@@ -406,15 +407,15 @@ public sealed class TelemetryPanelCard : UserControl
 
         _scalePill = new Border
         {
-            Background = CreateSurfaceGradient("#101D2E", "#152840"),
+            Background = ResolveBrush("PanelOverlayBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(0.5),
-            CornerRadius = new CornerRadius(7),
-            Padding = new Thickness(8, 2, 8, 2),
+            BorderThickness = new Thickness(0.7),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(10, 3, 10, 3),
             Child = _scaleText,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Opacity = 0.6,
+            Opacity = 0.78,
         };
         titleRow.Children.Add(_scalePill);
         Grid.SetColumn(_scalePill, 2);
@@ -422,21 +423,19 @@ public sealed class TelemetryPanelCard : UserControl
         // Value row: large value + secondary on the same line
         var valueRow = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            Spacing = 2,
             Children =
             {
                 _currentValueText,
                 _secondaryValueText,
             },
         };
-        _secondaryValueText.VerticalAlignment = VerticalAlignment.Bottom;
-        _secondaryValueText.Padding = new Thickness(0, 0, 0, 3);
+        _secondaryValueText.Padding = new Thickness(1, 0, 0, 0);
 
         var headerContent = new StackPanel
         {
-            Spacing = 4,
-            Padding = new Thickness(0, 0, 0, 2),
+            Spacing = 6,
+            Padding = new Thickness(0, 0, 0, 4),
             Background = BrushFactory.CreateBrush("#00FFFFFF"),
             Children =
             {
@@ -462,34 +461,21 @@ public sealed class TelemetryPanelCard : UserControl
         headerGrid.PointerCaptureLost += OnHeaderPointerCaptureLost;
         _headerDragHandle = headerGrid;
 
-        // Subtle top-edge highlight for glass-like depth effect
-        var topHighlight = new Border
-        {
-            Height = 1,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(8, 0, 8, 0),
-            CornerRadius = new CornerRadius(1),
-            Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)),
-            IsHitTestVisible = false,
-        };
-
         _cardBorder = new Border
         {
-            Background = CreateSurfaceGradient("#0E1B2C", "#13253A"),
+            Background = CreateSurfaceGradient("#101B2D", "#16273D"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(0.8),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(16, 14, 16, 14),
+            BorderThickness = new Thickness(0.9),
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(18, 16, 18, 18),
             Child = new Grid
             {
                 Children =
                 {
                     _edgeGlow,
-                    topHighlight,
                     new StackPanel
                     {
-                        Spacing = 8,
+                        Spacing = 10,
                         Children =
                         {
                             headerGrid,
@@ -727,6 +713,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         // Suspend chart/gauge rendering only during resize
         _chart.SetRenderingSuspended(resizing);
+        _gauge.SetRenderingSuspended(resizing);
 
         // Collapse charts and legends during resize so WinUI's layout engine
         // skips measuring them entirely — this is the biggest layout cost saver
@@ -750,17 +737,20 @@ public sealed class TelemetryPanelCard : UserControl
         // Only use CreateSurfaceGradient for elements that need distinct gradients.
         var strokeBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         var mutedBrush = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        var cardBg = CreateSurfaceGradient("#0E1B2C", "#13253A");
+        var cardBg = CreateSurfaceGradient("#101B2D", "#16273D");
 
         _cardBorder.Background = cardBg;
         _cardBorder.BorderBrush = strokeBrush;
-        _rangeShell.Background = ResolveBrush("SurfaceElevatedBrush", "#112033");
+        _cardBorder.BorderThickness = new Thickness(0.9);
+        _cardBorder.Opacity = 1.0;
+        _cardBorder.Translation = new System.Numerics.Vector3(0f, 0f, 0f);
+        _rangeShell.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
         _rangeShell.BorderBrush = strokeBrush;
         _scalePill.Background = ResolveBrush("PanelOverlayBrush", "#091321");
         _scalePill.BorderBrush = strokeBrush;
-        _chartFrame.Background = ResolveBrush("SurfaceBrush", "#0C1726");
+        _chartFrame.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
         _chartFrame.BorderBrush = strokeBrush;
-        _processSection.Background = ResolveBrush("SurfaceBrush", "#0C1726");
+        _processSection.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
         _processSection.BorderBrush = strokeBrush;
         _legendDivider.Background = strokeBrush;
         _legendScroller.Background = null;
@@ -769,7 +759,7 @@ public sealed class TelemetryPanelCard : UserControl
         _activityLabelText.Foreground = mutedBrush;
         _valueLabelText.Foreground = mutedBrush;
 
-        _badgeBorder.Background = ResolveBrush("SurfaceElevatedBrush", "#112033");
+        _badgeBorder.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
 
         _oneMinuteButton.RefreshThemeResources();
         _fiveMinuteButton.RefreshThemeResources();
@@ -925,8 +915,7 @@ public sealed class TelemetryPanelCard : UserControl
 
         if (allExist && rows.Count > 0)
         {
-            // Reorder existing rows and update values — no new UI elements created
-            _processRowsHost.Children.Clear();
+            var requiresReorder = _processRowsHost.Children.Count != rows.Count;
             for (var i = 0; i < rows.Count; i++)
             {
                 var item = rows[i];
@@ -934,13 +923,29 @@ public sealed class TelemetryPanelCard : UserControl
                 rp.NameText.Text = item.Name;
                 rp.ValueText.Text = item.Value;
                 rp.CaptionText.Text = item.Caption;
+                rp.Row.Tag = item.Key;
                 var intensity = Math.Clamp(item.Intensity, 0d, 1d);
                 if (rp.FillBrush.GradientStops.Count >= 3)
                 {
                     rp.FillBrush.GradientStops[1].Offset = intensity;
                     rp.FillBrush.GradientStops[2].Offset = Math.Min(intensity + 0.03, 1.0);
                 }
-                _processRowsHost.Children.Add(rp.Row);
+
+                if (!requiresReorder)
+                {
+                    requiresReorder =
+                        _processRowsHost.Children[i] is not FrameworkElement current ||
+                        !string.Equals(current.Tag as string, item.Key, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            if (requiresReorder)
+            {
+                _processRowsHost.Children.Clear();
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    _processRowsHost.Children.Add(_processRowParts[rows[i].Key].Row);
+                }
             }
 
             // Remove entries for rows no longer shown
@@ -963,6 +968,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             var item = rows[i];
             var rowParts = CreateProcessRow(item, panel.AccentBrush);
+            rowParts.Row.Tag = item.Key;
             _processRowParts.Add(item.Key, rowParts);
             _processRowsHost.Children.Add(rowParts.Row);
 
@@ -1089,7 +1095,7 @@ public sealed class TelemetryPanelCard : UserControl
 
     private void ApplyPalette(MetricPanelViewModel panel)
     {
-        _badgeBorder.Background = CreateSurfaceGradient("#102131", "#17304A");
+        _badgeBorder.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
         _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _scaleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
         _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
@@ -1104,11 +1110,11 @@ public sealed class TelemetryPanelCard : UserControl
         var util = panel.UtilizationPercent;
         if (util > 90)
         {
-            _currentValueText.Foreground = s_thresholdOrange; // orange — critical
+            _currentValueText.Foreground = ResolveBrush("CriticalBrush", "#FF9761");
         }
         else if (util > 75)
         {
-            _currentValueText.Foreground = s_thresholdYellow; // yellow — elevated
+            _currentValueText.Foreground = ResolveBrush("WarningBrush", "#F0C968");
         }
         else
         {
@@ -1117,16 +1123,8 @@ public sealed class TelemetryPanelCard : UserControl
     }
 
     // Cached threshold brushes — avoids allocating new brushes on every utilization update
-    private static readonly Brush s_thresholdOrange = BrushFactory.CreateBrush("#FF8C42");
-    private static readonly Brush s_thresholdYellow = BrushFactory.CreateBrush("#FFD166");
-
-    /// <summary>
-    /// Returns an accent brush color-coded by utilization threshold for panels that track utilization.
-    /// Under 75% = category accent, 75-90% = yellow, over 90% = orange.
-    /// </summary>
     private static Brush ResolveUtilizationBrush(MetricPanelViewModel panel)
     {
-        // Only apply threshold coloring to panels that track utilization percentage
         if (panel.UtilizationPercent <= 0 || panel.Unit != MetricUnit.Percent)
         {
             return panel.AccentBrush;
@@ -1134,12 +1132,12 @@ public sealed class TelemetryPanelCard : UserControl
 
         if (panel.UtilizationPercent > 90)
         {
-            return s_thresholdOrange;
+            return ResolveBrush("CriticalBrush", "#FF9761");
         }
 
         if (panel.UtilizationPercent > 75)
         {
-            return s_thresholdYellow;
+            return ResolveBrush("WarningBrush", "#F0C968");
         }
 
         return panel.AccentBrush;
@@ -1153,27 +1151,14 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         _cardBorder.BorderBrush = isHovered
-            ? ResolveBrush("AccentBrush", "#66E7FF")
+            ? ResolveBrush("AccentStrongBrush", "#9FEFFF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _cardBorder.BorderThickness = new Thickness(isHovered ? 1.4 : 0.8);
-
-        // Smooth opacity transition on hover for a polished feel
-        var targetOpacity = isHovered ? 1.0 : 0.92;
-        var animation = new DoubleAnimation
-        {
-            To = targetOpacity,
-            Duration = new Duration(TimeSpan.FromMilliseconds(isHovered ? 120 : 200)),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
-        };
-        Storyboard.SetTarget(animation, _cardBorder);
-        Storyboard.SetTargetProperty(animation, "Opacity");
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(animation);
-        storyboard.Begin();
-
+        _cardBorder.BorderThickness = new Thickness(isHovered ? 1.15 : 0.9);
+        _cardBorder.Opacity = isHovered ? 1.0 : 0.985;
         _cardBorder.Background = isHovered
-            ? CreateSurfaceGradient("#102133", "#162A40")
-            : CreateSurfaceGradient("#0E1B2C", "#13253A");
+            ? CreateSurfaceGradient("#122034", "#1A2C46")
+            : CreateSurfaceGradient("#101B2D", "#16273D");
+        _cardBorder.Translation = new System.Numerics.Vector3(0f, isHovered ? -1f : 0f, 0f);
     }
 
     private ActionChip CreateRangeButton(string text, TimeRangePreset preset)
@@ -1256,22 +1241,12 @@ public sealed class TelemetryPanelCard : UserControl
 
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.BorderThickness = new Thickness(2);
+            _cardBorder.Background = CreateSurfaceGradient("#122034", "#1A2C46");
+            _cardBorder.Opacity = 0.92;
+            _cardBorder.Translation = new System.Numerics.Vector3(0f, -2f, 0f);
             ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
             Canvas.SetZIndex(this, 50);
             CacheDragTargets();
-
-            // Animate lift — smooth transition into drag state
-            var liftOpacity = new DoubleAnimation
-            {
-                To = 0.88,
-                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
-            };
-            Storyboard.SetTarget(liftOpacity, _cardBorder);
-            Storyboard.SetTargetProperty(liftOpacity, "Opacity");
-            var liftStoryboard = new Storyboard();
-            liftStoryboard.Children.Add(liftOpacity);
-            liftStoryboard.Begin();
         }
 
         // Pure mouse delta — card moves exactly with the mouse, no feedback loops
@@ -1433,26 +1408,14 @@ public sealed class TelemetryPanelCard : UserControl
     {
         _isDropTarget = isActive;
         _cardBorder.BorderBrush = isActive
-            ? ResolveBrush("AccentBrush", "#66E7FF")
+            ? ResolveBrush("AccentStrongBrush", "#9FEFFF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _cardBorder.BorderThickness = new Thickness(isActive ? 1.5 : 1.2);
+        _cardBorder.BorderThickness = new Thickness(isActive ? 1.25 : 0.9);
         _cardBorder.Background = isActive
-            ? CreateSurfaceGradient("#102133", "#162A40")
-            : CreateSurfaceGradient("#0E1B2C", "#13253A");
-
-        // Animate the opacity pulse for smooth feedback
-        var targetOpacity = isActive ? 0.92 : 1.0;
-        var opAnim = new DoubleAnimation
-        {
-            To = targetOpacity,
-            Duration = new Duration(TimeSpan.FromMilliseconds(120)),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
-        };
-        Storyboard.SetTarget(opAnim, _cardBorder);
-        Storyboard.SetTargetProperty(opAnim, "Opacity");
-        var sb = new Storyboard();
-        sb.Children.Add(opAnim);
-        sb.Begin();
+            ? CreateSurfaceGradient("#122034", "#1A2C46")
+            : CreateSurfaceGradient("#101B2D", "#16273D");
+        _cardBorder.Opacity = isActive ? 0.96 : 1.0;
+        _cardBorder.Translation = new System.Numerics.Vector3(0f, isActive ? -1f : 0f, 0f);
     }
 
     private void CacheDragTargets()
@@ -1539,7 +1502,10 @@ public sealed class TelemetryPanelCard : UserControl
         {
             ProtectedCursor = null;
             _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-            _cardBorder.BorderThickness = new Thickness(1.2);
+            _cardBorder.BorderThickness = new Thickness(0.9);
+            _cardBorder.Background = CreateSurfaceGradient("#101B2D", "#16273D");
+            _cardBorder.Opacity = 1.0;
+            _cardBorder.Translation = new System.Numerics.Vector3(0f, 0f, 0f);
 
             // Finalize grid position and clear translate instantly — no swoop
             PanelDragEnded?.Invoke(this, EventArgs.Empty);
@@ -1679,17 +1645,25 @@ public sealed class TelemetryPanelCard : UserControl
 
         var border = new Border
         {
-            Background = CreateSurfaceGradient("#101C2D", "#132438"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(0.6),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(10, 6, 10, 6),
+            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(11),
+            Padding = new Thickness(11, 7, 11, 7),
             Child = row,
         };
 
         // Hover reads current theme each time — no stale captured brushes
-        border.PointerEntered += (_, _) => border.Background = CreateSurfaceGradient("#162A3E", "#1C3350");
-        border.PointerExited += (_, _) => border.Background = CreateSurfaceGradient("#101C2D", "#132438");
+        border.PointerEntered += (_, _) =>
+        {
+            border.Background = ResolveBrush("SurfaceStrongBrush", "#18314A");
+            border.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
+        };
+        border.PointerExited += (_, _) =>
+        {
+            border.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
+            border.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        };
 
         var wrapper = new ClickableBorder(border);
         return (wrapper, border, nameText, valueText, dot);
@@ -1889,14 +1863,30 @@ public sealed class TelemetryPanelCard : UserControl
         return BrushFactory.CreateBrush(fallbackHex);
     }
 
+    private static readonly Dictionary<string, LinearGradientBrush> s_gradientCache = new(StringComparer.Ordinal);
+    private static bool s_lastCachedLightMode;
+
     private static Brush CreateSurfaceGradient(string startHex, string endHex)
     {
-        if (IsLightPaletteActive())
+        var isLight = IsLightPaletteActive();
+        if (isLight != s_lastCachedLightMode)
         {
-            // Map dark hex to light equivalents for visual distinction between layers
+            s_gradientCache.Clear();
+            s_lastCachedLightMode = isLight;
+        }
+
+        var cacheKey = string.Concat(startHex, "|", endHex);
+        if (s_gradientCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        LinearGradientBrush brush;
+        if (isLight)
+        {
             var lightStart = LiftToLight(startHex);
             var lightEnd = LiftToLight(endHex);
-            return new LinearGradientBrush
+            brush = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0),
                 EndPoint = new Windows.Foundation.Point(1, 1),
@@ -1907,17 +1897,22 @@ public sealed class TelemetryPanelCard : UserControl
                 },
             };
         }
-
-        return new LinearGradientBrush
+        else
         {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1),
-            GradientStops = new GradientStopCollection
+            brush = new LinearGradientBrush
             {
-                new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
-                new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
-            },
-        };
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
+                    new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
+                },
+            };
+        }
+
+        s_gradientCache[cacheKey] = brush;
+        return brush;
     }
 
     private static Color LiftToLight(string darkHex)
@@ -1925,8 +1920,8 @@ public sealed class TelemetryPanelCard : UserControl
         return darkHex.TrimStart('#').ToUpperInvariant() switch
         {
             // Card surface — pure white
-            "0E1B2C" or "0E1A2C" => BrushFactory.ParseColor("#FFFFFF"),
-            "13253A" or "142436" => BrushFactory.ParseColor("#F8FAFD"),
+            "0E1B2C" or "0E1A2C" or "101B2D" => BrushFactory.ParseColor("#FFFFFF"),
+            "13253A" or "142436" or "16273D" => BrushFactory.ParseColor("#F8FAFD"),
             // Badge — tinted
             "102131" or "17304A" => BrushFactory.ParseColor("#E0EAF4"),
             // Chart frame — gray inset
@@ -1942,7 +1937,7 @@ public sealed class TelemetryPanelCard : UserControl
             // Scale pill
             "101D2E" or "152840" => BrushFactory.ParseColor("#E6ECF4"),
             // Card hover
-            "102133" or "162A40" => BrushFactory.ParseColor("#E4ECF4"),
+            "102133" or "162A40" or "122034" or "1A2C46" => BrushFactory.ParseColor("#E4ECF4"),
             _ => BrushFactory.ParseColor("#F2F6FB"),
         };
     }

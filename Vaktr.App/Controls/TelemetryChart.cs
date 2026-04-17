@@ -59,8 +59,14 @@ public sealed class TelemetryChart : UserControl
             typeof(TelemetryChart),
             new PropertyMetadata("Waiting for samples", OnChartPropertyChanged));
 
-    private readonly Canvas _canvas;
+    private readonly Canvas _plotCanvas;
+    private readonly Canvas _gridCanvas;
+    private readonly Canvas _dataCanvas;
     private readonly Canvas _interactionCanvas;
+    private readonly Rectangle _plotFrame;
+    private readonly Rectangle _plotTint;
+    private readonly Rectangle _leftEdgeFade;
+    private readonly Rectangle _rightEdgeFade;
     private readonly Rectangle _selectionRectangle;
     private readonly Line _hoverLine;
     private readonly Border _hoverTooltip;
@@ -81,14 +87,44 @@ public sealed class TelemetryChart : UserControl
     {
         UseLayoutRounding = false; // smoother diagonal lines on chart strokes
 
-        _canvas = new Canvas();
+        _plotCanvas = new Canvas();
+        _gridCanvas = new Canvas();
+        _dataCanvas = new Canvas();
         _interactionCanvas = new Canvas();
+        _plotFrame = new Rectangle
+        {
+            RadiusX = 10,
+            RadiusY = 10,
+            StrokeThickness = 0.9,
+            Opacity = 0.98,
+            IsHitTestVisible = false,
+        };
+        _plotTint = new Rectangle
+        {
+            RadiusX = 10,
+            RadiusY = 10,
+            Opacity = 0.04,
+            IsHitTestVisible = false,
+        };
+        _leftEdgeFade = new Rectangle
+        {
+            IsHitTestVisible = false,
+        };
+        _rightEdgeFade = new Rectangle
+        {
+            IsHitTestVisible = false,
+        };
+        _plotCanvas.Children.Add(_plotFrame);
+        _plotCanvas.Children.Add(_plotTint);
+        _plotCanvas.Children.Add(_leftEdgeFade);
+        _plotCanvas.Children.Add(_rightEdgeFade);
+        RefreshPlotSurfaceThemeResources();
         _selectionRectangle = new Rectangle
         {
             Visibility = Visibility.Collapsed,
             Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF"),
             StrokeThickness = 1,
-            Fill = BrushFactory.CreateBrush("#163BB7FF"),
+            Fill = ResolveBrush("AccentHaloBrush", "#2B8FE6C4"),
             RadiusX = 8,
             RadiusY = 8,
             IsHitTestVisible = false,
@@ -114,10 +150,10 @@ public sealed class TelemetryChart : UserControl
         {
             Visibility = Visibility.Collapsed,
             Background = CreateSurfaceGradient("#15283B", "#203851"),
-            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderBrush = ResolveBrush("AccentSoftBrush", "#163B60"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(11, 8, 11, 8),
+            CornerRadius = new CornerRadius(11),
+            Padding = new Thickness(12, 9, 12, 9),
             Child = _hoverTooltipText,
             IsHitTestVisible = false,
             Translation = new System.Numerics.Vector3(0, 0, 16), // Subtle elevation shadow
@@ -133,34 +169,16 @@ public sealed class TelemetryChart : UserControl
             Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
             Text = "Waiting for samples",
             TextAlignment = TextAlignment.Center,
+            Opacity = 0.82,
             Visibility = Visibility.Collapsed,
         };
-
-        // Gentle pulse animation on empty state text — subtle loading indicator
-        var emptyPulse = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimationUsingKeyFrames
-        {
-            RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever,
-        };
-        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.SplineDoubleKeyFrame
-            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.Zero), Value = 0.4,
-              KeySpline = new Microsoft.UI.Xaml.Media.Animation.KeySpline { ControlPoint1 = new Windows.Foundation.Point(0.4, 0), ControlPoint2 = new Windows.Foundation.Point(0.6, 1) } });
-        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.SplineDoubleKeyFrame
-            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1400)), Value = 1.0,
-              KeySpline = new Microsoft.UI.Xaml.Media.Animation.KeySpline { ControlPoint1 = new Windows.Foundation.Point(0.4, 0), ControlPoint2 = new Windows.Foundation.Point(0.6, 1) } });
-        emptyPulse.KeyFrames.Add(new Microsoft.UI.Xaml.Media.Animation.SplineDoubleKeyFrame
-            { KeyTime = Microsoft.UI.Xaml.Media.Animation.KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2800)), Value = 0.4,
-              KeySpline = new Microsoft.UI.Xaml.Media.Animation.KeySpline { ControlPoint1 = new Windows.Foundation.Point(0.4, 0), ControlPoint2 = new Windows.Foundation.Point(0.6, 1) } });
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(emptyPulse, _emptyStateText);
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(emptyPulse, "Opacity");
-        var emptyStoryboard = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
-        emptyStoryboard.Children.Add(emptyPulse);
-        _emptyStateText.Loaded += (_, _) => emptyStoryboard.Begin();
-
         Content = new Grid
         {
             Children =
             {
-                _canvas,
+                _plotCanvas,
+                _gridCanvas,
+                _dataCanvas,
                 _interactionCanvas,
                 _emptyStateText,
             },
@@ -253,9 +271,11 @@ public sealed class TelemetryChart : UserControl
 
     public void RefreshThemeResources()
     {
+        RefreshPlotSurfaceThemeResources();
         _hoverLine.Stroke = ResolveBrush("AccentStrongBrush", "#B7F7FF");
         _hoverTooltip.Background = CreateSurfaceGradient("#15283B", "#203851");
-        _hoverTooltip.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _hoverTooltip.BorderBrush = ResolveBrush("AccentSoftBrush", "#163B60");
+        _selectionRectangle.Fill = ResolveBrush("AccentHaloBrush", "#2B8FE6C4");
         _hoverTooltipText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _emptyStateText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _emptyStateText.Text = string.IsNullOrWhiteSpace(EmptyStateText) ? "Waiting for samples" : EmptyStateText;
@@ -305,6 +325,10 @@ public sealed class TelemetryChart : UserControl
     private DateTimeOffset _lastRenderedStart;
     private DateTimeOffset _lastRenderedEnd;
     private double _lastRenderedCeiling;
+    private double _lastRenderedWidth;
+    private double _lastRenderedHeight;
+    private double _lastResolvedMaxValue;
+    private bool _hasRenderedFrame;
     // Effective bounds used for rendering (may differ from Window*Utc when those are default)
     private DateTimeOffset _effectiveRenderStart;
     private DateTimeOffset _effectiveRenderEnd;
@@ -342,7 +366,9 @@ public sealed class TelemetryChart : UserControl
         var series = Series ?? Array.Empty<ChartSeriesViewModel>();
 
         // Skip redraw if nothing meaningful has changed
-        if (_canvas.Children.Count > 0 &&
+        if (_hasRenderedFrame &&
+            Math.Abs(width - _lastRenderedWidth) < 0.5d &&
+            Math.Abs(height - _lastRenderedHeight) < 0.5d &&
             WindowStartUtc == _lastRenderedStart &&
             WindowEndUtc == _lastRenderedEnd &&
             Math.Abs(CeilingValue - _lastRenderedCeiling) < 0.01 &&
@@ -355,6 +381,8 @@ public sealed class TelemetryChart : UserControl
         _lastRenderedStart = WindowStartUtc;
         _lastRenderedEnd = WindowEndUtc;
         _lastRenderedCeiling = CeilingValue;
+        _lastRenderedWidth = width;
+        _lastRenderedHeight = height;
         var hash = series.Count;
         for (var i = 0; i < series.Count; i++)
         {
@@ -366,13 +394,16 @@ public sealed class TelemetryChart : UserControl
 
         if (!TryGetPointBounds(series, out var minTimestamp, out var maxTimestamp, out var maxObservedValue))
         {
-            _canvas.Children.Clear();
+            _gridCanvas.Children.Clear();
+            _dataCanvas.Children.Clear();
             var emptyPlotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
             var emptyPlotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
-            DrawPlotSurface(emptyPlotWidth, emptyPlotHeight);
-            DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, ResolveMaxValue(0d), includeLabels: false);
+            UpdatePlotSurface(emptyPlotWidth, emptyPlotHeight);
+            _lastResolvedMaxValue = ResolveMaxValue(0d);
+            DrawGrid(width, height, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow, _lastResolvedMaxValue, includeLabels: false);
             _emptyStateText.Text = string.IsNullOrWhiteSpace(EmptyStateText) ? "\u23F3 Waiting for samples" : $"\u23F3 {EmptyStateText}";
             _emptyStateText.Visibility = Visibility.Visible;
+            _hasRenderedFrame = true;
             HideHover();
             return;
         }
@@ -390,6 +421,7 @@ public sealed class TelemetryChart : UserControl
         _effectiveRenderEnd = end;
 
         var maxValue = ResolveMaxValue(maxObservedValue);
+        _lastResolvedMaxValue = maxValue;
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
         var plotHeight = Math.Max(16d, height - TopPadding - BottomPadding);
         var seriesCount = series.Count;
@@ -398,8 +430,9 @@ public sealed class TelemetryChart : UserControl
         var pointBudget = ResolvePointBudget(width, seriesCount, end - start);
         var strokeThickness = seriesCount <= 2 ? 2d : seriesCount <= 6 ? 1.7d : 1.35d;
 
-        _canvas.Children.Clear();
-        DrawPlotSurface(plotWidth, plotHeight);
+        _gridCanvas.Children.Clear();
+        _dataCanvas.Children.Clear();
+        UpdatePlotSurface(plotWidth, plotHeight);
         DrawGrid(width, height, start, end, maxValue);
         foreach (var item in series)
         {
@@ -445,7 +478,7 @@ public sealed class TelemetryChart : UserControl
                     var fillProjected = ResolveFillPoints(strokeProjected);
                     if (fillProjected.Count >= 2)
                     {
-                        _canvas.Children.Add(new Path
+                        _dataCanvas.Children.Add(new Path
                         {
                             Data = BuildAreaGeometry(fillProjected, TopPadding + plotHeight),
                             Fill = item.FillBrush,
@@ -454,7 +487,7 @@ public sealed class TelemetryChart : UserControl
                     }
                 }
 
-                _canvas.Children.Add(new Path
+                _dataCanvas.Children.Add(new Path
                 {
                     Data = BuildLineGeometry(strokeProjected),
                     Stroke = item.StrokeBrush,
@@ -480,86 +513,43 @@ public sealed class TelemetryChart : UserControl
                 };
                 Canvas.SetLeft(glow, lastPoint.X - 7);
                 Canvas.SetTop(glow, lastPoint.Y - 7);
-                _canvas.Children.Add(glow);
+                _dataCanvas.Children.Add(glow);
                 DrawPoint(lastPoint, item.StrokeBrush, 5.5);
             }
         }
 
+        _hasRenderedFrame = true;
     }
 
-    private void DrawPlotSurface(double plotWidth, double plotHeight)
+    private void UpdatePlotSurface(double plotWidth, double plotHeight)
     {
-        var frame = new Rectangle
-        {
-            Width = plotWidth,
-            Height = plotHeight,
-            RadiusX = 8,
-            RadiusY = 8,
-            Stroke = ResolveBrush("SurfaceGridBrush", "#27425E"),
-            StrokeThickness = 1,
-            Fill = CreateSurfaceGradient("#0A141F", "#0F1E2E"),
-            Opacity = 0.96,
-        };
-
-        var tint = new Rectangle
-        {
-            Width = plotWidth,
-            Height = plotHeight,
-            RadiusX = 8,
-            RadiusY = 8,
-            Fill = ResolveBrush("AccentSoftBrush", "#10394D"),
-            Opacity = 0.03,
-        };
-
-        Canvas.SetLeft(frame, LeftPadding);
-        Canvas.SetTop(frame, TopPadding);
-        _canvas.Children.Add(frame);
-        Canvas.SetLeft(tint, LeftPadding);
-        Canvas.SetTop(tint, TopPadding);
-        _canvas.Children.Add(tint);
-
-        // Subtle edge fade for depth at left and right edges
         var edgeFadeWidth = Math.Min(24d, plotWidth * 0.06);
-        var plotBg = IsLightPaletteActive() ? BrushFactory.ParseColor("#EEF2F8") : BrushFactory.ParseColor("#0A141F");
-        var leftFade = new Rectangle
-        {
-            Width = edgeFadeWidth,
-            Height = plotHeight,
-            Fill = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0),
-                EndPoint = new Windows.Foundation.Point(1, 0),
-                GradientStops = new GradientStopCollection
-                {
-                    new GradientStop { Color = Color.FromArgb(40, plotBg.R, plotBg.G, plotBg.B), Offset = 0 },
-                    new GradientStop { Color = Color.FromArgb(0, plotBg.R, plotBg.G, plotBg.B), Offset = 1 },
-                },
-            },
-            IsHitTestVisible = false,
-        };
-        Canvas.SetLeft(leftFade, LeftPadding);
-        Canvas.SetTop(leftFade, TopPadding);
-        _canvas.Children.Add(leftFade);
+        _plotFrame.Width = plotWidth;
+        _plotFrame.Height = plotHeight;
+        _plotTint.Width = plotWidth;
+        _plotTint.Height = plotHeight;
+        _leftEdgeFade.Width = edgeFadeWidth;
+        _leftEdgeFade.Height = plotHeight;
+        _rightEdgeFade.Width = edgeFadeWidth;
+        _rightEdgeFade.Height = plotHeight;
 
-        var rightFade = new Rectangle
-        {
-            Width = edgeFadeWidth,
-            Height = plotHeight,
-            Fill = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0),
-                EndPoint = new Windows.Foundation.Point(1, 0),
-                GradientStops = new GradientStopCollection
-                {
-                    new GradientStop { Color = Color.FromArgb(0, plotBg.R, plotBg.G, plotBg.B), Offset = 0 },
-                    new GradientStop { Color = Color.FromArgb(40, plotBg.R, plotBg.G, plotBg.B), Offset = 1 },
-                },
-            },
-            IsHitTestVisible = false,
-        };
-        Canvas.SetLeft(rightFade, LeftPadding + plotWidth - edgeFadeWidth);
-        Canvas.SetTop(rightFade, TopPadding);
-        _canvas.Children.Add(rightFade);
+        Canvas.SetLeft(_plotFrame, LeftPadding);
+        Canvas.SetTop(_plotFrame, TopPadding);
+        Canvas.SetLeft(_plotTint, LeftPadding);
+        Canvas.SetTop(_plotTint, TopPadding);
+        Canvas.SetLeft(_leftEdgeFade, LeftPadding);
+        Canvas.SetTop(_leftEdgeFade, TopPadding);
+        Canvas.SetLeft(_rightEdgeFade, LeftPadding + plotWidth - edgeFadeWidth);
+        Canvas.SetTop(_rightEdgeFade, TopPadding);
+    }
+
+    private void RefreshPlotSurfaceThemeResources()
+    {
+        _plotFrame.Stroke = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        _plotFrame.Fill = ResolveBrush("SurfaceInsetBrush", "#091321");
+        _plotTint.Fill = ResolveBrush("AccentSoftBrush", "#10394D");
+        _leftEdgeFade.Fill = CreateEdgeFadeBrush(isLeadingEdge: true);
+        _rightEdgeFade.Fill = CreateEdgeFadeBrush(isLeadingEdge: false);
     }
 
     private void DrawGrid(double width, double height, DateTimeOffset start, DateTimeOffset end, double maxValue, bool includeLabels = true)
@@ -573,26 +563,26 @@ public sealed class TelemetryChart : UserControl
         for (var index = 0; index < divisions; index++)
         {
             var y = TopPadding + ((plotHeight / divisions) * index);
-            _canvas.Children.Add(new Rectangle
+            _gridCanvas.Children.Add(new Rectangle
             {
                 Width = plotWidth,
                 Height = plotHeight / divisions,
                 Fill = ResolveBrush("SurfaceGridBrush", index % 2 == 0 ? "#274768" : "#1B3650"),
-                Opacity = index % 2 == 0 ? 0.10 : 0.05,
+                Opacity = index % 2 == 0 ? 0.06 : 0.03,
             });
 
-            Canvas.SetLeft(_canvas.Children[^1], LeftPadding);
-            Canvas.SetTop(_canvas.Children[^1], y);
+            Canvas.SetLeft(_gridCanvas.Children[^1], LeftPadding);
+            Canvas.SetTop(_gridCanvas.Children[^1], y);
         }
 
         for (var index = 0; index <= divisions; index++)
         {
             var y = TopPadding + ((plotHeight / divisions) * index);
-            _canvas.Children.Add(new Line
+            _gridCanvas.Children.Add(new Line
             {
                 Stroke = gridBrush,
                 StrokeThickness = 1,
-                Opacity = index is 0 || index == divisions ? 0.40 : 0.20,
+                Opacity = index is 0 || index == divisions ? 0.28 : 0.16,
                 X1 = LeftPadding,
                 X2 = LeftPadding + plotWidth,
                 Y1 = y,
@@ -605,11 +595,11 @@ public sealed class TelemetryChart : UserControl
             var x = LeftPadding + ((plotWidth / divisions) * index);
             if (index is not 0 && index != divisions)
             {
-                _canvas.Children.Add(new Line
+                _gridCanvas.Children.Add(new Line
                 {
                     Stroke = gridBrush,
                     StrokeThickness = 1,
-                    Opacity = 0.12,
+                    Opacity = 0.08,
                     X1 = x,
                     X2 = x,
                     Y1 = TopPadding,
@@ -637,7 +627,7 @@ public sealed class TelemetryChart : UserControl
                 Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6"),
                 Text = FormatTimeLabel(tick, end - start),
             };
-            _canvas.Children.Add(label);
+            _gridCanvas.Children.Add(label);
             Canvas.SetLeft(label, Math.Clamp(x - 18, LeftPadding, width - 54));
             Canvas.SetTop(label, bottomY + 4);
         }
@@ -654,7 +644,7 @@ public sealed class TelemetryChart : UserControl
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(maxValue, Unit),
         };
-        _canvas.Children.Add(ceiling);
+        _gridCanvas.Children.Add(ceiling);
         Canvas.SetLeft(ceiling, LeftPadding);
         Canvas.SetTop(ceiling, 2);
 
@@ -671,7 +661,7 @@ public sealed class TelemetryChart : UserControl
                 Text = FormatAxisValue(midValue, Unit),
                 Opacity = 0.6,
             };
-            _canvas.Children.Add(midLabel);
+            _gridCanvas.Children.Add(midLabel);
             Canvas.SetLeft(midLabel, LeftPadding);
             Canvas.SetTop(midLabel, midY - 6);
         }
@@ -683,7 +673,7 @@ public sealed class TelemetryChart : UserControl
             Foreground = ResolveBrush("TextSecondaryBrush", "#A8C2DA"),
             Text = FormatAxisValue(0d, Unit),
         };
-        _canvas.Children.Add(floor);
+        _gridCanvas.Children.Add(floor);
         Canvas.SetLeft(floor, LeftPadding);
         Canvas.SetTop(floor, bottomY - 14);
     }
@@ -719,7 +709,7 @@ public sealed class TelemetryChart : UserControl
 
         Canvas.SetLeft(dot, point.X - (size / 2d));
         Canvas.SetTop(dot, point.Y - (size / 2d));
-        _canvas.Children.Add(dot);
+        _dataCanvas.Children.Add(dot);
     }
 
     private static IReadOnlyList<MetricPoint> Downsample(IReadOnlyList<MetricPoint> points, int maxPoints)
@@ -1215,6 +1205,32 @@ public sealed class TelemetryChart : UserControl
         return BrushFactory.CreateBrush(fallbackHex);
     }
 
+    private static Brush CreateEdgeFadeBrush(bool isLeadingEdge)
+    {
+        var plotBackground = IsLightPaletteActive()
+            ? BrushFactory.ParseColor("#EEF2F8")
+            : BrushFactory.ParseColor("#0A141F");
+
+        return new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 0),
+            GradientStops = new GradientStopCollection
+            {
+                new GradientStop
+                {
+                    Color = Color.FromArgb(isLeadingEdge ? (byte)40 : (byte)0, plotBackground.R, plotBackground.G, plotBackground.B),
+                    Offset = 0,
+                },
+                new GradientStop
+                {
+                    Color = Color.FromArgb(isLeadingEdge ? (byte)0 : (byte)40, plotBackground.R, plotBackground.G, plotBackground.B),
+                    Offset = 1,
+                },
+            },
+        };
+    }
+
     private static Color LiftToLight(string darkHex)
     {
         return darkHex.TrimStart('#').ToUpperInvariant() switch
@@ -1225,11 +1241,28 @@ public sealed class TelemetryChart : UserControl
         };
     }
 
+    private static readonly Dictionary<string, LinearGradientBrush> s_gradientCache = new(StringComparer.Ordinal);
+    private static bool s_lastCachedLightMode;
+
     private static Brush CreateSurfaceGradient(string startHex, string endHex)
     {
-        if (IsLightPaletteActive())
+        var isLight = IsLightPaletteActive();
+        if (isLight != s_lastCachedLightMode)
         {
-            return new LinearGradientBrush
+            s_gradientCache.Clear();
+            s_lastCachedLightMode = isLight;
+        }
+
+        var cacheKey = string.Concat(startHex, "|", endHex);
+        if (s_gradientCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        LinearGradientBrush brush;
+        if (isLight)
+        {
+            brush = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0),
                 EndPoint = new Windows.Foundation.Point(1, 1),
@@ -1240,17 +1273,22 @@ public sealed class TelemetryChart : UserControl
                 },
             };
         }
-
-        return new LinearGradientBrush
+        else
         {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1),
-            GradientStops = new GradientStopCollection
+            brush = new LinearGradientBrush
             {
-                new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
-                new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
-            },
-        };
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
+                    new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
+                },
+            };
+        }
+
+        s_gradientCache[cacheKey] = brush;
+        return brush;
     }
 
     private static bool IsLightPaletteActive()
@@ -1481,7 +1519,7 @@ public sealed class TelemetryChart : UserControl
         hoverX = 0d;
         tooltip = string.Empty;
 
-        if (!TryGetPointBounds(Series, out _, out _, out var peak))
+        if (_lastResolvedMaxValue <= 0d)
         {
             return false;
         }
@@ -1495,7 +1533,7 @@ public sealed class TelemetryChart : UserControl
             return false;
         }
 
-        var maxValue = ResolveMaxValue(peak);
+        var maxValue = _lastResolvedMaxValue;
         var normalized = Math.Clamp((pointerX - LeftPadding) / plotWidth, 0d, 1d);
         var target = start + TimeSpan.FromTicks((long)((end - start).Ticks * normalized));
         var lines = new List<(string Name, double Value)>();
