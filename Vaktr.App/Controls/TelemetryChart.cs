@@ -305,6 +305,9 @@ public sealed class TelemetryChart : UserControl
     private DateTimeOffset _lastRenderedStart;
     private DateTimeOffset _lastRenderedEnd;
     private double _lastRenderedCeiling;
+    // Effective bounds used for rendering (may differ from Window*Utc when those are default)
+    private DateTimeOffset _effectiveRenderStart;
+    private DateTimeOffset _effectiveRenderEnd;
 
     private bool SeriesMatchesLastRendered(IReadOnlyList<ChartSeriesViewModel> series)
     {
@@ -382,6 +385,9 @@ public sealed class TelemetryChart : UserControl
         {
             end = start.AddMinutes(1);
         }
+
+        _effectiveRenderStart = start;
+        _effectiveRenderEnd = end;
 
         var maxValue = ResolveMaxValue(maxObservedValue);
         var plotWidth = Math.Max(16d, width - LeftPadding - RightPadding);
@@ -1350,6 +1356,10 @@ public sealed class TelemetryChart : UserControl
             return;
         }
 
+        // Flip the flag BEFORE releasing capture so OnPointerCaptureLost
+        // (which fires synchronously from ReleasePointerCaptures) doesn't
+        // re-enter CompleteSelection and undo the just-pinned tooltip.
+        _isSelecting = false;
         ReleasePointerCaptures();
         CompleteSelection();
         e.Handled = true;
@@ -1362,6 +1372,7 @@ public sealed class TelemetryChart : UserControl
             return;
         }
 
+        _isSelecting = false;
         CompleteSelection();
     }
 
@@ -1370,17 +1381,22 @@ public sealed class TelemetryChart : UserControl
         _isSelecting = false;
         _selectionRectangle.Visibility = Visibility.Collapsed;
 
-        if (WindowEndUtc <= WindowStartUtc)
-        {
-            return;
-        }
-
         var left = Math.Min(_selectionStartX, _selectionCurrentX);
         var right = Math.Max(_selectionStartX, _selectionCurrentX);
         if (right - left < MinimumSelectionWidth)
         {
             // Short click (not a drag) — pin a tooltip at this position
             TryPinTooltip(_selectionStartX);
+            return;
+        }
+
+        // Use the effective rendering bounds (which account for default Window*Utc
+        // falling back to data min/max) so the pixel→timestamp conversion matches
+        // exactly what the user sees on screen. Fall back to Window properties.
+        var renderStart = _effectiveRenderEnd > _effectiveRenderStart ? _effectiveRenderStart : WindowStartUtc;
+        var renderEnd = _effectiveRenderEnd > _effectiveRenderStart ? _effectiveRenderEnd : WindowEndUtc;
+        if (renderEnd <= renderStart)
+        {
             return;
         }
 
@@ -1394,8 +1410,8 @@ public sealed class TelemetryChart : UserControl
 
         var normalizedLeft = (clampedLeft - LeftPadding) / plotWidth;
         var normalizedRight = (clampedRight - LeftPadding) / plotWidth;
-        var start = WindowStartUtc + TimeSpan.FromTicks((long)((WindowEndUtc - WindowStartUtc).Ticks * normalizedLeft));
-        var end = WindowStartUtc + TimeSpan.FromTicks((long)((WindowEndUtc - WindowStartUtc).Ticks * normalizedRight));
+        var start = renderStart + TimeSpan.FromTicks((long)((renderEnd - renderStart).Ticks * normalizedLeft));
+        var end = renderStart + TimeSpan.FromTicks((long)((renderEnd - renderStart).Ticks * normalizedRight));
 
         if (end > start)
         {
@@ -1470,8 +1486,10 @@ public sealed class TelemetryChart : UserControl
             return false;
         }
 
-        var start = WindowStartUtc;
-        var end = WindowEndUtc;
+        // Prefer the effective render bounds (set by Redraw) but fall back to
+        // WindowStartUtc/WindowEndUtc if Redraw hasn't set them yet.
+        var start = _effectiveRenderEnd > _effectiveRenderStart ? _effectiveRenderStart : WindowStartUtc;
+        var end = _effectiveRenderEnd > _effectiveRenderStart ? _effectiveRenderEnd : WindowEndUtc;
         if (end <= start)
         {
             return false;
@@ -1595,6 +1613,13 @@ public sealed class TelemetryChart : UserControl
 
     private void TryPinTooltip(double pointerX)
     {
+        // Only one annotation at a time — clicking again replaces it
+        if (_pinnedTooltips.Count > 0)
+        {
+            ClearPinnedTooltips();
+            return;
+        }
+
         var plotWidth = Math.Max(16d, ActualWidth - LeftPadding - RightPadding);
         var plotHeight = Math.Max(16d, ActualHeight - TopPadding - BottomPadding);
         if (!TryBuildHoverSnapshot(pointerX, plotWidth, plotHeight, out var hoverX, out var tooltip))
@@ -1615,7 +1640,7 @@ public sealed class TelemetryChart : UserControl
             IsHitTestVisible = false,
         };
 
-        // Create pinned tooltip
+        // Create pinned tooltip — clickable to dismiss
         var pinnedText = new TextBlock
         {
             FontSize = 10,
@@ -1632,8 +1657,13 @@ public sealed class TelemetryChart : UserControl
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(8, 6, 8, 6),
             Child = pinnedText,
-            IsHitTestVisible = false,
+            IsHitTestVisible = true,
             Opacity = 0.95,
+        };
+        pinnedBorder.Tapped += (_, e) =>
+        {
+            ClearPinnedTooltips();
+            e.Handled = true;
         };
 
         _interactionCanvas.Children.Add(markerLine);
