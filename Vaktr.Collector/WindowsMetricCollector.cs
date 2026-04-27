@@ -356,7 +356,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                     var usedPercent = Math.Clamp((1d - (drive.AvailableFreeSpace / (double)totalBytes)) * 100d, 0d, 100d);
                     var driveLabel = drive.Name.TrimEnd('\\');
                     var panelKey = $"volume-{Sanitize(driveLabel)}";
-                    var panelTitle = $"Drive {driveLabel} Capacity";
+                    var panelTitle = $"Drive {driveLabel}";
 
                     _cachedDriveUsageValues.Add(new CachedMetricValue(
                         panelKey,

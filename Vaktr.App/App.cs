@@ -93,23 +93,23 @@ public sealed class App : Application
     {
         var palette = mode == ThemeMode.Light
             ? new ThemePalette(
-                "#E2EBF4",     // AppBackdrop — noticeably gray-blue, not near-white
-                "#EDF2F8",     // ShellBackground — slightly lighter than backdrop
-                "#B0C0D4",     // ShellStroke — visible border
-                "#FFFFFF",     // Surface — pure white cards stand out from gray bg
-                "#F4F7FB",     // SurfaceElevated — very slight tint
-                "#E8EEF5",     // SurfaceStrong — clearly tinted for buttons/hover
-                "#E3EAF3",     // SurfaceInset — slightly recessed beds
-                "#C0CEDC",     // SurfaceStroke — visible card borders
-                "#B0FFFFFF",   // SurfaceHighlight — crisp top highlight
-                "#DCE5EF",     // PanelOverlay — distinct overlay tint
-                "#B8C8D8",     // SurfaceGrid — visible grid lines
-                "#0A1824",     // TextPrimary — strong dark text
-                "#2C4460",     // TextSecondary — darker for better contrast
-                "#5A7084",     // TextMuted — still readable
-                "#0868A0",     // Accent — deeper blue for visibility on light bg
-                "#04506E",     // AccentStrong — very dark blue
-                "#D0E8F8",     // AccentSoft — light blue tint
+                "#EEF2F7",     // AppBackdrop — neutral light shell background
+                "#F7F9FC",     // ShellBackground — brighter than the app backdrop
+                "#CAD4DF",     // ShellStroke — soft but visible shell framing
+                "#FFFFFF",     // Surface — primary white cards
+                "#FBFCFE",     // SurfaceElevated — nearly-white raised surfaces
+                "#EEF2F7",     // SurfaceStrong — compact controls and hover states
+                "#F3F6FA",     // SurfaceInset — recessed chart/process beds
+                "#C8D2DE",     // SurfaceStroke — crisp borders on light cards
+                "#C8FFFFFF",   // SurfaceHighlight — restrained highlight for glassy edges
+                "#E8EEF5",     // PanelOverlay — subtle supporting pill/background tint
+                "#C7D2DE",     // SurfaceGrid — visible but not blue-heavy chart grid
+                "#0D1A25",     // TextPrimary — strong dark text
+                "#3A4F63",     // TextSecondary — calmer supporting copy
+                "#66788A",     // TextMuted — readable metadata
+                "#0C6B96",     // Accent — cooler cyan-blue without neon contrast
+                "#0A4E6D",     // AccentStrong — stronger interactive state
+                "#DDEAF6",     // AccentSoft — quiet accent tint
                 "#18609020",   // AccentHalo
                 "#15C09040",   // WarningHalo
                 "#B8861F",     // Warning

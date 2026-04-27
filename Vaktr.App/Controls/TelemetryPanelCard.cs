@@ -122,8 +122,8 @@ public sealed class TelemetryPanelCard : UserControl
         _scaleText.MaxWidth = 200;
         _titleText = CreateTextBlock("Segoe UI Variable Display", 15.5, FontWeights.Medium);
         _titleText.TextTrimming = TextTrimming.CharacterEllipsis;
-        _titleText.TextWrapping = TextWrapping.NoWrap;
-        _titleText.MaxLines = 1;
+        _titleText.TextWrapping = TextWrapping.WrapWholeWords;
+        _titleText.MaxLines = 2;
         _titleText.Opacity = 0.94;
         _currentValueText = CreateTextBlock("Bahnschrift", 28, FontWeights.SemiBold);
         _currentValueText.CharacterSpacing = -12;
@@ -371,7 +371,7 @@ public sealed class TelemetryPanelCard : UserControl
         var rangeHost = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 4,
+            Spacing = 2,
             Children =
             {
                 _oneMinuteButton,
@@ -388,8 +388,8 @@ public sealed class TelemetryPanelCard : UserControl
             Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
             BorderThickness = new Thickness(0.8),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(7, 6, 7, 6),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(4, 4, 4, 4),
             Child = rangeHost,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
@@ -1166,8 +1166,8 @@ public sealed class TelemetryPanelCard : UserControl
         var button = new ActionChip
         {
             Tag = preset,
-            MinHeight = 30,
-            MinWidth = 40,
+            MinHeight = 26,
+            MinWidth = 34,
             Text = text,
         };
 

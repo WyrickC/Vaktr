@@ -9,7 +9,6 @@ namespace Vaktr.App.Controls;
 public sealed class InlineTextEntry : UserControl
 {
     private readonly Border _surface;
-    private readonly Border _shine;
     private readonly Border _glow;
     private readonly TextBlock _label;
     private bool _isFocused;
@@ -17,6 +16,10 @@ public sealed class InlineTextEntry : UserControl
     private bool _isPressed;
     private string _text = string.Empty;
     private string _placeholderText = string.Empty;
+    private Brush? _cachedIdleBg;
+    private Brush? _cachedHoverBg;
+    private Brush? _cachedFocusBg;
+    private bool _brushCacheIsLight;
 
     public InlineTextEntry()
     {
@@ -42,13 +45,6 @@ public sealed class InlineTextEntry : UserControl
             MinHeight = 40,
         };
 
-        _shine = new Border
-        {
-            Height = 0,
-            Visibility = Visibility.Collapsed,
-            IsHitTestVisible = false,
-        };
-
         _glow = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -64,7 +60,6 @@ public sealed class InlineTextEntry : UserControl
             Children =
             {
                 _glow,
-                _shine,
                 _label,
             },
         };
@@ -127,6 +122,9 @@ public sealed class InlineTextEntry : UserControl
 
     public void RefreshThemeResources()
     {
+        _cachedIdleBg = null;
+        _cachedHoverBg = null;
+        _cachedFocusBg = null;
         UpdateVisualState();
     }
 
@@ -209,19 +207,33 @@ public sealed class InlineTextEntry : UserControl
 
     private void UpdateVisualState()
     {
-        _surface.Background = CreateSurfaceGradient(
-            _isFocused ? "#173247" : _isHovered ? "#142438" : "#101B2A",
-            _isFocused ? "#122739" : _isHovered ? "#1A2C42" : "#142335");
+        var isLight = IsLightPaletteActive();
+        if (_cachedIdleBg is null || _brushCacheIsLight != isLight)
+        {
+            _brushCacheIsLight = isLight;
+            if (isLight)
+            {
+                _cachedIdleBg = ResolveBrush("SurfaceBrush", "#FFFFFF");
+                _cachedHoverBg = ResolveBrush("SurfaceElevatedBrush", "#F4F7FB");
+                _cachedFocusBg = ResolveBrush("SurfaceStrongBrush", "#E8EEF5");
+            }
+            else
+            {
+                _cachedIdleBg = CreateSurfaceGradient("#101B2A", "#142335");
+                _cachedHoverBg = CreateSurfaceGradient("#142438", "#1A2C42");
+                _cachedFocusBg = CreateSurfaceGradient("#173247", "#122739");
+            }
+        }
+
+        _surface.Background = _isFocused
+            ? _cachedFocusBg
+            : _isHovered ? _cachedHoverBg : _cachedIdleBg;
         _surface.BorderBrush = ResolveBrush(_isFocused ? "AccentStrongBrush" : "SurfaceStrokeBrush",
-            _isFocused ? "#B7F7FF" : "#27425E");
+            _isFocused ? (isLight ? "#04506E" : "#B7F7FF") : isLight ? "#C0CEDC" : "#27425E");
         _surface.BorderThickness = new Thickness(_isFocused ? 1.2 : _isHovered ? 1.0 : 0.8);
         Opacity = _isPressed ? 0.96 : _isHovered ? 0.99 : 1.0;
         _glow.Background = ResolveBrush("AccentHaloBrush", "#1B68DAFF");
         _glow.Opacity = _isFocused ? 0.06 : _isHovered ? 0.02 : 0;
-        _shine.Background = _isFocused
-            ? ResolveBrush("AccentStrongBrush", "#D7FBFF")
-            : ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-        _shine.Opacity = _isFocused ? 0.16 : _isHovered ? 0.08 : 0.04;
 
         var displayText = _text;
         if (string.IsNullOrWhiteSpace(displayText))

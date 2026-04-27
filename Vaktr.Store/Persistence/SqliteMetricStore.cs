@@ -220,50 +220,76 @@ public sealed class SqliteMetricStore : IMetricStore
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         var command = connection.CreateCommand();
+        var fromMs = fromUtc.ToUnixTimeMilliseconds();
         var rawBoundaryMs = DateTimeOffset.UtcNow.Subtract(RawResolutionWindow).ToUnixTimeMilliseconds();
-        command.CommandText =
-            """
-            SELECT
-                panel_key,
-                panel_title,
-                series_key,
-                series_name,
-                category,
-                unit,
-                timestamp_ms,
-                value
-            FROM (
-                SELECT
-                    panel_key,
-                    panel_title,
-                    series_key,
-                    series_name,
-                    category,
-                    unit,
-                    timestamp_ms,
-                    value
-                FROM metric_rollups_1m
-                WHERE timestamp_ms >= $fromTimestamp
-                  AND timestamp_ms < $rawBoundary
+        var loadedWindow = DateTimeOffset.UtcNow - fromUtc;
 
-                UNION ALL
+        // For wide ranges (>24h), skip the raw-samples window entirely — the chart
+        // downsamples to ~180 points regardless, so second-resolution raw samples
+        // for the last 6h would get collapsed to a single pixel anyway. Avoiding
+        // the UNION saves hundreds of thousands of rows on a 30d load.
+        var wideRangeRollupsOnly = loadedWindow >= TimeSpan.FromHours(24);
 
-                SELECT
-                    panel_key,
-                    panel_title,
-                    series_key,
-                    series_name,
-                    category,
-                    unit,
-                    timestamp_ms,
-                    value
-                FROM metric_samples
-                WHERE timestamp_ms >= $fromTimestamp
-            )
-            ORDER BY panel_key, series_key, timestamp_ms;
-            """;
-        command.Parameters.AddWithValue("$fromTimestamp", fromUtc.ToUnixTimeMilliseconds());
-        command.Parameters.AddWithValue("$rawBoundary", rawBoundaryMs);
+        command.CommandText = wideRangeRollupsOnly
+            ? """
+              SELECT
+                  panel_key,
+                  panel_title,
+                  series_key,
+                  series_name,
+                  category,
+                  unit,
+                  timestamp_ms,
+                  value
+              FROM metric_rollups_1m
+              WHERE timestamp_ms >= $fromTimestamp
+              ORDER BY panel_key, series_key, timestamp_ms;
+              """
+            : """
+              SELECT
+                  panel_key,
+                  panel_title,
+                  series_key,
+                  series_name,
+                  category,
+                  unit,
+                  timestamp_ms,
+                  value
+              FROM (
+                  SELECT
+                      panel_key,
+                      panel_title,
+                      series_key,
+                      series_name,
+                      category,
+                      unit,
+                      timestamp_ms,
+                      value
+                  FROM metric_rollups_1m
+                  WHERE timestamp_ms >= $fromTimestamp
+                    AND timestamp_ms < $rawBoundary
+
+                  UNION ALL
+
+                  SELECT
+                      panel_key,
+                      panel_title,
+                      series_key,
+                      series_name,
+                      category,
+                      unit,
+                      timestamp_ms,
+                      value
+                  FROM metric_samples
+                  WHERE timestamp_ms >= $fromTimestamp
+              )
+              ORDER BY panel_key, series_key, timestamp_ms;
+              """;
+        command.Parameters.AddWithValue("$fromTimestamp", fromMs);
+        if (!wideRangeRollupsOnly)
+        {
+            command.Parameters.AddWithValue("$rawBoundary", rawBoundaryMs);
+        }
 
         var panelMap = new Dictionary<string, PanelAccumulator>(StringComparer.OrdinalIgnoreCase);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);

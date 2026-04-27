@@ -42,6 +42,7 @@ public sealed partial class ShellWindow : Window
     private readonly ScrollViewer _scrollHost;
     private Border? _loadingOverlay;
     private readonly Border _controlsBodyHost;
+    private Border? _controlsSurfaceRef;
     private readonly Grid _brandHost;
     private readonly Grid _summaryHost;
     private readonly Grid _dashboardGrid;
@@ -252,6 +253,7 @@ public sealed partial class ShellWindow : Window
         // All brush updates run synchronously so the user never sees a half-themed state.
         // Chart redraws are already deferred inside each card's RefreshThemeResources.
         RefreshWindowChrome();
+        RefreshShellSurfaceThemeResources();
         RefreshSummaryCardThemeResources();
         RefreshGlobalRangeControls();
 
@@ -274,6 +276,7 @@ public sealed partial class ShellWindow : Window
         }
 
         // Rebuild control deck on next frame — it's less critical than panel visuals
+        // and rebuilding synchronously during theme switches causes visible jank.
         _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
         {
             if (_controlDeckEditableActive)
@@ -1834,6 +1837,12 @@ public sealed partial class ShellWindow : Window
     {
         try
         {
+            if (_shellBorderRef is not null)
+            {
+                _shellBorderRef.Background = ResolveBrush("ShellBackgroundBrush", "#07101B");
+                _shellBorderRef.BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145");
+            }
+
             var titleBar = AppWindow.TitleBar;
             if (titleBar is null)
             {
@@ -1862,6 +1871,15 @@ public sealed partial class ShellWindow : Window
         catch (Exception ex)
         {
             StartupTrace.WriteException("RefreshWindowChrome", ex);
+        }
+    }
+
+    private void RefreshShellSurfaceThemeResources()
+    {
+        if (_controlsSurfaceRef is not null)
+        {
+            _controlsSurfaceRef.Background = CreateSurfaceGradient("#0F1B2D", "#15263D");
+            _controlsSurfaceRef.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
         }
     }
 

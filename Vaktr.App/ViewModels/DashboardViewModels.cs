@@ -1336,16 +1336,24 @@ public sealed class MetricPanelViewModel : ObservableObject
         var latestTimestamp = DateTimeOffset.MinValue;
         foreach (var series in history.Series)
         {
+            // Move the incoming list in directly instead of copying. If the caller
+            // gave us a List<MetricPoint>, adopt it; otherwise do a single copy.
+            // This avoids an O(N) allocation per series on wide-range loads.
+            var points = series.Points is List<MetricPoint> list
+                ? list
+                : new List<MetricPoint>(series.Points);
+
             _buffers[series.SeriesKey] = new SeriesBuffer(
                 series.SeriesKey,
                 series.SeriesName,
-                series.Points.ToList(),
+                points,
                 ResolveBrush(paletteIndex),
                 ResolveFillBrush(paletteIndex),
-                series.Points.LastOrDefault()?.Timestamp ?? DateTimeOffset.UtcNow);
-            if (series.Points.Count > 0 && series.Points[^1].Timestamp > latestTimestamp)
+                points.Count > 0 ? points[^1].Timestamp : DateTimeOffset.UtcNow);
+
+            if (points.Count > 0 && points[^1].Timestamp > latestTimestamp)
             {
-                latestTimestamp = series.Points[^1].Timestamp;
+                latestTimestamp = points[^1].Timestamp;
             }
             paletteIndex++;
         }
@@ -1355,7 +1363,9 @@ public sealed class MetricPanelViewModel : ObservableObject
             _latestPointTimestampUtc = latestTimestamp;
         }
 
-        TrimBuffers(DateTimeOffset.UtcNow);
+        // Skip TrimBuffers — the store already returns only data within the retention
+        // window, and the hard buffer cap doesn't apply to loaded history (buffers
+        // will be trimmed naturally on the next live-sample append if needed).
         RefreshPresentation();
     }
 
@@ -1826,7 +1836,10 @@ public sealed class MetricPanelViewModel : ObservableObject
     }
 
     /// <summary>Maximum points per series buffer to cap memory usage.</summary>
-    private const int MaxBufferPointsPerSeries = 20_000;
+    // Cap sized to hold 30d of 1-minute rollups (43,200) plus headroom for
+    // live 1/sec samples layered on top. Caps unbounded memory growth while
+    // allowing wide-range history loads to retain full resolution.
+    private const int MaxBufferPointsPerSeries = 60_000;
 
     private void TrimBuffers(DateTimeOffset anchor)
     {
@@ -2231,7 +2244,7 @@ public sealed class MetricPanelViewModel : ObservableObject
         var startMs = (double)start.ToUnixTimeMilliseconds();
 
         var sampled = new List<MetricPoint>(pointBudget + 2);
-        // Always include the first point for visual continuity
+        // Always include the first in-window point so the line anchors cleanly on the left edge.
         sampled.Add(points[lo]);
 
         var bucketIndex = 0;

@@ -921,95 +921,12 @@ public sealed class TelemetryChart : UserControl
 
     private static IReadOnlyList<Windows.Foundation.Point> ResolveStrokePoints(IReadOnlyList<Windows.Foundation.Point> points)
     {
-        if (points.Count <= 1)
-        {
-            return points;
-        }
-
-        var startIndex = ResolveLeadingArtifactTrimIndex(points);
-        if (startIndex == 0)
-        {
-            return points;
-        }
-
-        var result = new Windows.Foundation.Point[points.Count - startIndex];
-        for (var i = 0; i < result.Length; i++)
-        {
-            result[i] = points[startIndex + i];
-        }
-
-        return result;
+        return points;
     }
 
     private static IReadOnlyList<Windows.Foundation.Point> ResolveFillPoints(IReadOnlyList<Windows.Foundation.Point> points)
     {
-        if (points.Count <= 2)
-        {
-            return points;
-        }
-
-        var startIndex = ResolveLeadingArtifactTrimIndex(points);
-
-        if (startIndex >= points.Count - 1)
-        {
-            return points;
-        }
-
-        if (startIndex > 0)
-        {
-            var sliced = new Windows.Foundation.Point[points.Count - startIndex];
-            for (var i = 0; i < sliced.Length; i++)
-                sliced[i] = points[startIndex + i];
-
-            if (sliced.Length > 1 &&
-                sliced[0].X <= LeftPadding + 20d &&
-                sliced[1].X - sliced[0].X >= 28d)
-            {
-                var trimmed = new Windows.Foundation.Point[sliced.Length - 1];
-                Array.Copy(sliced, 1, trimmed, 0, trimmed.Length);
-                return trimmed;
-            }
-
-            return sliced;
-        }
-
-        if (points.Count > 1 &&
-            points[0].X <= LeftPadding + 20d &&
-            points[1].X - points[0].X >= 28d)
-        {
-            var trimmed = new Windows.Foundation.Point[points.Count - 1];
-            for (var i = 0; i < trimmed.Length; i++)
-                trimmed[i] = points[i + 1];
-            return trimmed;
-        }
-
         return points;
-    }
-
-    private static int ResolveLeadingArtifactTrimIndex(IReadOnlyList<Windows.Foundation.Point> points)
-    {
-        if (points.Count <= 1)
-        {
-            return 0;
-        }
-
-        var startIndex = 0;
-        while (startIndex < points.Count - 1)
-        {
-            var current = points[startIndex];
-            var next = points[startIndex + 1];
-            var nearLeadingEdge = current.X <= LeftPadding + 10d;
-            var compressedX = Math.Abs(next.X - current.X) < 0.8d;
-
-            if (!nearLeadingEdge || !compressedX)
-            {
-                break;
-            }
-
-            startIndex++;
-        }
-
-        return startIndex;
     }
 
     private static bool TryGetPointBounds(

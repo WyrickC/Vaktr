@@ -10,7 +10,6 @@ namespace Vaktr.App.Controls;
 public sealed class ActionChip : UserControl
 {
     private readonly Border _surface;
-    private readonly Border _shine;
     private readonly Border _glow;
     private readonly TextBlock _label;
     private bool _isActive;
@@ -40,18 +39,6 @@ public sealed class ActionChip : UserControl
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#243D55"),
         };
 
-        _shine = new Border
-        {
-            Height = 0,
-            CornerRadius = new CornerRadius(1),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(1, 1, 1, 0),
-            Opacity = 0,
-            Visibility = Visibility.Collapsed,
-            IsHitTestVisible = false,
-        };
-
         _glow = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -78,7 +65,6 @@ public sealed class ActionChip : UserControl
             Children =
             {
                 _glow,
-                _shine,
                 _label,
             },
         };
@@ -255,10 +241,6 @@ public sealed class ActionChip : UserControl
         Opacity = _isPressed ? 0.84 : _isHovered ? 0.97 : 1.0;
         _glow.Background = ResolveBrush("AccentHaloBrush", "#2B8FE6C4");
         _glow.Opacity = _isFocused ? 0.08 : useAccent ? 0.04 : 0;
-        _shine.Background = _isFocused
-            ? ResolveBrush("AccentStrongBrush", isLight ? "#04506E" : "#C7F5FF")
-            : ResolveBrush("TextPrimaryBrush", isLight ? "#0A1824" : "#F2F8FF");
-        _shine.Opacity = _isFocused ? 0.14 : _isHovered ? 0.08 : 0.04;
     }
 
     private static Brush ResolveBrush(string key, string fallbackHex)

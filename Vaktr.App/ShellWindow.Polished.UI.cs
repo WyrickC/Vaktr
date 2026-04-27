@@ -86,7 +86,7 @@ public sealed partial class ShellWindow
         // that added layout overhead during resize for negligible visual effect (0.08 opacity)
         var shellBorder = new Border
         {
-            Background = CreateSurfaceGradient("#08111C", "#0D1A29"),
+            Background = ResolveBrush("ShellBackgroundBrush", "#07101B"),
             BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(24),
@@ -202,7 +202,7 @@ public sealed partial class ShellWindow
             },
         };
 
-        return new Border
+        var surface = new Border
         {
             Background = CreateSurfaceGradient("#0F1B2D", "#15263D"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
@@ -211,6 +211,9 @@ public sealed partial class ShellWindow
             Padding = new Thickness(22, 19, 22, 20),
             Child = root,
         };
+
+        _controlsSurfaceRef = surface;
+        return surface;
     }
 
     private void RenderControlDeckSummary()
