@@ -12,6 +12,11 @@ jobs:
     strategy:
       matrix:
         platform: [x64, ARM64]
+        include:
+          - platform: x64
+            runtime: win-x64
+          - platform: ARM64
+            runtime: win-arm64
 
     steps:
       - name: Checkout
@@ -44,7 +49,7 @@ jobs:
           path: Vaktr.Tests/TestResults/*.trx
 
       - name: Publish app (self-contained)
-        run: dotnet publish Vaktr.App/Vaktr.App.csproj -c Release -p:Platform=${{ matrix.platform }} -r win-${{ matrix.platform }} --self-contained -o publish/${{ matrix.platform }}
+        run: dotnet publish Vaktr.App/Vaktr.App.csproj -c Release -p:Platform=${{ matrix.platform }} -r ${{ matrix.runtime }} --self-contained -o publish/${{ matrix.platform }}
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
