@@ -40,17 +40,17 @@ public sealed class UsageGauge : UserControl
         _canvas = new Canvas();
         _frameBorder = new Border
         {
-            CornerRadius = new CornerRadius(19),
+            CornerRadius = new CornerRadius(16),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.8),
             Background = CreateThemedGradient(),
         };
         _innerBorder = new Border
         {
             Margin = new Thickness(6),
-            CornerRadius = new CornerRadius(20),
+            CornerRadius = new CornerRadius(16),
             BorderBrush = ResolveBrush("SurfaceGridBrush", "#35587A"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.8),
             Opacity = 0.18,
         };
         _valueText = new TextBlock
@@ -92,7 +92,7 @@ public sealed class UsageGauge : UserControl
         };
 
         Loaded += (_, _) => ScheduleRedraw();
-        SizeChanged += (_, _) => ScheduleRedraw();
+        SizeChanged += OnGaugeSizeChanged;
     }
 
     public double Value
@@ -151,6 +151,20 @@ public sealed class UsageGauge : UserControl
             return (0.2126 * c.R) + (0.7152 * c.G) + (0.0722 * c.B) >= 170d;
         }
         return false;
+    }
+
+    private bool _renderingSuspended;
+
+    private void OnGaugeSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_renderingSuspended) return;
+        ScheduleRedraw();
+    }
+
+    public void SetRenderingSuspended(bool suspended)
+    {
+        _renderingSuspended = suspended;
+        if (!suspended) ScheduleRedraw();
     }
 
     private void ScheduleRedraw(DispatcherQueuePriority priority = DispatcherQueuePriority.Low)

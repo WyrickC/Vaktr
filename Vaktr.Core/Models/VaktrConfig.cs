@@ -138,9 +138,22 @@ public sealed class VaktrConfig
             _ => RetentionPreset.NinetyDays,
         };
 
-        StorageDirectory = string.IsNullOrWhiteSpace(StorageDirectory)
-            ? DefaultStorageDirectory
-            : StorageDirectory.Trim();
+        if (string.IsNullOrWhiteSpace(StorageDirectory))
+        {
+            StorageDirectory = DefaultStorageDirectory;
+        }
+        else
+        {
+            // Resolve to absolute path to prevent path traversal (e.g., "..\..\")
+            try
+            {
+                StorageDirectory = Path.GetFullPath(StorageDirectory.Trim());
+            }
+            catch
+            {
+                StorageDirectory = DefaultStorageDirectory;
+            }
+        }
 
         PanelVisibility ??= new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         PanelOrder ??= [];

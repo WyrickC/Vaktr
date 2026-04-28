@@ -50,12 +50,15 @@ public sealed class TelemetryPanelCard : UserControl
     private readonly ActionChip _fiveMinuteButton;
     private readonly ActionChip _fifteenMinuteButton;
     private readonly ActionChip _oneHourButton;
+    private readonly ActionChip _twoDayButton;
+    private readonly ActionChip _fiveDayButton;
     private readonly ActionChip _sortHighestButton;
     private readonly ActionChip _sortLowestButton;
     private readonly ActionChip _sortNameButton;
     private readonly ActionChip _perProcessChartButton;
-    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Border _legendDivider;
+    private readonly Dictionary<string, (ClickableBorder Row, Border InnerBorder, TextBlock NameText, TextBlock ValueText, Ellipse Dot)> _legendRows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (ClickableBorder Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, LinearGradientBrush FillBrush, Border RowBorder, Ellipse? ChartDot)> _processRowParts = new(StringComparer.OrdinalIgnoreCase);
     private bool _processScrollLoadQueued;
     private bool _processSectionRevealed;
     private MetricPanelViewModel? _observedPanel;
@@ -111,26 +114,29 @@ public sealed class TelemetryPanelCard : UserControl
             VerticalAlignment = VerticalAlignment.Center,
         };
         _footerText = CreateTextBlock(fontSize: 10);
-        _footerText.CharacterSpacing = 30;
-        _footerText.FontStyle = Windows.UI.Text.FontStyle.Italic;
-        _scaleText = CreateTextBlock("Segoe UI Variable Text", 10.5, FontWeights.Normal);
+        _footerText.CharacterSpacing = 55;
+        _footerText.Opacity = 0.72;
+        _scaleText = CreateTextBlock("Bahnschrift", 9.5, FontWeights.Normal);
         _scaleText.TextWrapping = TextWrapping.NoWrap;
         _scaleText.TextTrimming = TextTrimming.CharacterEllipsis;
-        _scaleText.MaxWidth = 220;
-        _titleText = CreateTextBlock("Segoe UI Variable Display", 17.5, FontWeights.SemiBold);
+        _scaleText.MaxWidth = 200;
+        _titleText = CreateTextBlock("Segoe UI Variable Display", 15.5, FontWeights.Medium);
         _titleText.TextTrimming = TextTrimming.CharacterEllipsis;
-        _titleText.TextWrapping = TextWrapping.NoWrap;
-        _titleText.MaxLines = 1;
-        _currentValueText = CreateTextBlock("Bahnschrift", 22, FontWeights.SemiBold);
+        _titleText.TextWrapping = TextWrapping.WrapWholeWords;
+        _titleText.MaxLines = 2;
+        _titleText.Opacity = 0.94;
+        _currentValueText = CreateTextBlock("Bahnschrift", 28, FontWeights.SemiBold);
+        _currentValueText.CharacterSpacing = -12;
         _secondaryValueText = CreateTextBlock(fontSize: 11.5);
+        _secondaryValueText.Opacity = 0.78;
 
         _badgeBorder = new Border
         {
-            Width = 38,
-            Height = 38,
-            CornerRadius = new CornerRadius(13),
-            BorderThickness = new Thickness(1),
-            Background = CreateSurfaceGradient("#102131", "#17304A"),
+            Width = 36,
+            Height = 36,
+            CornerRadius = new CornerRadius(11),
+            BorderThickness = new Thickness(0.9),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             Child = _badgeIconHost,
         };
 
@@ -151,6 +157,8 @@ public sealed class TelemetryPanelCard : UserControl
         _fiveMinuteButton = CreateRangeButton("5m", TimeRangePreset.FiveMinutes);
         _fifteenMinuteButton = CreateRangeButton("15m", TimeRangePreset.FifteenMinutes);
         _oneHourButton = CreateRangeButton("1h", TimeRangePreset.OneHour);
+        _twoDayButton = CreateRangeButton("2d", TimeRangePreset.TwoDays);
+        _fiveDayButton = CreateRangeButton("5d", TimeRangePreset.FiveDays);
 
         _visualGrid = new Grid
         {
@@ -178,9 +186,9 @@ public sealed class TelemetryPanelCard : UserControl
 
         _chartFrame = new Border
         {
-            Background = CreateSurfaceGradient("#0E1A2B", "#13263B"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.8),
             CornerRadius = new CornerRadius(14),
             Padding = new Thickness(4, 4, 4, 3),
             Child = _chart,
@@ -192,7 +200,15 @@ public sealed class TelemetryPanelCard : UserControl
 
         _legendHost = new StackPanel
         {
-            Spacing = 6,
+            Spacing = 4,
+        };
+        _legendDivider = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(8, 0, 8, 0),
+            Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            Opacity = 0.3,
+            IsHitTestVisible = false,
         };
         _legendScroller = new ScrollViewer
         {
@@ -208,14 +224,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             if (sender is ScrollViewer sv && sv.ScrollableHeight > 0)
             {
-                var delta = e.GetCurrentPoint(sv).Properties.MouseWheelDelta;
-                // Only capture if there's room to scroll in the wheel direction
-                var atTop = sv.VerticalOffset <= 0;
-                var atBottom = sv.VerticalOffset >= sv.ScrollableHeight;
-                if ((delta > 0 && !atTop) || (delta < 0 && !atBottom))
-                {
-                    e.Handled = true;
-                }
+                e.Handled = true;
             }
         };
 
@@ -230,6 +239,7 @@ public sealed class TelemetryPanelCard : UserControl
         {
             Spacing = 0,
         };
+        // Click handlers are attached per-row in the slow path of RefreshProcessRows
         _processScroller = new ScrollViewer
         {
             MaxHeight = 320,
@@ -255,7 +265,6 @@ public sealed class TelemetryPanelCard : UserControl
             Spacing = 5,
             Children =
             {
-                _perProcessChartButton,
                 _sortHighestButton,
                 _sortLowestButton,
                 _sortNameButton,
@@ -274,22 +283,25 @@ public sealed class TelemetryPanelCard : UserControl
         processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         processColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        _processLabelText = CreateTextBlock(fontSize: 9.5);
+        _processLabelText = CreateTextBlock(fontSize: 9);
         _processLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _processLabelText.CharacterSpacing = 60;
+        _processLabelText.CharacterSpacing = 100;
+        _processLabelText.Opacity = 0.6;
         _processLabelText.Text = "PROCESS";
         processColumns.Children.Add(_processLabelText);
 
-        _activityLabelText = CreateTextBlock(fontSize: 9.5);
+        _activityLabelText = CreateTextBlock(fontSize: 9);
         _activityLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _activityLabelText.CharacterSpacing = 60;
+        _activityLabelText.CharacterSpacing = 100;
+        _activityLabelText.Opacity = 0.6;
         _activityLabelText.Text = "DETAILS";
         processColumns.Children.Add(_activityLabelText);
         Grid.SetColumn(_activityLabelText, 1);
 
-        _valueLabelText = CreateTextBlock(fontSize: 9.5);
+        _valueLabelText = CreateTextBlock(fontSize: 9);
         _valueLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _valueLabelText.CharacterSpacing = 60;
+        _valueLabelText.CharacterSpacing = 100;
+        _valueLabelText.Opacity = 0.6;
         _valueLabelText.Text = "VALUE";
         _valueLabelText.HorizontalAlignment = HorizontalAlignment.Right;
         processColumns.Children.Add(_valueLabelText);
@@ -298,15 +310,12 @@ public sealed class TelemetryPanelCard : UserControl
         // Capture scroll events — prevent bubbling to main shell scroll, but let through at edges
         _processScroller.PointerWheelChanged += (sender, e) =>
         {
+            // Always capture scroll wheel when the process list has scrollable content.
+            // This prevents the wheel event from bubbling to the parent ScrollViewer
+            // and scrolling the entire page when the user is over the process list.
             if (sender is ScrollViewer sv && sv.ScrollableHeight > 0)
             {
-                var delta = e.GetCurrentPoint(sv).Properties.MouseWheelDelta;
-                var atTop = sv.VerticalOffset <= 0;
-                var atBottom = sv.VerticalOffset >= sv.ScrollableHeight;
-                if ((delta > 0 && !atTop) || (delta < 0 && !atBottom))
-                {
-                    e.Handled = true;
-                }
+                e.Handled = true;
             }
         };
 
@@ -341,11 +350,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _processSection = new Border
         {
-            Background = CreateSurfaceGradient("#0F1C2D", "#14263A"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(17),
-            Padding = new Thickness(13, 12, 13, 12),
+            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(13, 11, 13, 11),
             Visibility = Visibility.Collapsed,
             Child = new StackPanel
             {
@@ -362,71 +371,77 @@ public sealed class TelemetryPanelCard : UserControl
         var rangeHost = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 5,
+            Spacing = 2,
             Children =
             {
                 _oneMinuteButton,
                 _fiveMinuteButton,
                 _fifteenMinuteButton,
                 _oneHourButton,
+                _twoDayButton,
+                _fiveDayButton,
             },
         };
 
         _rangeShell = new Border
         {
-            Background = CreateSurfaceGradient("#102031", "#15283E"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.8),
             CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(6, 5, 6, 5),
+            Padding = new Thickness(4, 4, 4, 4),
             Child = rangeHost,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
         };
 
-        var metaGrid = new Grid
-        {
-            ColumnSpacing = 12,
-        };
-        metaGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        metaGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        metaGrid.Children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                _badgeBorder,
-                _footerText,
-            },
-        });
+        // Top row: badge + title inline, scale pill on the right
+        var titleRow = new Grid { ColumnSpacing = 10 };
+        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        titleRow.Children.Add(_badgeBorder);
+        titleRow.Children.Add(_titleText);
+        Grid.SetColumn(_titleText, 1);
+        _titleText.VerticalAlignment = VerticalAlignment.Center;
+
         _scalePill = new Border
         {
-            Background = ResolveBrush("PanelOverlayBrush", "#112132"),
-            BorderBrush = ResolveBrush("SurfaceStrongBrush", "#20364C"),
-            BorderThickness = new Thickness(1),
+            Background = ResolveBrush("PanelOverlayBrush", "#091321"),
+            BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
+            BorderThickness = new Thickness(0.7),
             CornerRadius = new CornerRadius(9),
-            Padding = new Thickness(10, 4, 10, 4),
+            Padding = new Thickness(10, 3, 10, 3),
             Child = _scaleText,
             HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            MinHeight = 28,
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.78,
         };
-        metaGrid.Children.Add(_scalePill);
-        Grid.SetColumn(_scalePill, 1);
+        titleRow.Children.Add(_scalePill);
+        Grid.SetColumn(_scalePill, 2);
+
+        // Value row: large value + secondary on the same line
+        var valueRow = new StackPanel
+        {
+            Spacing = 2,
+            Children =
+            {
+                _currentValueText,
+                _secondaryValueText,
+            },
+        };
+        _secondaryValueText.Padding = new Thickness(1, 0, 0, 0);
 
         var headerContent = new StackPanel
         {
-            Spacing = 3,
-            Padding = new Thickness(0, 2, 0, 2),
+            Spacing = 6,
+            Padding = new Thickness(0, 0, 0, 4),
             Background = BrushFactory.CreateBrush("#00FFFFFF"),
             Children =
             {
-                metaGrid,
-                _titleText,
-                _currentValueText,
-                _secondaryValueText,
+                titleRow,
+                valueRow,
+                _footerText,
             },
         };
         var headerGrid = new Grid
@@ -448,11 +463,11 @@ public sealed class TelemetryPanelCard : UserControl
 
         _cardBorder = new Border
         {
-            Background = CreateSurfaceGradient("#0E1B2C", "#13253A"),
+            Background = CreateSurfaceGradient("#101B2D", "#16273D"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1.2),
-            CornerRadius = new CornerRadius(22),
-            Padding = new Thickness(18, 16, 18, 16),
+            BorderThickness = new Thickness(0.9),
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(18, 16, 18, 18),
             Child = new Grid
             {
                 Children =
@@ -465,6 +480,7 @@ public sealed class TelemetryPanelCard : UserControl
                         {
                             headerGrid,
                             _visualGrid,
+                            _legendDivider,
                             _legendScroller,
                             _processSection,
                         },
@@ -585,7 +601,11 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         UpdateBadgeIcon(panel);
-        _footerText.Text = panel.FooterText;
+        _footerText.Text = panel.IsZoomed ? $"\u23F8 {panel.FooterText}" : panel.FooterText;
+        _footerText.Opacity = panel.IsZoomed ? 0.85 : 0.6;
+        _footerText.Foreground = panel.IsZoomed
+            ? ResolveBrush("AccentBrush", "#66E7FF")
+            : ResolveBrush("TextMutedBrush", "#7D9AB6");
         _titleText.Text = panel.Title;
         _currentValueText.Text = panel.CurrentValue;
         _secondaryValueText.Text = panel.SecondaryValue;
@@ -621,7 +641,7 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         _gauge.Value = panel.GaugeValue;
-        _gauge.AccentBrush = panel.AccentBrush;
+        _gauge.AccentBrush = ResolveUtilizationBrush(panel);
         _gauge.Caption = panel.PrefersGaugeVisual ? "Capacity" : "Live";
 
         if (!ReferenceEquals(_lastRenderedProcessRows, panel.ProcessRows))
@@ -685,6 +705,24 @@ public sealed class TelemetryPanelCard : UserControl
         }
     }
 
+    /// <summary>Optimizes the panel for window resize — collapses heavy elements and flattens corners.</summary>
+    public void SetResizeMode(bool resizing)
+    {
+        _cardBorder.CornerRadius = new CornerRadius(resizing ? 4 : 18);
+        _chartFrame.CornerRadius = new CornerRadius(resizing ? 2 : 12);
+
+        // Suspend chart/gauge rendering only during resize
+        _chart.SetRenderingSuspended(resizing);
+        _gauge.SetRenderingSuspended(resizing);
+
+        // Collapse charts and legends during resize so WinUI's layout engine
+        // skips measuring them entirely — this is the biggest layout cost saver
+        _chart.Visibility = resizing ? Visibility.Collapsed : Visibility.Visible;
+        _legendScroller.Visibility = resizing ? Visibility.Collapsed : Visibility.Visible;
+        _processSection.Visibility = resizing ? Visibility.Collapsed
+            : Panel?.SupportsProcessTable == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private static bool IsPriorityPanelProperty(string? propertyName)
     {
         return string.Equals(propertyName, nameof(MetricPanelViewModel.CurrentValue), StringComparison.Ordinal) ||
@@ -695,54 +733,70 @@ public sealed class TelemetryPanelCard : UserControl
 
     public void RefreshThemeResources()
     {
-        _cardBorder.Background = CreateSurfaceGradient("#0E1B2C", "#13253A");
-        _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _rangeShell.Background = CreateSurfaceGradient("#102031", "#15283E");
-        _rangeShell.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _scalePill.Background = ResolveBrush("PanelOverlayBrush", "#112132");
-        _scalePill.BorderBrush = ResolveBrush("SurfaceStrongBrush", "#20364C");
-        _chartFrame.Background = CreateSurfaceGradient("#0E1A2B", "#13263B");
-        _chartFrame.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _processSection.Background = CreateSurfaceGradient("#0F1C2D", "#14263A");
-        _processSection.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        // Use theme resource brushes where possible — they update in-place when theme changes.
+        // Only use CreateSurfaceGradient for elements that need distinct gradients.
+        var strokeBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        var mutedBrush = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        var cardBg = CreateSurfaceGradient("#101B2D", "#16273D");
+
+        _cardBorder.Background = cardBg;
+        _cardBorder.BorderBrush = strokeBrush;
+        _cardBorder.BorderThickness = new Thickness(0.9);
+        _cardBorder.Opacity = 1.0;
+        _cardBorder.Translation = new System.Numerics.Vector3(0f, 0f, 0f);
+        _rangeShell.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
+        _rangeShell.BorderBrush = strokeBrush;
+        _scalePill.Background = ResolveBrush("PanelOverlayBrush", "#091321");
+        _scalePill.BorderBrush = strokeBrush;
+        _chartFrame.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
+        _chartFrame.BorderBrush = strokeBrush;
+        _processSection.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
+        _processSection.BorderBrush = strokeBrush;
+        _legendDivider.Background = strokeBrush;
         _legendScroller.Background = null;
         _processScroller.Background = null;
-        _processLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _activityLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-        _valueLabelText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
+        _processLabelText.Foreground = mutedBrush;
+        _activityLabelText.Foreground = mutedBrush;
+        _valueLabelText.Foreground = mutedBrush;
 
-        _badgeBorder.Background = CreateSurfaceGradient("#102131", "#17304A");
+        _badgeBorder.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
 
         _oneMinuteButton.RefreshThemeResources();
         _fiveMinuteButton.RefreshThemeResources();
         _fifteenMinuteButton.RefreshThemeResources();
         _oneHourButton.RefreshThemeResources();
+        _twoDayButton.RefreshThemeResources();
+        _fiveDayButton.RefreshThemeResources();
         _sortHighestButton.RefreshThemeResources();
         _sortLowestButton.RefreshThemeResources();
         _sortNameButton.RefreshThemeResources();
         _perProcessChartButton.RefreshThemeResources();
 
+        var legendBg = ResolveBrush("SurfaceElevatedBrush", "#112033");
+        var secondaryBrush = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
+        var primaryBrush = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         foreach (var rowParts in _legendRows.Values)
         {
-            rowParts.Row.Background = CreateSurfaceGradient("#101C2D", "#132438");
-            rowParts.Row.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-            rowParts.NameText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
-            rowParts.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
+            rowParts.InnerBorder.Background = legendBg;
+            rowParts.InnerBorder.BorderBrush = strokeBrush;
+            rowParts.NameText.Foreground = secondaryBrush;
+            rowParts.ValueText.Foreground = primaryBrush;
         }
 
         foreach (var rowParts in _processRowParts.Values)
         {
-            rowParts.Row.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-            rowParts.NameText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-            rowParts.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
-            rowParts.CaptionText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
-            rowParts.MeterTrack.Background = ResolveBrush("SurfaceStrongBrush", "#162A41");
+            rowParts.NameText.Foreground = primaryBrush;
+            rowParts.ValueText.Foreground = primaryBrush;
+            rowParts.CaptionText.Foreground = mutedBrush;
         }
 
         if (Panel is { } panel)
         {
             UpdateBadgeIcon(panel);
             ApplyPalette(panel);
+            // Re-apply range/sort button states so active highlights use new theme colors
+            RefreshRangeButtons(panel);
+            RefreshProcessSortButtons(panel);
         }
         else
         {
@@ -795,7 +849,16 @@ public sealed class TelemetryPanelCard : UserControl
                 rowParts = CreateLegendRow(series.Name, series.StrokeBrush);
                 _legendRows.Add(series.Name, rowParts);
                 _legendHost.Children.Add(rowParts.Row);
+
+                // Click legend row to isolate/focus that series on the chart
+                var capturedKey = series.Key;
+                rowParts.Row.Tapped += (_, _) => Panel?.ToggleSeriesFocus(capturedKey);
             }
+
+            // Dim unfocused legend rows when a series is focused
+            var isFocused = panel.FocusedSeriesKey is null ||
+                string.Equals(series.Key, panel.FocusedSeriesKey, StringComparison.OrdinalIgnoreCase);
+            rowParts.Row.Opacity = isFocused ? 1.0 : 0.35;
 
             rowParts.ValueText.Text = value;
             orderedRows.Add(rowParts.Row);
@@ -832,36 +895,69 @@ public sealed class TelemetryPanelCard : UserControl
             return;
         }
 
-        // Fast path: if row count and keys match in order, just update values in-place
+        // Fast path: if all rows already exist as UI elements, just reorder + update in-place.
+        // Skip fast path if a pin state changed (need full rebuild for bold/dot visuals).
         var rows = panel.ProcessRows;
-        if (_processRowsHost.Children.Count == rows.Count)
+        var forceRebuild = panel._forceProcessRowRebuild;
+        if (forceRebuild) panel._forceProcessRowRebuild = false; // consume the flag
+        var allExist = !forceRebuild && rows.Count <= _processRowParts.Count;
+        if (allExist)
         {
-            var allMatch = true;
             for (var i = 0; i < rows.Count; i++)
             {
-                if (!_processRowParts.TryGetValue(rows[i].Key, out var rp) ||
-                    !ReferenceEquals(_processRowsHost.Children[i], rp.Row))
+                if (!_processRowParts.ContainsKey(rows[i].Key))
                 {
-                    allMatch = false;
+                    allExist = false;
                     break;
                 }
             }
+        }
 
-            if (allMatch)
+        if (allExist && rows.Count > 0)
+        {
+            var requiresReorder = _processRowsHost.Children.Count != rows.Count;
+            for (var i = 0; i < rows.Count; i++)
             {
-                // Same rows, same order — just update text and meter values
-                for (var i = 0; i < rows.Count; i++)
+                var item = rows[i];
+                var rp = _processRowParts[item.Key];
+                rp.NameText.Text = item.Name;
+                rp.ValueText.Text = item.Value;
+                rp.CaptionText.Text = item.Caption;
+                rp.Row.Tag = item.Key;
+                var intensity = Math.Clamp(item.Intensity, 0d, 1d);
+                if (rp.FillBrush.GradientStops.Count >= 3)
                 {
-                    var item = rows[i];
-                    var rp = _processRowParts[item.Key];
-                    rp.NameText.Text = item.Name;
-                    rp.ValueText.Text = item.Value;
-                    rp.CaptionText.Text = item.Caption;
-                    rp.MeterFill.Width = 32 * Math.Clamp(item.Intensity, 0d, 1d);
+                    rp.FillBrush.GradientStops[1].Offset = intensity;
+                    rp.FillBrush.GradientStops[2].Offset = Math.Min(intensity + 0.03, 1.0);
                 }
 
-                return;
+                if (!requiresReorder)
+                {
+                    requiresReorder =
+                        _processRowsHost.Children[i] is not FrameworkElement current ||
+                        !string.Equals(current.Tag as string, item.Key, StringComparison.OrdinalIgnoreCase);
+                }
             }
+
+            if (requiresReorder)
+            {
+                _processRowsHost.Children.Clear();
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    _processRowsHost.Children.Add(_processRowParts[rows[i].Key].Row);
+                }
+            }
+
+            // Remove entries for rows no longer shown
+            if (_processRowParts.Count > rows.Count)
+            {
+                var activeKeys = new HashSet<string>(rows.Count, StringComparer.OrdinalIgnoreCase);
+                foreach (var r in rows) activeKeys.Add(r.Key);
+                foreach (var key in _processRowParts.Keys.Where(k => !activeKeys.Contains(k)).ToArray())
+                    _processRowParts.Remove(key);
+            }
+
+            return;
         }
 
         // Slow path: rebuild the row list (sort change, new/removed processes)
@@ -872,8 +968,32 @@ public sealed class TelemetryPanelCard : UserControl
         {
             var item = rows[i];
             var rowParts = CreateProcessRow(item, panel.AccentBrush);
+            rowParts.Row.Tag = item.Key;
             _processRowParts.Add(item.Key, rowParts);
             _processRowsHost.Children.Add(rowParts.Row);
+
+            // Track press/release to distinguish taps from scroll drags.
+            // Use AddHandler with handledEventsToo so events fire even when
+            // the parent ScrollViewer has already marked them as Handled.
+            var processName = item.Name;
+            Windows.Foundation.Point pressPos = default;
+            rowParts.Row.AddHandler(PointerPressedEvent, new PointerEventHandler((sender, args) =>
+            {
+                pressPos = args.GetCurrentPoint((UIElement)sender).Position;
+            }), true);
+            rowParts.Row.AddHandler(PointerReleasedEvent, new PointerEventHandler((sender, args) =>
+            {
+                if (Panel is not { } p) return;
+                var releasePos = args.GetCurrentPoint((UIElement)sender).Position;
+                // Only count as a click if the pointer didn't move far (not a scroll)
+                var dx = Math.Abs(releasePos.X - pressPos.X);
+                var dy = Math.Abs(releasePos.Y - pressPos.Y);
+                if (dx < 12 && dy < 12)
+                {
+                    p.ToggleProcessPin(processName);
+                }
+                args.Handled = true;
+            }), true);
         }
 
     }
@@ -960,40 +1080,67 @@ public sealed class TelemetryPanelCard : UserControl
         ApplyRangeState(_fiveMinuteButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.FiveMinutes);
         ApplyRangeState(_fifteenMinuteButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.FifteenMinutes);
         ApplyRangeState(_oneHourButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.OneHour);
+        ApplyRangeState(_twoDayButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.TwoDays);
+        ApplyRangeState(_fiveDayButton, allowPresetHighlight && panel?.SelectedRange == TimeRangePreset.FiveDays);
     }
 
     private void RefreshProcessSortButtons(MetricPanelViewModel? panel)
     {
         ApplyRangeState(_sortHighestButton, panel?.ProcessSortMode == ProcessSortMode.Highest);
         ApplyRangeState(_sortLowestButton, panel?.ProcessSortMode == ProcessSortMode.Lowest);
-        ApplyRangeState(_sortNameButton, panel?.ProcessSortMode == ProcessSortMode.Name);
+        var isNameSort = panel?.ProcessSortMode is ProcessSortMode.Name or ProcessSortMode.NameReverse;
+        ApplyRangeState(_sortNameButton, isNameSort);
+        _sortNameButton.Text = panel?.ProcessSortMode == ProcessSortMode.NameReverse ? "Name \u2191" : "Name \u2193";
     }
 
     private void ApplyPalette(MetricPanelViewModel panel)
     {
-        _badgeBorder.Background = CreateSurfaceGradient("#102131", "#17304A");
-        _badgeBorder.BorderBrush = panel.AccentBrush;
-        _edgeGlow.Background = panel.AccentBrush;
+        _badgeBorder.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
         _footerText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
         _scaleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
         _titleText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
         _secondaryValueText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
         _processSectionTitleText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
 
-        // Color-code current value based on utilization thresholds
+        // Color-code current value, badge, and edge glow based on utilization thresholds
+        var thresholdBrush = ResolveUtilizationBrush(panel);
+        _badgeBorder.BorderBrush = thresholdBrush;
+        _edgeGlow.Background = thresholdBrush;
+
         var util = panel.UtilizationPercent;
         if (util > 90)
         {
-            _currentValueText.Foreground = BrushFactory.CreateBrush("#FF8C42"); // orange — critical
+            _currentValueText.Foreground = ResolveBrush("CriticalBrush", "#FF9761");
         }
         else if (util > 75)
         {
-            _currentValueText.Foreground = BrushFactory.CreateBrush("#FFD166"); // yellow — elevated
+            _currentValueText.Foreground = ResolveBrush("WarningBrush", "#F0C968");
         }
         else
         {
             _currentValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF"); // default
         }
+    }
+
+    // Cached threshold brushes — avoids allocating new brushes on every utilization update
+    private static Brush ResolveUtilizationBrush(MetricPanelViewModel panel)
+    {
+        if (panel.UtilizationPercent <= 0 || panel.Unit != MetricUnit.Percent)
+        {
+            return panel.AccentBrush;
+        }
+
+        if (panel.UtilizationPercent > 90)
+        {
+            return ResolveBrush("CriticalBrush", "#FF9761");
+        }
+
+        if (panel.UtilizationPercent > 75)
+        {
+            return ResolveBrush("WarningBrush", "#F0C968");
+        }
+
+        return panel.AccentBrush;
     }
 
     private void SetHoverState(bool isHovered)
@@ -1004,13 +1151,14 @@ public sealed class TelemetryPanelCard : UserControl
         }
 
         _cardBorder.BorderBrush = isHovered
-            ? ResolveBrush("AccentBrush", "#66E7FF")
+            ? ResolveBrush("AccentStrongBrush", "#9FEFFF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _cardBorder.BorderThickness = new Thickness(isHovered ? 1.5 : 1.2);
-        _cardBorder.Opacity = 1.0;
+        _cardBorder.BorderThickness = new Thickness(isHovered ? 1.15 : 0.9);
+        _cardBorder.Opacity = isHovered ? 1.0 : 0.985;
         _cardBorder.Background = isHovered
-            ? CreateSurfaceGradient("#102133", "#162A40")
-            : CreateSurfaceGradient("#0E1B2C", "#13253A");
+            ? CreateSurfaceGradient("#122034", "#1A2C46")
+            : CreateSurfaceGradient("#101B2D", "#16273D");
+        _cardBorder.Translation = new System.Numerics.Vector3(0f, isHovered ? -1f : 0f, 0f);
     }
 
     private ActionChip CreateRangeButton(string text, TimeRangePreset preset)
@@ -1018,8 +1166,8 @@ public sealed class TelemetryPanelCard : UserControl
         var button = new ActionChip
         {
             Tag = preset,
-            MinHeight = 30,
-            MinWidth = 40,
+            MinHeight = 26,
+            MinWidth = 34,
             Text = text,
         };
 
@@ -1093,22 +1241,12 @@ public sealed class TelemetryPanelCard : UserControl
 
             _cardBorder.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
             _cardBorder.BorderThickness = new Thickness(2);
+            _cardBorder.Background = CreateSurfaceGradient("#122034", "#1A2C46");
+            _cardBorder.Opacity = 0.92;
+            _cardBorder.Translation = new System.Numerics.Vector3(0f, -2f, 0f);
             ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
             Canvas.SetZIndex(this, 50);
             CacheDragTargets();
-
-            // Animate lift — smooth transition into drag state
-            var liftOpacity = new DoubleAnimation
-            {
-                To = 0.88,
-                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
-            };
-            Storyboard.SetTarget(liftOpacity, _cardBorder);
-            Storyboard.SetTargetProperty(liftOpacity, "Opacity");
-            var liftStoryboard = new Storyboard();
-            liftStoryboard.Children.Add(liftOpacity);
-            liftStoryboard.Begin();
         }
 
         // Pure mouse delta — card moves exactly with the mouse, no feedback loops
@@ -1210,8 +1348,16 @@ public sealed class TelemetryPanelCard : UserControl
 
         if (Panel is { } panel)
         {
-            // Update button states immediately for snappy feedback
-            RefreshProcessSortButtons(panel);
+            // Toggle Name → NameReverse on second click
+            if (sortMode == ProcessSortMode.Name && panel.ProcessSortMode == ProcessSortMode.Name)
+            {
+                sortMode = ProcessSortMode.NameReverse;
+            }
+            else if (sortMode == ProcessSortMode.Name && panel.ProcessSortMode == ProcessSortMode.NameReverse)
+            {
+                sortMode = ProcessSortMode.Name;
+            }
+
             panel.ProcessSortMode = sortMode;
             RefreshProcessSortButtons(panel);
         }
@@ -1262,26 +1408,14 @@ public sealed class TelemetryPanelCard : UserControl
     {
         _isDropTarget = isActive;
         _cardBorder.BorderBrush = isActive
-            ? ResolveBrush("AccentBrush", "#66E7FF")
+            ? ResolveBrush("AccentStrongBrush", "#9FEFFF")
             : ResolveBrush("SurfaceStrokeBrush", "#27425E");
-        _cardBorder.BorderThickness = new Thickness(isActive ? 1.5 : 1.2);
+        _cardBorder.BorderThickness = new Thickness(isActive ? 1.25 : 0.9);
         _cardBorder.Background = isActive
-            ? CreateSurfaceGradient("#102133", "#162A40")
-            : CreateSurfaceGradient("#0E1B2C", "#13253A");
-
-        // Animate the opacity pulse for smooth feedback
-        var targetOpacity = isActive ? 0.92 : 1.0;
-        var opAnim = new DoubleAnimation
-        {
-            To = targetOpacity,
-            Duration = new Duration(TimeSpan.FromMilliseconds(120)),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
-        };
-        Storyboard.SetTarget(opAnim, _cardBorder);
-        Storyboard.SetTargetProperty(opAnim, "Opacity");
-        var sb = new Storyboard();
-        sb.Children.Add(opAnim);
-        sb.Begin();
+            ? CreateSurfaceGradient("#122034", "#1A2C46")
+            : CreateSurfaceGradient("#101B2D", "#16273D");
+        _cardBorder.Opacity = isActive ? 0.96 : 1.0;
+        _cardBorder.Translation = new System.Numerics.Vector3(0f, isActive ? -1f : 0f, 0f);
     }
 
     private void CacheDragTargets()
@@ -1368,7 +1502,10 @@ public sealed class TelemetryPanelCard : UserControl
         {
             ProtectedCursor = null;
             _cardBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
-            _cardBorder.BorderThickness = new Thickness(1.2);
+            _cardBorder.BorderThickness = new Thickness(0.9);
+            _cardBorder.Background = CreateSurfaceGradient("#101B2D", "#16273D");
+            _cardBorder.Opacity = 1.0;
+            _cardBorder.Translation = new System.Numerics.Vector3(0f, 0f, 0f);
 
             // Finalize grid position and clear translate instantly — no swoop
             PanelDragEnded?.Invoke(this, EventArgs.Empty);
@@ -1467,7 +1604,7 @@ public sealed class TelemetryPanelCard : UserControl
         }
     }
 
-    private static (Border Row, TextBlock NameText, TextBlock ValueText, Ellipse Dot) CreateLegendRow(string name, Brush strokeBrush)
+    private static (ClickableBorder Row, Border InnerBorder, TextBlock NameText, TextBlock ValueText, Ellipse Dot) CreateLegendRow(string name, Brush strokeBrush)
     {
         var row = new Grid();
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1476,9 +1613,9 @@ public sealed class TelemetryPanelCard : UserControl
 
         var dot = new Ellipse
         {
-            Width = 7,
-            Height = 7,
-            Margin = new Thickness(0, 3, 9, 0),
+            Width = 8,
+            Height = 8,
+            Margin = new Thickness(0, 2, 8, 0),
             Fill = strokeBrush,
         };
         row.Children.Add(dot);
@@ -1506,20 +1643,37 @@ public sealed class TelemetryPanelCard : UserControl
         row.Children.Add(valueText);
         Grid.SetColumn(valueText, 2);
 
-        return (new Border
+        var border = new Border
         {
-            Background = CreateSurfaceGradient("#101C2D", "#132438"),
+            Background = ResolveBrush("SurfaceInsetBrush", "#091321"),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(12, 8, 12, 8),
+            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(11),
+            Padding = new Thickness(11, 7, 11, 7),
             Child = row,
-        }, nameText, valueText, dot);
+        };
+
+        // Hover reads current theme each time — no stale captured brushes
+        border.PointerEntered += (_, _) =>
+        {
+            border.Background = ResolveBrush("SurfaceStrongBrush", "#18314A");
+            border.BorderBrush = ResolveBrush("AccentStrongBrush", "#9FEFFF");
+        };
+        border.PointerExited += (_, _) =>
+        {
+            border.Background = ResolveBrush("SurfaceInsetBrush", "#091321");
+            border.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        };
+
+        var wrapper = new ClickableBorder(border);
+        return (wrapper, border, nameText, valueText, dot);
     }
 
-    private static (Border Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, Border MeterFill, Border MeterTrack) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
+    private static (ClickableBorder Row, TextBlock NameText, TextBlock ValueText, TextBlock CaptionText, LinearGradientBrush FillBrush, Border RowBorder, Ellipse? ChartDot) CreateProcessRow(ProcessListItemViewModel item, Brush accentBrush)
     {
-        var nameText = new TextBlock
+        // Small color dot showing the process chart line color (if charted)
+        Ellipse? chartDot = null;
+        var nameContent = (FrameworkElement)new TextBlock
         {
             FontFamily = new FontFamily("Segoe UI Variable Text"),
             FontSize = 11.5,
@@ -1528,6 +1682,31 @@ public sealed class TelemetryPanelCard : UserControl
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        var nameText = (TextBlock)nameContent;
+
+        // Bold name + color dot when pinned
+        if (item.IsPinned)
+        {
+            nameText.FontWeight = FontWeights.SemiBold;
+        }
+
+        if (item.ChartColor is not null)
+        {
+            chartDot = new Ellipse
+            {
+                Width = 7,
+                Height = 7,
+                Fill = item.ChartColor,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+            };
+            var nameStack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children = { chartDot, nameText },
+            };
+            nameContent = nameStack;
+        }
 
         var captionText = new TextBlock
         {
@@ -1538,26 +1717,6 @@ public sealed class TelemetryPanelCard : UserControl
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 0, 0),
-        };
-
-        // Inline meter bar right next to the value
-        var meterFill = new Border
-        {
-            Width = 32 * Math.Clamp(item.Intensity, 0d, 1d),
-            Height = 3,
-            Background = accentBrush,
-            CornerRadius = new CornerRadius(999),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        var meterTrack = new Border
-        {
-            Width = 32,
-            Height = 3,
-            Background = ResolveBrush("SurfaceStrongBrush", "#162A41"),
-            CornerRadius = new CornerRadius(999),
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = meterFill,
         };
 
         var valueText = new TextBlock
@@ -1573,32 +1732,80 @@ public sealed class TelemetryPanelCard : UserControl
             TextAlignment = TextAlignment.Right,
         };
 
-        // Clean table row: Name | Caption | Meter+Value (right-aligned)
+        // Table row: Name | Caption | Value
         var rowGrid = new Grid
         {
             ColumnSpacing = 6,
         };
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 90 });
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.7, GridUnitType.Star) });
-        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        rowGrid.Children.Add(nameText);
+        rowGrid.Children.Add(nameContent);
         rowGrid.Children.Add(captionText);
         Grid.SetColumn(captionText, 1);
-        rowGrid.Children.Add(meterTrack);
-        Grid.SetColumn(meterTrack, 2);
         rowGrid.Children.Add(valueText);
-        Grid.SetColumn(valueText, 3);
+        Grid.SetColumn(valueText, 2);
 
-        // Subtle bottom separator instead of bordered card
-        return (new Border
+        // Background gradient fill — row itself acts as the meter (Grafana-style)
+        var intensity = Math.Clamp(item.Intensity, 0d, 1d);
+        var accentColor = accentBrush is SolidColorBrush scb ? scb.Color : BrushFactory.ParseColor("#66E7FF");
+        var baseAlpha = item.IsPinned ? (byte)70 : (byte)55;
+        var edgeAlpha = item.IsPinned ? (byte)50 : (byte)35;
+
+        var fillBrush = new LinearGradientBrush
         {
-            Padding = new Thickness(6, 4, 6, 4),
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 0),
+            GradientStops =
+            {
+                new GradientStop { Color = Color.FromArgb(baseAlpha, accentColor.R, accentColor.G, accentColor.B), Offset = 0 },
+                new GradientStop { Color = Color.FromArgb(edgeAlpha, accentColor.R, accentColor.G, accentColor.B), Offset = intensity },
+                new GradientStop { Color = Color.FromArgb(0, accentColor.R, accentColor.G, accentColor.B), Offset = Math.Min(intensity + 0.03, 1.0) },
+            },
+        };
+
+        var rowBorder = new Border
+        {
+            Padding = new Thickness(8, 5, 8, 5),
             BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-            BorderThickness = new Thickness(0, 0, 0, 0.5),
-            Child = rowGrid,
-        }, nameText, valueText, captionText, meterFill, meterTrack);
+            BorderThickness = new Thickness(0, 0, 0, 0.4),
+            Background = fillBrush,
+            // Transparent background on the grid ensures the entire row is hit-testable
+            Child = new Grid { Background = BrushFactory.CreateBrush("#01000000"), Children = { rowGrid } },
+        };
+
+        // Hover feedback — accent border + subtle background brighten
+        rowBorder.PointerEntered += (_, _) =>
+        {
+            rowBorder.BorderBrush = ResolveBrush("AccentBrush", "#66E7FF");
+            rowBorder.BorderThickness = new Thickness(0, 0, 0, 1.2);
+            // Boost fill opacity on hover for clear visual feedback
+            if (fillBrush.GradientStops.Count >= 3)
+            {
+                var c0 = fillBrush.GradientStops[0].Color;
+                var c1 = fillBrush.GradientStops[1].Color;
+                fillBrush.GradientStops[0].Color = Color.FromArgb(Math.Min((byte)120, (byte)(c0.A + 40)), c0.R, c0.G, c0.B);
+                fillBrush.GradientStops[1].Color = Color.FromArgb(Math.Min((byte)100, (byte)(c1.A + 40)), c1.R, c1.G, c1.B);
+            }
+        };
+        rowBorder.PointerExited += (_, _) =>
+        {
+            rowBorder.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            rowBorder.BorderThickness = new Thickness(0, 0, 0, 0.4);
+            // Restore original fill opacity
+            if (fillBrush.GradientStops.Count >= 3)
+            {
+                var c0 = fillBrush.GradientStops[0].Color;
+                var c1 = fillBrush.GradientStops[1].Color;
+                fillBrush.GradientStops[0].Color = Color.FromArgb(baseAlpha, c0.R, c0.G, c0.B);
+                fillBrush.GradientStops[1].Color = Color.FromArgb(edgeAlpha, c1.R, c1.G, c1.B);
+            }
+        };
+
+        // Wrap in ClickableBorder for hand cursor + click handlers in slow path
+        var clickableRow = new ClickableBorder(rowBorder);
+        return (clickableRow, nameText, valueText, captionText, fillBrush, rowBorder, chartDot);
     }
 
     private void UpdateBadgeIcon(MetricPanelViewModel? panel)
@@ -1656,31 +1863,82 @@ public sealed class TelemetryPanelCard : UserControl
         return BrushFactory.CreateBrush(fallbackHex);
     }
 
+    private static readonly Dictionary<string, LinearGradientBrush> s_gradientCache = new(StringComparer.Ordinal);
+    private static bool s_lastCachedLightMode;
+
     private static Brush CreateSurfaceGradient(string startHex, string endHex)
     {
-        if (IsLightPaletteActive())
+        var isLight = IsLightPaletteActive();
+        if (isLight != s_lastCachedLightMode)
         {
-            return new LinearGradientBrush
+            s_gradientCache.Clear();
+            s_lastCachedLightMode = isLight;
+        }
+
+        var cacheKey = string.Concat(startHex, "|", endHex);
+        if (s_gradientCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        LinearGradientBrush brush;
+        if (isLight)
+        {
+            var lightStart = LiftToLight(startHex);
+            var lightEnd = LiftToLight(endHex);
+            brush = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0),
                 EndPoint = new Windows.Foundation.Point(1, 1),
                 GradientStops = new GradientStopCollection
                 {
-                    new GradientStop { Color = ResolveColor("SurfaceBrush", "#F8FBFF"), Offset = 0d },
-                    new GradientStop { Color = ResolveColor("SurfaceElevatedBrush", "#EEF5FB"), Offset = 1d },
+                    new GradientStop { Color = lightStart, Offset = 0d },
+                    new GradientStop { Color = lightEnd, Offset = 1d },
+                },
+            };
+        }
+        else
+        {
+            brush = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = new GradientStopCollection
+                {
+                    new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
+                    new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
                 },
             };
         }
 
-        return new LinearGradientBrush
+        s_gradientCache[cacheKey] = brush;
+        return brush;
+    }
+
+    private static Color LiftToLight(string darkHex)
+    {
+        return darkHex.TrimStart('#').ToUpperInvariant() switch
         {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1),
-            GradientStops = new GradientStopCollection
-            {
-                new GradientStop { Color = BrushFactory.ParseColor(startHex), Offset = 0d },
-                new GradientStop { Color = BrushFactory.ParseColor(endHex), Offset = 1d },
-            },
+            // Card surface — pure white
+            "0E1B2C" or "0E1A2C" or "101B2D" => BrushFactory.ParseColor("#FFFFFF"),
+            "13253A" or "142436" or "16273D" => BrushFactory.ParseColor("#F8FAFD"),
+            // Badge — tinted
+            "102131" or "17304A" => BrushFactory.ParseColor("#E0EAF4"),
+            // Chart frame — gray inset
+            "0C1824" or "111F30" => BrushFactory.ParseColor("#EDF1F7"),
+            // Process section — gray inset
+            "0D1824" or "12202F" => BrushFactory.ParseColor("#EBF0F6"),
+            // Legend row idle
+            "101C2D" or "132438" => BrushFactory.ParseColor("#F0F4F9"),
+            // Legend row hover
+            "162A3E" or "1C3350" => BrushFactory.ParseColor("#E0E8F2"),
+            // Range shell
+            "102031" or "15283E" => BrushFactory.ParseColor("#ECF0F6"),
+            // Scale pill
+            "101D2E" or "152840" => BrushFactory.ParseColor("#E6ECF4"),
+            // Card hover
+            "102133" or "162A40" or "122034" or "1A2C46" => BrushFactory.ParseColor("#E4ECF4"),
+            _ => BrushFactory.ParseColor("#F2F6FB"),
         };
     }
 

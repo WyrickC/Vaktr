@@ -10,7 +10,6 @@ namespace Vaktr.App;
 public sealed class App : Application
 {
     private ShellWindow? _window;
-    private bool _startupGuardActive = true;
 
     public static App CurrentApp => (App)Current;
 
@@ -87,7 +86,6 @@ public sealed class App : Application
 
     public void MarkStartupSettled()
     {
-        _startupGuardActive = false;
         StartupTrace.Write("Startup guard disarmed");
     }
 
@@ -95,24 +93,28 @@ public sealed class App : Application
     {
         var palette = mode == ThemeMode.Light
             ? new ThemePalette(
-                "#EEF5FB",
-                "#F8FBFF",
-                "#C4D2E2",
-                "#FFFFFF",
-                "#F0F5FB",
-                "#E4EDF6",
-                "#B8C9DC",
-                "#E6EFF8",
-                "#C8D8E8",
-                "#0A1824",
-                "#3A5068",
-                "#576F85",
-                "#0975A8",
-                "#065A82",
-                "#C8E8F8",
-                "#1C7EA229",
-                "#19D2A04A",
-                "#90E0EBF5")
+                "#EEF2F7",     // AppBackdrop — neutral light shell background
+                "#F7F9FC",     // ShellBackground — brighter than the app backdrop
+                "#CAD4DF",     // ShellStroke — soft but visible shell framing
+                "#FFFFFF",     // Surface — primary white cards
+                "#FBFCFE",     // SurfaceElevated — nearly-white raised surfaces
+                "#EEF2F7",     // SurfaceStrong — compact controls and hover states
+                "#F3F6FA",     // SurfaceInset — recessed chart/process beds
+                "#C8D2DE",     // SurfaceStroke — crisp borders on light cards
+                "#C8FFFFFF",   // SurfaceHighlight — restrained highlight for glassy edges
+                "#E8EEF5",     // PanelOverlay — subtle supporting pill/background tint
+                "#C7D2DE",     // SurfaceGrid — visible but not blue-heavy chart grid
+                "#0D1A25",     // TextPrimary — strong dark text
+                "#3A4F63",     // TextSecondary — calmer supporting copy
+                "#66788A",     // TextMuted — readable metadata
+                "#0C6B96",     // Accent — cooler cyan-blue without neon contrast
+                "#0A4E6D",     // AccentStrong — stronger interactive state
+                "#DDEAF6",     // AccentSoft — quiet accent tint
+                "#18609020",   // AccentHalo
+                "#15C09040",   // WarningHalo
+                "#B8861F",     // Warning
+                "#C96C36",     // Critical
+                "#80D8E4F0")   // OverlayScrim
             : new ThemePalette(
                 "#030812",
                 "#07101B",
@@ -120,7 +122,9 @@ public sealed class App : Application
                 "#0C1726",
                 "#112033",
                 "#18314A",
+                "#091321",
                 "#315274",
+                "#22FFFFFF",
                 "#091321",
                 "#426A8C",
                 "#F4F9FF",
@@ -131,6 +135,8 @@ public sealed class App : Application
                 "#163B60",
                 "#2B8FE6C4",
                 "#1EFFA25C",
+                "#F0C968",
+                "#FF9761",
                 "#B0060A12");
 
         SetBrushResource("AppBackdropBrush", palette.AppBackdrop);
@@ -139,7 +145,9 @@ public sealed class App : Application
         SetBrushResource("SurfaceBrush", palette.Surface);
         SetBrushResource("SurfaceElevatedBrush", palette.SurfaceElevated);
         SetBrushResource("SurfaceStrongBrush", palette.SurfaceStrong);
+        SetBrushResource("SurfaceInsetBrush", palette.SurfaceInset);
         SetBrushResource("SurfaceStrokeBrush", palette.SurfaceStroke);
+        SetBrushResource("SurfaceHighlightBrush", palette.SurfaceHighlight);
         SetBrushResource("PanelOverlayBrush", palette.PanelOverlay);
         SetBrushResource("SurfaceGridBrush", palette.SurfaceGrid);
         SetBrushResource("TextPrimaryBrush", palette.TextPrimary);
@@ -150,6 +158,8 @@ public sealed class App : Application
         SetBrushResource("AccentSoftBrush", palette.AccentSoft);
         SetBrushResource("AccentHaloBrush", palette.AccentHalo);
         SetBrushResource("WarningHaloBrush", palette.WarningHalo);
+        SetBrushResource("WarningBrush", palette.Warning);
+        SetBrushResource("CriticalBrush", palette.Critical);
         SetBrushResource("OverlayScrimBrush", palette.OverlayScrim);
     }
 
@@ -248,7 +258,9 @@ public sealed class App : Application
         string Surface,
         string SurfaceElevated,
         string SurfaceStrong,
+        string SurfaceInset,
         string SurfaceStroke,
+        string SurfaceHighlight,
         string PanelOverlay,
         string SurfaceGrid,
         string TextPrimary,
@@ -259,5 +271,7 @@ public sealed class App : Application
         string AccentSoft,
         string AccentHalo,
         string WarningHalo,
+        string Warning,
+        string Critical,
         string OverlayScrim);
 }
