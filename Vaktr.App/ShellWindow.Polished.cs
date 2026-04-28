@@ -42,6 +42,7 @@ public sealed partial class ShellWindow : Window
     private readonly ScrollViewer _scrollHost;
     private Border? _loadingOverlay;
     private readonly Border _controlsBodyHost;
+    private Border? _controlsSurfaceRef;
     private readonly Grid _brandHost;
     private readonly Grid _summaryHost;
     private readonly Grid _dashboardGrid;
@@ -55,8 +56,12 @@ public sealed partial class ShellWindow : Window
     private readonly ActionChip _globalOneHourButton;
     private readonly ActionChip _globalTwelveHourButton;
     private readonly ActionChip _globalTwentyFourHourButton;
+    private readonly ActionChip _globalTwoDayButton;
+    private readonly ActionChip _globalFiveDayButton;
     private readonly ActionChip _globalSevenDayButton;
     private readonly ActionChip _globalThirtyDayButton;
+    private readonly ActionChip _globalNinetyDayButton;
+    private readonly ActionChip _globalOneYearButton;
     private readonly ActionChip _globalResetZoomButton;
 
     private CollectorService? _collectorService;
@@ -82,7 +87,7 @@ public sealed partial class ShellWindow : Window
     private DateTimeOffset? _globalAbsoluteStartUtc;
     private DateTimeOffset? _globalAbsoluteEndUtc;
     private MetricSnapshot? _pendingSnapshot;
-
+    private int _lastLoadedHistoryMinutes;
     public ShellWindow(
         MainViewModel viewModel,
         IMetricStore metricStore,
@@ -97,7 +102,8 @@ public sealed partial class ShellWindow : Window
 
         Title = "Vaktr";
 
-        _statusText = CreateSecondaryText(string.Empty, 12);
+        _statusText = CreateMutedText(string.Empty, 11);
+        _statusText.Opacity = 0.7;
         _controlsBodyHost = new Border();
         _brandHost = CreateBrandPlaceholder();
         _summaryHost = new Grid
@@ -123,8 +129,12 @@ public sealed partial class ShellWindow : Window
         _globalOneHourButton = CreateGlobalRangeChip("1h", 60);
         _globalTwelveHourButton = CreateGlobalRangeChip("12h", 720);
         _globalTwentyFourHourButton = CreateGlobalRangeChip("24h", 1440);
+        _globalTwoDayButton = CreateGlobalRangeChip("2d", 2880);
+        _globalFiveDayButton = CreateGlobalRangeChip("5d", 7200);
         _globalSevenDayButton = CreateGlobalRangeChip("7d", 10080);
         _globalThirtyDayButton = CreateGlobalRangeChip("30d", 43200);
+        _globalNinetyDayButton = CreateGlobalRangeChip("90d", 129600);
+        _globalOneYearButton = CreateGlobalRangeChip("1y", 525600);
         _globalResetZoomButton = CreateActionChip("Reset zoom", OnResetAllZoomClick);
         _titleBarDragHost = new Grid
         {
@@ -185,6 +195,7 @@ public sealed partial class ShellWindow : Window
         Content = _rootLayout;
         SetTitleBar(_titleBarDragHost);
         ApplyInitialTheme(_viewModel.SelectedTheme);
+        InstallResizeHook();
 
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.DashboardPanels.CollectionChanged += OnDashboardPanelsChanged;
@@ -237,10 +248,36 @@ public sealed partial class ShellWindow : Window
 
     private void RefreshThemeVisuals()
     {
-        // Force-clear gradient cache before any surface gradient is rebuilt
         _gradientCache.Clear();
 
-        RunWithDeferredPanelRendering(() =>
+        // All brush updates run synchronously so the user never sees a half-themed state.
+        // Chart redraws are already deferred inside each card's RefreshThemeResources.
+        RefreshWindowChrome();
+        RefreshShellSurfaceThemeResources();
+        RefreshSummaryCardThemeResources();
+        RefreshGlobalRangeControls();
+
+        foreach (var chip in new[]
+        {
+            _globalRangeButton, _globalOneMinuteButton, _globalFiveMinuteButton,
+            _globalFifteenMinuteButton, _globalThirtyMinuteButton, _globalOneHourButton,
+            _globalTwelveHourButton, _globalTwentyFourHourButton, _globalTwoDayButton,
+            _globalFiveDayButton, _globalSevenDayButton, _globalThirtyDayButton,
+            _globalNinetyDayButton, _globalOneYearButton, _globalResetZoomButton,
+        })
+        {
+            chip.RefreshThemeResources();
+        }
+
+        // Panel cards — update brushes only, chart redraws are deferred inside each card
+        foreach (var card in _panelCards.Values)
+        {
+            card.RefreshThemeResources();
+        }
+
+        // Rebuild control deck on next frame — it's less critical than panel visuals
+        // and rebuilding synchronously during theme switches causes visible jank.
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
         {
             if (_controlDeckEditableActive)
             {
@@ -255,26 +292,6 @@ public sealed partial class ShellWindow : Window
             {
                 RenderGlobalRangeEditor();
             }
-
-            RefreshSummaryCardThemeResources();
-            foreach (var card in _panelCards.Values)
-            {
-                card.RefreshThemeResources();
-            }
-
-            RefreshGlobalRangeControls();
-            foreach (var chip in new[]
-            {
-                _globalRangeButton, _globalOneMinuteButton, _globalFiveMinuteButton,
-                _globalFifteenMinuteButton, _globalThirtyMinuteButton, _globalOneHourButton,
-                _globalTwelveHourButton, _globalTwentyFourHourButton, _globalSevenDayButton,
-                _globalThirtyDayButton, _globalResetZoomButton,
-            })
-            {
-                chip.RefreshThemeResources();
-            }
-
-            RefreshWindowChrome();
         });
     }
 
@@ -303,11 +320,11 @@ public sealed partial class ShellWindow : Window
             badgeHost.VerticalAlignment = VerticalAlignment.Center;
 
             var titleText = CreateMutedText(string.Empty, 9.5);
-            titleText.CharacterSpacing = 90;
+            titleText.CharacterSpacing = 110;
             titleText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Title)) });
 
-            var valueText = CreatePrimaryText(string.Empty, 25, true);
-            valueText.FontFamily = new FontFamily("Segoe UI Variable Display");
+            var valueText = CreatePrimaryText(string.Empty, 28, true);
+            valueText.FontFamily = new FontFamily("Bahnschrift");
             valueText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(SummaryCardViewModel.Value)) });
 
             var captionText = CreateSecondaryText(string.Empty, 11.5);
@@ -316,19 +333,19 @@ public sealed partial class ShellWindow : Window
             // Mini utilization bar — thin horizontal bar below the value
             var gaugeTrack = new Border
             {
-                Height = 3,
+                Height = 4,
                 CornerRadius = new CornerRadius(2),
                 Background = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                Opacity = 0.5,
-                Margin = new Thickness(0, 4, 0, 5),
+                Opacity = 0.38,
+                Margin = new Thickness(0, 7, 0, 6),
             };
             var gaugeFill = new Border
             {
-                Height = 3,
+                Height = 4,
                 CornerRadius = new CornerRadius(2),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Background = card.AccentBrush,
-                Margin = new Thickness(0, 4, 0, 5),
+                Margin = new Thickness(0, 7, 0, 6),
             };
             var gaugeHost = new Grid
             {
@@ -338,6 +355,7 @@ public sealed partial class ShellWindow : Window
             // Bind fill width and color to utilization
             card.PropertyChanged += (_, args) =>
             {
+                if (_isWindowResizing) return; // skip during resize
                 if (!string.Equals(args.PropertyName, nameof(SummaryCardViewModel.Utilization)))
                 {
                     return;
@@ -346,20 +364,19 @@ public sealed partial class ShellWindow : Window
                 var util = card.Utilization;
                 var trackWidth = gaugeTrack.ActualWidth > 0 ? gaugeTrack.ActualWidth : 120;
                 gaugeFill.Width = trackWidth * Math.Clamp(util / 100d, 0d, 1d);
-                gaugeFill.Background = util > 90 ? BrushFactory.CreateBrush("#FF8C42")
-                    : util > 75 ? BrushFactory.CreateBrush("#FFD166")
-                    : card.AccentBrush;
+                gaugeFill.Background = ResolveSummaryUtilizationBrush(util, card.AccentBrush);
             };
             // Also update on track size change
             gaugeTrack.SizeChanged += (_, _) =>
             {
                 var util = card.Utilization;
                 gaugeFill.Width = gaugeTrack.ActualWidth * Math.Clamp(util / 100d, 0d, 1d);
+                gaugeFill.Background = ResolveSummaryUtilizationBrush(util, card.AccentBrush);
             };
 
             var details = new StackPanel
             {
-                Spacing = 1,
+                Spacing = 2,
                 VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
@@ -372,7 +389,7 @@ public sealed partial class ShellWindow : Window
 
             var contentGrid = new Grid
             {
-                ColumnSpacing = 12,
+                ColumnSpacing = 14,
             };
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -383,16 +400,16 @@ public sealed partial class ShellWindow : Window
             var summaryCard = new Border
             {
                 DataContext = card,
-                Background = CreateSurfaceGradient("#0F1C2D", "#15283F"),
+                Background = CreateSurfaceGradient("#101B2D", "#16273D"),
                 BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                BorderThickness = new Thickness(0.9),
+                CornerRadius = new CornerRadius(18),
                 Padding = new Thickness(18, 15, 18, 15),
-                MinHeight = 100,
+                MinHeight = 98,
                 Child = contentGrid,
             };
             _summaryHost.Children.Add(summaryCard);
-            _summaryCardVisuals.Add(new SummaryCardVisual(summaryCard, titleText, valueText, captionText, badgeHost, card));
+            _summaryCardVisuals.Add(new SummaryCardVisual(summaryCard, titleText, valueText, captionText, badgeHost, gaugeTrack, gaugeFill, card));
             var index = _summaryHost.Children.Count - 1;
             while (_summaryHost.RowDefinitions.Count <= index / summaryColumns)
             {
@@ -416,27 +433,35 @@ public sealed partial class ShellWindow : Window
         for (var i = 0; i < _summaryCardVisuals.Count; i++)
         {
             var visual = _summaryCardVisuals[i];
-            visual.Surface.Background = CreateSurfaceGradient("#0F1C2D", "#15283F");
+            visual.Surface.Background = CreateSurfaceGradient("#101B2D", "#16273D");
             visual.Surface.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
             visual.TitleText.Foreground = ResolveBrush("TextMutedBrush", "#7D9AB6");
             visual.ValueText.Foreground = ResolveBrush("TextPrimaryBrush", "#F2F8FF");
             visual.CaptionText.Foreground = ResolveBrush("TextSecondaryBrush", "#B7CCE1");
-
-            // Replace the entire badge tile — the outer Border has themed background/border
-            var newTile = (Border)IconFactory.CreateTile(visual.ViewModel.Title, visual.ViewModel.AccentBrush, 48, 16);
-            newTile.VerticalAlignment = VerticalAlignment.Center;
-            if (visual.BadgeHost.Parent is Grid parentGrid)
+            visual.GaugeTrack.Background = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+            visual.GaugeFill.Background = ResolveSummaryUtilizationBrush(visual.ViewModel.Utilization, visual.ViewModel.AccentBrush);
+            // Skip badge recreation — just update its background/border colors
+            if (visual.BadgeHost is Border badge)
             {
-                var idx = parentGrid.Children.IndexOf(visual.BadgeHost);
-                if (idx >= 0)
-                {
-                    parentGrid.Children.RemoveAt(idx);
-                    parentGrid.Children.Insert(idx, newTile);
-                }
+                badge.Background = CreateSurfaceGradient("#102131", "#17304A");
+                badge.BorderBrush = visual.ViewModel.AccentBrush;
             }
-
-            _summaryCardVisuals[i] = visual with { BadgeHost = newTile };
         }
+    }
+
+    private Brush ResolveSummaryUtilizationBrush(double utilization, Brush accentBrush)
+    {
+        if (utilization > 90)
+        {
+            return ResolveBrush("CriticalBrush", "#FF9761");
+        }
+
+        if (utilization > 75)
+        {
+            return ResolveBrush("WarningBrush", "#F0C968");
+        }
+
+        return accentBrush;
     }
 
     private void RefreshPanelToggles()
@@ -569,6 +594,22 @@ public sealed partial class ShellWindow : Window
         {
             await EnsureCollectorRunningAsync(config);
             _pendingHistoryLoad = TryLoadHistoryAsync(config);
+
+            // Run startup prune in the background — don't block telemetry startup.
+            // This catches up on missed maintenance without delaying the first snapshot.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _metricStore.PruneAsync(config, CancellationToken.None);
+                    StartupTrace.Write("Startup prune complete");
+                }
+                catch (Exception pruneEx)
+                {
+                    StartupTrace.WriteException("Startup prune", pruneEx);
+                }
+            });
+
             StartupTrace.Write("Background startup complete // polished-v19");
         }
         catch (Exception ex)
@@ -732,12 +773,24 @@ public sealed partial class ShellWindow : Window
         }
     }
 
-    private void OnThemeQuickToggle(object? sender, EventArgs e)
+    private async void OnThemeQuickToggle(object? sender, EventArgs e)
     {
         _draftThemeMode = _draftThemeMode == ThemeMode.Dark
             ? ThemeMode.Light
             : ThemeMode.Dark;
-        App.CurrentApp.PreviewTheme(_draftThemeMode);
+        _viewModel.SelectedTheme = _draftThemeMode;
+        App.CurrentApp.ApplyTheme(_draftThemeMode);
+
+        // Persist immediately so the theme is remembered on next launch
+        try
+        {
+            var config = _viewModel.BuildConfig();
+            await _configStore.SaveAsync(config, CancellationToken.None);
+        }
+        catch
+        {
+            // Best effort — theme will still be active for this session
+        }
     }
 
     private void OnToggleGlobalRangeEditor(object? sender, EventArgs e)
@@ -895,6 +948,20 @@ public sealed partial class ShellWindow : Window
     private void ApplyQueuedSnapshot()
     {
         _snapshotApplyQueued = false;
+
+        // During window resize, don't apply snapshots at all — keep them pending.
+        // Text/value updates cause WinUI layout invalidation which is the main
+        // source of resize stutter. The snapshot will be applied when resize ends.
+        if (_isWindowResizing)
+        {
+            if (_pendingSnapshot is not null)
+            {
+                _snapshotApplyQueued = true;
+                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, ApplyQueuedSnapshot);
+            }
+            return;
+        }
+
         var snapshot = _pendingSnapshot;
         _pendingSnapshot = null;
         if (snapshot is null)
@@ -912,15 +979,23 @@ public sealed partial class ShellWindow : Window
             }
         }
 
+        // Suspend rendering during the snapshot application pass so that
+        // individual panel property changes don't trigger separate chart redraws.
+        // Everything renders once at the end when we resume.
+        SetPanelRenderingSuspended(true);
         _viewModel.ApplySnapshot(snapshot);
         if (_globalAbsoluteStartUtc.HasValue && _globalAbsoluteEndUtc.HasValue)
         {
-            foreach (var panel in _viewModel.DashboardPanels.Where(panel => !panel.IsZoomed))
+            foreach (var panel in _viewModel.DashboardPanels)
             {
-                panel.ZoomToWindow(_globalAbsoluteStartUtc.Value, _globalAbsoluteEndUtc.Value);
+                if (!panel.IsZoomed)
+                {
+                    panel.ZoomToWindow(_globalAbsoluteStartUtc.Value, _globalAbsoluteEndUtc.Value);
+                }
             }
         }
 
+        SetPanelRenderingSuspended(false);
         UpdateStatusText();
 
         if (_pendingSnapshot is not null && !_snapshotApplyQueued)
@@ -996,13 +1071,15 @@ public sealed partial class ShellWindow : Window
 
     private void OnScrollHostViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
+        if (_isWindowResizing) return; // no scroll handling during resize
+
         if (e.IsIntermediate)
         {
             SetPanelRenderingSuspended(true);
             return;
         }
 
-        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => SetPanelRenderingSuspended(false));
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () => SetPanelRenderingSuspended(false));
     }
 
     private void RunWithDeferredPanelRendering(Action action)
@@ -1032,25 +1109,110 @@ public sealed partial class ShellWindow : Window
         }
     }
 
+    private bool _isWindowResizing;
+    private Border? _shellBorderRef;
+
+    private void InstallResizeHook()
+    {
+        try
+        {
+            var hwnd = WindowNative.GetWindowHandle(this);
+            ResizeInterop.Install(hwnd,
+                onEnterResize: () => DispatcherQueue.TryEnqueue(() =>
+                {
+                    _isWindowResizing = true;
+
+                    if (_scrollHost.Content is UIElement scrollContent)
+                    {
+                        scrollContent.CacheMode = new BitmapCache();
+                    }
+
+                    if (_shellBorderRef is not null)
+                    {
+                        _shellBorderRef.CornerRadius = new CornerRadius(0);
+                    }
+
+                    foreach (var card in _panelCards.Values)
+                    {
+                        card.SetRenderingSuspended(true);
+                        card.SetResizeMode(true);
+                    }
+
+                    // Safety: auto-clear resize flag after 5 seconds in case WM_EXITSIZEMOVE is missed
+                    _ = System.Threading.Tasks.Task.Delay(5000).ContinueWith(_ =>
+                    {
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            if (_isWindowResizing)
+                            {
+                                _isWindowResizing = false;
+                                if (_scrollHost.Content is UIElement sc) sc.CacheMode = null;
+                                if (_shellBorderRef is not null) _shellBorderRef.CornerRadius = new CornerRadius(22);
+                                foreach (var card in _panelCards.Values)
+                                {
+                                    card.SetResizeMode(false);
+                                    card.SetRenderingSuspended(false);
+                                }
+                            }
+                        });
+                    }, TaskScheduler.Default);
+                }),
+                onExitResize: () => DispatcherQueue.TryEnqueue(() =>
+                {
+                    _isWindowResizing = false;
+
+                    // Remove bitmap cache — back to live rendering
+                    if (_scrollHost.Content is UIElement scrollContent)
+                    {
+                        scrollContent.CacheMode = null;
+                    }
+
+                    if (_shellBorderRef is not null)
+                    {
+                        _shellBorderRef.CornerRadius = new CornerRadius(22);
+                    }
+
+                    var nextColumnCount = DetermineDashboardColumns();
+                    if (nextColumnCount != _lastDashboardColumnCount)
+                    {
+                        QueueDashboardRefresh();
+                    }
+                    else if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
+                    {
+                        BuildSummaryCards();
+                    }
+
+                    foreach (var card in _panelCards.Values)
+                    {
+                        card.SetResizeMode(false);
+                        card.SetRenderingSuspended(false);
+                    }
+                }));
+        }
+        catch
+        {
+            // Subclassing may fail in some hosts — fall back to SizeChanged
+        }
+    }
+
     private void OnRootLayoutSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (!_initialized)
+        // When the Win32 resize hook is active, skip all work here — the hook handles it
+        if (!_initialized || _isWindowResizing)
         {
             return;
         }
 
+        // Handle programmatic resizes (not drag) that don't trigger WM_ENTERSIZEMOVE
         var nextColumnCount = DetermineDashboardColumns();
-        if (nextColumnCount == _lastDashboardColumnCount)
+        if (nextColumnCount != _lastDashboardColumnCount)
         {
-            if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
-            {
-                BuildSummaryCards();
-            }
-
-            return;
+            QueueDashboardRefresh();
         }
-
-        QueueDashboardRefresh();
+        else if (_summaryCardsBound && DetermineSummaryColumns() != _lastSummaryColumnCount)
+        {
+            BuildSummaryCards();
+        }
     }
 
     private void OnDashboardPanelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -1074,6 +1236,8 @@ public sealed partial class ShellWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_isWindowResizing) return; // no UI updates during resize
+
         if (string.Equals(e.PropertyName, nameof(MainViewModel.StatusText), StringComparison.Ordinal))
         {
             UpdateStatusText();
@@ -1544,6 +1708,7 @@ public sealed partial class ShellWindow : Window
             var historyWindow = retentionWindow;
             var history = await _metricStore.LoadHistoryAsync(DateTimeOffset.UtcNow.Subtract(historyWindow), CancellationToken.None);
             _viewModel.LoadHistory(history);
+            _lastLoadedHistoryMinutes = (int)historyWindow.TotalMinutes;
             StartupTrace.Write($"TryLoadHistoryAsync complete // panels={history.Count}");
         }
         catch (Exception ex)
@@ -1570,22 +1735,25 @@ public sealed partial class ShellWindow : Window
         _viewModel.StatusText = "Starting telemetry";
         UpdateStatusText();
         StartupTrace.Write("Calling CollectorService.StartAsync");
-        try
-        {
-            // Run entirely on a thread-pool thread so that ConfigureAwait(false)
-            // continuations inside StartAsync never resume on the UI thread
-            await Task.Run(() => _collectorService.StartAsync(config, CancellationToken.None));
-            StartupTrace.Write("CollectorService.StartAsync complete");
-        }
-        catch (Exception ex)
-        {
-            StartupTrace.WriteException("CollectorService.StartAsync", ex);
-            throw;
-        }
 
-        // StartAsync uses ConfigureAwait(false) internally, so we may be on a
-        // thread-pool thread here. Dispatch back to the UI thread for any
-        // visual updates to avoid a WinUI originate error.
+        // Fire and forget — don't block startup waiting for the collector.
+        // The collector runs on a background thread and fires SnapshotCollected
+        // when the first sample is ready. The loading overlay dismisses on
+        // first snapshot, not on collector start.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _collectorService.StartAsync(config, CancellationToken.None);
+                StartupTrace.Write("CollectorService.StartAsync complete");
+            }
+            catch (Exception ex)
+            {
+                StartupTrace.WriteException("CollectorService.StartAsync", ex);
+            }
+        });
+
+        // Immediately proceed with UI setup — don't wait for collector
         DispatcherQueue.TryEnqueue(() =>
         {
             if (!_summaryCardsBound)
@@ -1617,19 +1785,47 @@ public sealed partial class ShellWindow : Window
         _viewModel.ApplyGlobalWindowRange(minutes);
         HideGlobalRangeEditor();
         RefreshGlobalRangeControls();
+
+        // If the user selects a wider range than what we last loaded from the database,
+        // re-query to ensure the data covers the full requested window.
+        if (minutes > _lastLoadedHistoryMinutes)
+        {
+            _ = ReloadHistoryForRangeAsync(minutes);
+        }
+    }
+
+    private async Task ReloadHistoryForRangeAsync(int minutes)
+    {
+        try
+        {
+            var fromUtc = DateTimeOffset.UtcNow.AddMinutes(-minutes);
+            var history = await _metricStore.LoadHistoryAsync(fromUtc, CancellationToken.None);
+            _viewModel.LoadHistory(history);
+            _lastLoadedHistoryMinutes = minutes;
+        }
+        catch
+        {
+            // Best-effort — live data will still flow
+        }
     }
 
     private void RefreshGlobalRangeControls()
     {
-        ApplyGlobalRangeState(_globalOneMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 1);
-        ApplyGlobalRangeState(_globalFiveMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 5);
-        ApplyGlobalRangeState(_globalFifteenMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 15);
-        ApplyGlobalRangeState(_globalThirtyMinuteButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 30);
-        ApplyGlobalRangeState(_globalOneHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 60);
-        ApplyGlobalRangeState(_globalTwelveHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 720);
-        ApplyGlobalRangeState(_globalTwentyFourHourButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 1440);
-        ApplyGlobalRangeState(_globalSevenDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 10080);
-        ApplyGlobalRangeState(_globalThirtyDayButton, !_globalAbsoluteStartUtc.HasValue && _viewModel.SelectedWindowMinutes == 43200);
+        var noAbsolute = !_globalAbsoluteStartUtc.HasValue;
+        var minutes = _viewModel.SelectedWindowMinutes;
+        ApplyGlobalRangeState(_globalOneMinuteButton, noAbsolute && minutes == 1);
+        ApplyGlobalRangeState(_globalFiveMinuteButton, noAbsolute && minutes == 5);
+        ApplyGlobalRangeState(_globalFifteenMinuteButton, noAbsolute && minutes == 15);
+        ApplyGlobalRangeState(_globalThirtyMinuteButton, noAbsolute && minutes == 30);
+        ApplyGlobalRangeState(_globalOneHourButton, noAbsolute && minutes == 60);
+        ApplyGlobalRangeState(_globalTwelveHourButton, noAbsolute && minutes == 720);
+        ApplyGlobalRangeState(_globalTwentyFourHourButton, noAbsolute && minutes == 1440);
+        ApplyGlobalRangeState(_globalTwoDayButton, noAbsolute && minutes == 2880);
+        ApplyGlobalRangeState(_globalFiveDayButton, noAbsolute && minutes == 7200);
+        ApplyGlobalRangeState(_globalSevenDayButton, noAbsolute && minutes == 10080);
+        ApplyGlobalRangeState(_globalThirtyDayButton, noAbsolute && minutes == 43200);
+        ApplyGlobalRangeState(_globalNinetyDayButton, noAbsolute && minutes == 129600);
+        ApplyGlobalRangeState(_globalOneYearButton, noAbsolute && minutes == 525600);
 
         _globalRangeButton.Text = BuildGlobalRangeButtonText();
         _globalRangeButton.IsActive = _globalRangeEditorVisible;
@@ -1641,6 +1837,12 @@ public sealed partial class ShellWindow : Window
     {
         try
         {
+            if (_shellBorderRef is not null)
+            {
+                _shellBorderRef.Background = ResolveBrush("ShellBackgroundBrush", "#07101B");
+                _shellBorderRef.BorderBrush = ResolveBrush("ShellStrokeBrush", "#1A3145");
+            }
+
             var titleBar = AppWindow.TitleBar;
             if (titleBar is null)
             {
@@ -1672,6 +1874,15 @@ public sealed partial class ShellWindow : Window
         }
     }
 
+    private void RefreshShellSurfaceThemeResources()
+    {
+        if (_controlsSurfaceRef is not null)
+        {
+            _controlsSurfaceRef.Background = CreateSurfaceGradient("#0F1B2D", "#15263D");
+            _controlsSurfaceRef.BorderBrush = ResolveBrush("SurfaceStrokeBrush", "#27425E");
+        }
+    }
+
     private void RenderGlobalRangeEditor()
     {
         _globalRangeEditorVisible = true;
@@ -1695,8 +1906,13 @@ public sealed partial class ShellWindow : Window
         var quickRangeRowSecondary = CreateChipWrapRow(
             _globalTwelveHourButton,
             _globalTwentyFourHourButton,
-            _globalSevenDayButton,
-            _globalThirtyDayButton);
+            _globalTwoDayButton,
+            _globalFiveDayButton,
+            _globalSevenDayButton);
+        var quickRangeRowTertiary = CreateChipWrapRow(
+            _globalThirtyDayButton,
+            _globalNinetyDayButton,
+            _globalOneYearButton);
 
         var quickRangeCard = new Border
         {
@@ -1713,6 +1929,7 @@ public sealed partial class ShellWindow : Window
                     CreateSectionHeader("QUICK RANGES", "Jump the whole board to a preset replay window."),
                     quickRangeRowPrimary,
                     quickRangeRowSecondary,
+                    quickRangeRowTertiary,
                 },
             },
         };
@@ -1890,8 +2107,12 @@ public sealed partial class ShellWindow : Window
         <= 60 => "1h",
         <= 720 => "12h",
         <= 1440 => "24h",
+        <= 2880 => "2d",
+        <= 7200 => "5d",
         <= 10080 => "7d",
-        _ => "30d",
+        <= 43200 => "30d",
+        <= 129600 => "90d",
+        _ => "1y",
     };
 
     private static bool TryParseGlobalDateTime(string text, out DateTimeOffset value)
@@ -1943,7 +2164,51 @@ internal sealed record SummaryCardVisual(
     TextBlock ValueText,
     TextBlock CaptionText,
     Border BadgeHost,
+    Border GaugeTrack,
+    Border GaugeFill,
     SummaryCardViewModel ViewModel);
+
+internal static class ResizeInterop
+{
+    private const uint WM_ENTERSIZEMOVE = 0x0231;
+    private const uint WM_EXITSIZEMOVE = 0x0232;
+    private const nint SubclassId = 1001;
+
+    private static Action? s_onEnterResize;
+    private static Action? s_onExitResize;
+    private static SubclassProc? s_procDelegate; // prevent GC collection
+
+    private delegate nint SubclassProc(nint hWnd, uint uMsg, nint wParam, nint lParam, nint uIdSubclass, nint dwRefData);
+
+    public static void Install(nint hwnd, Action onEnterResize, Action onExitResize)
+    {
+        s_onEnterResize = onEnterResize;
+        s_onExitResize = onExitResize;
+        s_procDelegate = SubclassCallback;
+        SetWindowSubclass(hwnd, s_procDelegate, SubclassId, 0);
+    }
+
+    private static nint SubclassCallback(nint hWnd, uint uMsg, nint wParam, nint lParam, nint uIdSubclass, nint dwRefData)
+    {
+        if (uMsg == WM_ENTERSIZEMOVE)
+        {
+            s_onEnterResize?.Invoke();
+        }
+        else if (uMsg == WM_EXITSIZEMOVE)
+        {
+            s_onExitResize?.Invoke();
+        }
+
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowSubclass(nint hWnd, SubclassProc pfnSubclass, nint uIdSubclass, nint dwRefData);
+
+    [DllImport("comctl32.dll")]
+    private static extern nint DefSubclassProc(nint hWnd, uint uMsg, nint wParam, nint lParam);
+}
 
 internal static class NativeWindowMethods
 {

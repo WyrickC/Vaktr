@@ -12,9 +12,9 @@ public sealed class WindowsMetricCollector : IMetricCollector
 {
     private const double BytesPerMegabyte = 1024d * 1024d;
     private const double BitsPerMegabit = 1_000_000d;
-    private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(75);
-    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DriveUsageRefreshInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan HostActivityRefreshInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ProcessActivityRefreshInterval = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan TemperatureRefreshInterval = TimeSpan.FromSeconds(20);
 
     private readonly nint _query;
@@ -34,8 +34,12 @@ public sealed class WindowsMetricCollector : IMetricCollector
     private readonly List<CachedMetricValue> _cachedHostActivityValues = [];
     private readonly List<CachedMetricValue> _cachedTemperatureValues = [];
     private readonly List<ProcessActivitySample> _cachedProcessActivity = [];
+    private readonly HashSet<int> _activeProcessIds = [];
+    private readonly List<int> _staleProcessIds = [];
     private LiveBoardDetails? _cachedLiveBoardDetails;
     private readonly TemperatureSensorReader _temperatureReader = new();
+    private nint _pdhArrayBuffer;
+    private uint _pdhArrayBufferSize;
 
     private ulong _previousIdleTime;
     private ulong _previousKernelTime;
@@ -126,6 +130,13 @@ public sealed class WindowsMetricCollector : IMetricCollector
         if (_query != nint.Zero)
         {
             _ = PdhNative.PdhCloseQuery(_query);
+        }
+
+        if (_pdhArrayBuffer != nint.Zero)
+        {
+            Marshal.FreeHGlobal(_pdhArrayBuffer);
+            _pdhArrayBuffer = nint.Zero;
+            _pdhArrayBufferSize = 0;
         }
 
         return ValueTask.CompletedTask;
@@ -269,6 +280,16 @@ public sealed class WindowsMetricCollector : IMetricCollector
             MetricUnit.Gigabytes,
             availableGb,
             timestamp));
+
+        samples.Add(new MetricSample(
+            "memory",
+            "Memory",
+            "total-gb",
+            "Total",
+            MetricCategory.Memory,
+            MetricUnit.Gigabytes,
+            totalGb,
+            timestamp));
     }
 
     private void AddDisk(List<MetricSample> samples, DateTimeOffset timestamp)
@@ -335,7 +356,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
                     var usedPercent = Math.Clamp((1d - (drive.AvailableFreeSpace / (double)totalBytes)) * 100d, 0d, 100d);
                     var driveLabel = drive.Name.TrimEnd('\\');
                     var panelKey = $"volume-{Sanitize(driveLabel)}";
-                    var panelTitle = $"Drive {driveLabel} Capacity";
+                    var panelTitle = $"Drive {driveLabel}";
 
                     _cachedDriveUsageValues.Add(new CachedMetricValue(
                         panelKey,
@@ -408,27 +429,27 @@ public sealed class WindowsMetricCollector : IMetricCollector
             var processCount = 0;
             var threadCount = 0L;
             var handleCount = _cachedHandleCount;
-            var activePids = new HashSet<int>();
+            _activeProcessIds.Clear();
             EnumerateProcesses(
                 timestamp,
                 shouldRefreshProcesses,
-                shouldRefreshProcesses || _cachedHandleCount == 0,
-                activePids,
+                shouldRefresh || _cachedHandleCount == 0,
+                _activeProcessIds,
                 ref processCount,
                 ref threadCount,
                 ref handleCount);
 
             if (shouldRefreshProcesses)
             {
-                var stalePids = new List<int>();
+                _staleProcessIds.Clear();
                 foreach (var pid in _processCpuBaselines.Keys)
                 {
-                    if (!activePids.Contains(pid))
+                    if (!_activeProcessIds.Contains(pid))
                     {
-                        stalePids.Add(pid);
+                        _staleProcessIds.Add(pid);
                     }
                 }
-                foreach (var pid in stalePids)
+                foreach (var pid in _staleProcessIds)
                 {
                     _processCpuBaselines.Remove(pid);
                 }
@@ -739,7 +760,7 @@ public sealed class WindowsMetricCollector : IMetricCollector
             : null;
     }
 
-    private static Dictionary<string, double> TryGetArrayValues(nint counter)
+    private Dictionary<string, double> TryGetArrayValues(nint counter)
     {
         var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         if (counter == nint.Zero)
@@ -756,40 +777,49 @@ public sealed class WindowsMetricCollector : IMetricCollector
             return values;
         }
 
-        var buffer = Marshal.AllocHGlobal((int)bufferSize);
-        try
+        EnsurePdhArrayBuffer(bufferSize);
+        status = PdhNative.PdhGetFormattedCounterArray(counter, format, ref bufferSize, ref itemCount, _pdhArrayBuffer);
+        if (status != PdhNative.ErrorSuccess)
         {
-            status = PdhNative.PdhGetFormattedCounterArray(counter, format, ref bufferSize, ref itemCount, buffer);
-            if (status != PdhNative.ErrorSuccess)
-            {
-                return values;
-            }
-
-            var itemSize = Marshal.SizeOf<PdhNative.PdhFmtCounterValueItemDouble>();
-            for (var index = 0; index < itemCount; index++)
-            {
-                var itemPointer = buffer + (index * itemSize);
-                var item = Marshal.PtrToStructure<PdhNative.PdhFmtCounterValueItemDouble>(itemPointer);
-                if (item.FmtValue.CStatus != PdhNative.ErrorSuccess)
-                {
-                    continue;
-                }
-
-                var instanceName = Marshal.PtrToStringUni(item.SzName);
-                if (string.IsNullOrWhiteSpace(instanceName))
-                {
-                    continue;
-                }
-
-                values[instanceName] = item.FmtValue.DoubleValue;
-            }
+            return values;
         }
-        finally
+
+        var itemSize = Marshal.SizeOf<PdhNative.PdhFmtCounterValueItemDouble>();
+        for (var index = 0; index < itemCount; index++)
         {
-            Marshal.FreeHGlobal(buffer);
+            var itemPointer = _pdhArrayBuffer + (index * itemSize);
+            var item = Marshal.PtrToStructure<PdhNative.PdhFmtCounterValueItemDouble>(itemPointer);
+            if (item.FmtValue.CStatus != PdhNative.ErrorSuccess)
+            {
+                continue;
+            }
+
+            var instanceName = Marshal.PtrToStringUni(item.SzName);
+            if (string.IsNullOrWhiteSpace(instanceName))
+            {
+                continue;
+            }
+
+            values[instanceName] = item.FmtValue.DoubleValue;
         }
 
         return values;
+    }
+
+    private void EnsurePdhArrayBuffer(uint requiredSize)
+    {
+        if (requiredSize <= _pdhArrayBufferSize && _pdhArrayBuffer != nint.Zero)
+        {
+            return;
+        }
+
+        if (_pdhArrayBuffer != nint.Zero)
+        {
+            Marshal.FreeHGlobal(_pdhArrayBuffer);
+        }
+
+        _pdhArrayBuffer = Marshal.AllocHGlobal((int)requiredSize);
+        _pdhArrayBufferSize = requiredSize;
     }
 
     private static bool IsLogicalDriveInstance(string instance) =>
@@ -905,14 +935,16 @@ public sealed class WindowsMetricCollector : IMetricCollector
                 var shouldOpenProcess = shouldRefreshProcesses || shouldRefreshHandleCounts;
                 if (shouldOpenProcess)
                 {
-                    // Try full access first (CPU times + memory), fall back to limited (CPU times only)
+                    var desiredAccess = shouldRefreshProcesses
+                        ? ProcessNative.ProcessQueryLimitedInformation | ProcessNative.ProcessVmRead
+                        : ProcessNative.ProcessQueryLimitedInformation;
+
                     var processHandle = ProcessNative.OpenProcess(
-                        ProcessNative.ProcessQueryLimitedInformation | ProcessNative.ProcessVmRead,
+                        desiredAccess,
                         false,
                         processId);
 
-                    // If full access denied (anti-cheat, protected processes), try limited access
-                    if (!ProcessNative.IsValidHandle(processHandle))
+                    if (!ProcessNative.IsValidHandle(processHandle) && shouldRefreshProcesses)
                     {
                         processHandle = ProcessNative.OpenProcess(
                             ProcessNative.ProcessQueryLimitedInformation,
